@@ -43,7 +43,13 @@ async function commitAndPushAutofix(cwd, request) {
   const status = await git(cwd, ["status", "--porcelain"]);
   if (status) {
     await git(cwd, ["add", "--all"]);
-    await git(cwd, ["commit", "-m", "fix(pr-review): apply automated review fixes"]);
+    await git(cwd, [
+      "commit",
+      "-m",
+      "fix(pr-review): apply automated review fixes",
+      "-m",
+      "Revisor-Autofix: true",
+    ]);
   }
   const reviewedHead = await git(cwd, ["rev-parse", "HEAD"]);
   if (reviewedHead.toLowerCase() !== request.headSha.toLowerCase()) {
@@ -84,6 +90,46 @@ function optionalConcordiaUrl(cwd, enabled) {
   }
 }
 
+function buildGateResult({
+  request,
+  firstAnalysis,
+  finalAnalysis,
+  baseline,
+  reviewer,
+  contextSource,
+  reviewedHeadSha,
+  reviewerOutput = "",
+  complexityDropThreshold,
+}) {
+  const complexityScoreDelta =
+    finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
+  const reasons = gateReasons(
+    finalAnalysis,
+    complexityScoreDelta,
+    complexityDropThreshold,
+    reviewerOutput,
+  );
+  return {
+    conclusion: reasons.length === 0 ? "success" : "action_required",
+    reviewMode: request.reviewMode,
+    reviewer,
+    contextSource,
+    analysisSource: "anatomia-cli",
+    originalHeadSha: request.headSha,
+    reviewedHeadSha,
+    initialAnalysis: {
+      project: firstAnalysis.project.id,
+      files: firstAnalysis.analysis.files,
+      functions: firstAnalysis.analysis.functions,
+      cacheHit: firstAnalysis.analysis.cacheHit,
+    },
+    analysis: finalAnalysis,
+    baselineComplexityScore: baseline.quality.complexity.score,
+    complexityScoreDelta,
+    reasons,
+  };
+}
+
 export function createPrReviewRunner({
   cwd,
   env = process.env,
@@ -105,24 +151,6 @@ export function createPrReviewRunner({
       repoPath,
       repository: request.repository,
     });
-    const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
-    const httpContext = await loadConcordiaContext({
-      baseUrl: concordiaUrl,
-      repository: request.repository,
-      headRef: request.headRef,
-      transport,
-    });
-    const authorContext = httpContext ?? (
-      settings.concordiaContextEnabled
-        ? await loadPersistedConcordiaContext({
-            workspaceRoot,
-            repository: request.repository,
-            headRef: request.headRef,
-            dbPath: env.CONCORDIA_DB_PATH,
-          })
-        : null
-    );
-    const reviewer = reviewerForProvider(authorContext?.provider, settings.fallbackReviewer);
     const worktrees = await prepareWorktrees(repoPath, request);
     try {
       const [initial, baseline] = await Promise.all([
@@ -137,6 +165,41 @@ export function createPrReviewRunner({
           base: "HEAD",
         }),
       ]);
+      if (request.reviewMode === "verification") {
+        return {
+          ...buildGateResult({
+            request,
+            firstAnalysis,
+            finalAnalysis: initial,
+            baseline,
+            reviewer: null,
+            contextSource: "verification-only",
+            reviewedHeadSha: request.headSha,
+            complexityDropThreshold,
+          }),
+          humanQuestion: !initial.domain.hasTargetDomain
+            ? targetDomainQuestion(request.repository, request.number)
+            : null,
+        };
+      }
+      const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
+      const httpContext = await loadConcordiaContext({
+        baseUrl: concordiaUrl,
+        repository: request.repository,
+        headRef: request.headRef,
+        transport,
+      });
+      const authorContext = httpContext ?? (
+        settings.concordiaContextEnabled
+          ? await loadPersistedConcordiaContext({
+              workspaceRoot,
+              repository: request.repository,
+              headRef: request.headRef,
+              dbPath: env.CONCORDIA_DB_PATH,
+            })
+          : null
+      );
+      const reviewer = reviewerForProvider(authorContext?.provider, settings.fallbackReviewer);
       if (!initial.domain.hasTargetDomain) {
         await notifyConcordia({
           baseUrl: concordiaUrl,
@@ -172,14 +235,6 @@ export function createPrReviewRunner({
         cwd: worktrees.head,
         base: worktrees.mergeBase,
       });
-      const complexityScoreDelta =
-        finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
-      const reasons = gateReasons(
-        finalAnalysis,
-        complexityScoreDelta,
-        complexityDropThreshold,
-        reviewResult.stdout,
-      );
       const needsHuman = !finalAnalysis.domain.hasTargetDomain
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
       await notifyConcordia({
@@ -191,22 +246,17 @@ export function createPrReviewRunner({
         transport,
       });
       return {
-        conclusion: reasons.length === 0 ? "success" : "action_required",
-        reviewer,
-        contextSource: authorContext?.source ?? "pr-only",
-        analysisSource: "anatomia-cli",
-        originalHeadSha: request.headSha,
-        reviewedHeadSha,
-        initialAnalysis: {
-          project: firstAnalysis.project.id,
-          files: firstAnalysis.analysis.files,
-          functions: firstAnalysis.analysis.functions,
-          cacheHit: firstAnalysis.analysis.cacheHit,
-        },
-        analysis: finalAnalysis,
-        baselineComplexityScore: baseline.quality.complexity.score,
-        complexityScoreDelta,
-        reasons,
+        ...buildGateResult({
+          request,
+          firstAnalysis,
+          finalAnalysis,
+          baseline,
+          reviewer,
+          contextSource: authorContext?.source ?? "pr-only",
+          reviewedHeadSha,
+          reviewerOutput: reviewResult.stdout,
+          complexityDropThreshold,
+        }),
         humanQuestion: needsHuman
           ? targetDomainQuestion(request.repository, request.number)
           : null,

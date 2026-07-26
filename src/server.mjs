@@ -1,7 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { bearerToken, tokenMatches } from "./auth.mjs";
-import { readOriginToken, readSettings } from "./config.mjs";
+import { ConfiguredGitHubCheckReporter } from "./check-reporter.mjs";
+import {
+  readGitHubAppCredentials,
+  readOriginToken,
+  readSettings,
+} from "./config.mjs";
+import { GitHubAppClient } from "./github-app.mjs";
 import { PrReviewQueue } from "./queue.mjs";
 import { createUiRequestHandler, readJsonBody, sendJson } from "./ui-server.mjs";
 import { PrReviewWorkerPool } from "./worker-pool.mjs";
@@ -25,6 +31,13 @@ function validateRequest(body) {
   if (typeof body.base_ref !== "string" || !body.base_ref || body.base_ref.length > 255) {
     throw new Error("base_ref is invalid.");
   }
+  if (
+    body.review_mode !== undefined
+    && body.review_mode !== "full"
+    && body.review_mode !== "verification"
+  ) {
+    throw new Error("review_mode is invalid.");
+  }
   if (body.repository !== body.head_repository) {
     throw new Error("Fork pull requests are not eligible for the local autofix review.");
   }
@@ -35,6 +48,7 @@ function validateRequest(body) {
     headRef: body.head_ref,
     headRepository: body.head_repository,
     baseRef: body.base_ref,
+    reviewMode: body.review_mode === "verification" ? "verification" : "full",
     pullRequestUrl: typeof body.pull_request_url === "string"
       ? body.pull_request_url
       : undefined,
@@ -74,8 +88,12 @@ export function createRequestHandler({
     }
     try {
       if (request.method === "POST" && url.pathname === "/v1/pr-gate/jobs") {
-        const job = queue.submit(validateRequest(await readJsonBody(request)));
-        sendJson(response, 202, { id: job.id, status: job.status });
+        const job = await queue.submit(validateRequest(await readJsonBody(request)));
+        sendJson(response, 202, {
+          id: job.id,
+          status: job.status,
+          check_url: job.checkUrl,
+        });
         return;
       }
       if (request.method === "GET" && url.pathname.startsWith("/v1/pr-gate/jobs/")) {
@@ -98,17 +116,26 @@ export async function startRevisor({
   port,
   cwd = process.cwd(),
   runner,
+  checkReporter,
   createWorkerPool = (options) => new PrReviewWorkerPool(options),
+  createGitHubClient = (options) => new GitHubAppClient(options),
 } = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("Revisor port must be an integer from 1 to 65535.");
   }
   const settings = readSettings(env);
+  const reporter = checkReporter ?? new ConfiguredGitHubCheckReporter({
+    readCredentials: () => readGitHubAppCredentials(env),
+    createClient: createGitHubClient,
+  });
   const workerPool = runner
     ? null
     : createWorkerPool({ size: settings.workerCount, cwd, env });
   const jobRunner = runner ?? ((request) => workerPool.run(request));
-  const queue = new PrReviewQueue(jobRunner, { concurrency: settings.workerCount });
+  const queue = new PrReviewQueue(jobRunner, {
+    concurrency: settings.workerCount,
+    reporter,
+  });
   const sessionToken = randomBytes(24).toString("base64url");
   const server = createServer(createRequestHandler({ env, sessionToken, queue }));
   try {

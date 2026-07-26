@@ -49,9 +49,13 @@ test("authenticates and enqueues an external PR request", async () => {
     env: state.env,
     sessionToken: "ui-token",
     queue: {
-      submit(value) {
+      async submit(value) {
         submitted = value;
-        return { id: "job-1", status: "queued" };
+        return {
+          id: "job-1",
+          status: "queued",
+          checkUrl: "https://github.com/LUDIARS/Revisor/runs/1",
+        };
       },
       get: () => null,
     },
@@ -69,11 +73,17 @@ test("authenticates and enqueues an external PR request", async () => {
         head_ref: "feat/review",
         head_repository: "LUDIARS/Revisor",
         base_ref: "main",
+        review_mode: "verification",
       }),
     }), output);
     assert.equal(output.status, 202);
     assert.equal(submitted.repository, "LUDIARS/Revisor");
-    assert.deepEqual(JSON.parse(output.body), { id: "job-1", status: "queued" });
+    assert.equal(submitted.reviewMode, "verification");
+    assert.deepEqual(JSON.parse(output.body), {
+      id: "job-1",
+      status: "queued",
+      check_url: "https://github.com/LUDIARS/Revisor/runs/1",
+    });
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

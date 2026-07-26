@@ -20,6 +20,7 @@ function defaults() {
     anatomiaFolder: "",
     fallbackReviewer: "codex-sol",
     concordiaContextEnabled: true,
+    githubAppId: "",
     workerCount: 1,
   };
 }
@@ -114,6 +115,9 @@ export function readSettings(env = process.env) {
       ? "claude-opus"
       : base.fallbackReviewer,
     concordiaContextEnabled: value.concordiaContextEnabled !== false,
+    githubAppId: typeof value.githubAppId === "string"
+      ? value.githubAppId
+      : base.githubAppId,
     workerCount: Number.isInteger(value.workerCount)
       && value.workerCount >= 1
       && value.workerCount <= 8
@@ -133,6 +137,12 @@ export function writeSettings(settings, env = process.env) {
   ) {
     throw new RevisorError("Fallback reviewer is invalid.");
   }
+  const githubAppId = typeof settings.githubAppId === "string"
+    ? settings.githubAppId.trim()
+    : "";
+  if (!/^[A-Za-z0-9_-]+$/.test(githubAppId)) {
+    throw new RevisorError("GitHub App ID is required and has an invalid format.");
+  }
   const workerCount = Number(settings.workerCount);
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > 8) {
     throw new RevisorError("Worker count must be an integer from 1 to 8.");
@@ -142,6 +152,7 @@ export function writeSettings(settings, env = process.env) {
     anatomiaFolder,
     fallbackReviewer: settings.fallbackReviewer,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
+    githubAppId,
     workerCount,
   };
   writeConfig(config, env);
@@ -180,6 +191,57 @@ export function writeOriginToken(token, env = process.env) {
 export function hasOriginToken(env = process.env) {
   try {
     readOriginToken(env);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readGitHubAppPrivateKey(env = process.env) {
+  const configPath = resolveConfigPath(env);
+  const blob = readConfig(env).secrets.githubAppPrivateKey;
+  if (!isEncryptedBlob(blob)) {
+    throw new RevisorError("GitHub App private key is not configured.");
+  }
+  try {
+    const value = decryptString(blob, readMasterKey(configPath, env)).trim();
+    if (!/^-----BEGIN (?:RSA )?PRIVATE KEY-----/.test(value)) {
+      throw new Error("invalid PEM private key");
+    }
+    return value;
+  } catch (error) {
+    throw new RevisorError("GitHub App private key could not be decrypted.", {
+      cause: error,
+    });
+  }
+}
+
+export function writeGitHubAppPrivateKey(privateKey, env = process.env) {
+  const value = String(privateKey ?? "").trim();
+  if (!/^-----BEGIN (?:RSA )?PRIVATE KEY-----/.test(value)) {
+    throw new RevisorError("GitHub App private key must be a PEM private key.");
+  }
+  const configPath = resolveConfigPath(env);
+  const config = readConfig(env);
+  config.secrets.githubAppPrivateKey = encryptString(
+    value,
+    readOrCreateMasterKey(configPath, env),
+  );
+  writeConfig(config, env);
+}
+
+export function readGitHubAppCredentials(env = process.env) {
+  const { githubAppId } = readSettings(env);
+  if (!githubAppId) throw new RevisorError("GitHub App ID is not configured.");
+  return {
+    appId: githubAppId,
+    privateKey: readGitHubAppPrivateKey(env),
+  };
+}
+
+export function hasGitHubAppCredentials(env = process.env) {
+  try {
+    readGitHubAppCredentials(env);
     return true;
   } catch {
     return false;

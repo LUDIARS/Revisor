@@ -1,6 +1,8 @@
 import {
+  hasGitHubAppCredentials,
   hasOriginToken,
   readSettings,
+  writeGitHubAppPrivateKey,
   writeOriginToken,
   writeSettings,
 } from "./config.mjs";
@@ -55,7 +57,9 @@ export function createUiRequestHandler({
       try {
         sendJson(response, 200, {
           status: "ok",
-          configured: Boolean(readSettings(env).anatomiaFolder) && hasOriginToken(env),
+          configured: Boolean(readSettings(env).anatomiaFolder)
+            && hasOriginToken(env)
+            && hasGitHubAppCredentials(env),
         });
       } catch (error) {
         sendJson(response, 503, {
@@ -86,6 +90,7 @@ export function createUiRequestHandler({
       if (request.method === "GET" && url.pathname === "/api/settings") {
         sendJson(response, 200, {
           settings: readSettings(env),
+          githubAppConfigured: hasGitHubAppCredentials(env),
           originTokenConfigured: hasOriginToken(env),
         });
         return;
@@ -97,8 +102,12 @@ export function createUiRequestHandler({
         if (typeof body.originToken === "string" && body.originToken.trim()) {
           writeOriginToken(body.originToken, env);
         }
+        if (typeof body.githubAppPrivateKey === "string" && body.githubAppPrivateKey.trim()) {
+          writeGitHubAppPrivateKey(body.githubAppPrivateKey, env);
+        }
         sendJson(response, 200, {
           settings,
+          githubAppConfigured: hasGitHubAppCredentials(env),
           originTokenConfigured: hasOriginToken(env),
         });
         return;

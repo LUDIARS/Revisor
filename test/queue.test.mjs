@@ -14,6 +14,22 @@ test("deduplicates exact heads and caps concurrent reviews", async () => {
   let running = 0;
   let maximum = 0;
   const releases = [];
+  const events = [];
+  const reporter = {
+    async queued(job) {
+      job.checkRunId = Number(job.id.replace("job-", ""));
+      events.push(`queued:${job.id}`);
+    },
+    async running(job) {
+      events.push(`running:${job.id}`);
+    },
+    async completed(job) {
+      events.push(`completed:${job.id}`);
+    },
+    async failed(job) {
+      events.push(`failed:${job.id}`);
+    },
+  };
   const queue = new PrReviewQueue(async () => {
     running += 1;
     maximum = Math.max(maximum, running);
@@ -22,15 +38,23 @@ test("deduplicates exact heads and caps concurrent reviews", async () => {
     return { conclusion: "success" };
   }, {
     concurrency: 2,
+    reporter,
     createId: (() => {
       let id = 0;
       return () => `job-${++id}`;
     })(),
   });
 
-  const first = queue.submit(request(1));
-  assert.equal(queue.submit(request(1)).id, first.id);
-  const jobs = [first, queue.submit(request(2)), queue.submit(request(3))];
+  const [first, duplicate] = await Promise.all([
+    queue.submit(request(1)),
+    queue.submit(request(1)),
+  ]);
+  assert.equal(duplicate.id, first.id);
+  const jobs = [
+    first,
+    await queue.submit(request(2)),
+    await queue.submit(request(3)),
+  ];
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(maximum, 2);
   assert.equal(queue.state().queued, 1);
@@ -40,4 +64,6 @@ test("deduplicates exact heads and caps concurrent reviews", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(jobs.every((job) => job.status === "completed"));
   assert.equal(maximum, 2);
+  assert.equal(events.filter((event) => event === "queued:job-1").length, 1);
+  assert.equal(events.filter((event) => event.startsWith("completed:")).length, 3);
 });

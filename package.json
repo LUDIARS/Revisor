@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/cli.mjs && node --check src/server.mjs && node --check src/runner.mjs",
+    "check": "node --check src/cli.mjs && node --check src/server.mjs && node --check src/runner.mjs && node --check src/github-app.mjs && node --check src/check-reporter.mjs",
     "start": "node src/cli.mjs serve"
   },
   "engines": {

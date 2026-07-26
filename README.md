@@ -26,7 +26,7 @@ Anatomia web service.
   registers and analyzes it before the temporary PR comparison.
 
 The review worker never executes PR repository code. Build, test, and lint
-remain ordinary GitHub CI responsibilities.
+run on the GitHub-hosted runner before it submits the review request.
 
 ## Requirements
 
@@ -55,6 +55,7 @@ The loopback root page configures:
 - one through eight child worker processes;
 - optional Concordia context lookup;
 - the encrypted PR-gate origin token.
+- the GitHub App ID and encrypted private key used to publish Check Runs.
 
 The worker count controls both child-process count and queue concurrency.
 Changes to the worker count apply on the next service start.
@@ -80,7 +81,26 @@ GET  /v1/pr-gate/jobs/:id
 
 Requests require the configured origin token as a Bearer token. Fork PRs are
 rejected before queueing. The same repository, PR number, and head SHA are
-deduplicated.
+deduplicated. A successful submission creates a queued `Revisor review` Check
+Run. Revisor updates it to `in_progress` and finally to `success`,
+`action_required`, or `failure`; the GitHub-hosted workflow does not poll.
+
+The request `review_mode` is either `full` or `verification`. Revisor autofix
+commits carry the `Revisor-Autofix: true` trailer. CI reruns on those exact
+heads submit `verification`, which performs the Anatomia gates without
+repeating the opposite-provider review.
+
+## GitHub App
+
+Create and install a GitHub App on every reviewed repository with:
+
+- Repository permissions: `Checks: Read and write`
+- No webhook events are required for the enqueue flow
+
+Enter the App ID and generated PEM private key in the loopback settings UI.
+The private key is encrypted with the same local master key as the origin
+token. Installation access tokens are requested per repository and cached
+only until shortly before their one-hour expiry.
 
 ## Development
 

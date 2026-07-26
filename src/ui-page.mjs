@@ -16,8 +16,9 @@ export function renderSettingsPage(sessionToken) {
     section { background: #19202c; border: 1px solid #2d394a; border-radius: 14px; padding: 24px; }
     h1 { margin-top: 0; } h2 { margin-top: 32px; }
     .field { display: grid; gap: 8px; margin: 18px 0; }
-    input, select, button { font: inherit; border-radius: 8px; border: 1px solid #40506a; padding: 10px 12px; }
-    input, select { color: inherit; background: #111722; }
+    input, select, textarea, button { font: inherit; border-radius: 8px; border: 1px solid #40506a; padding: 10px 12px; }
+    input, select, textarea { color: inherit; background: #111722; }
+    textarea { min-height: 120px; resize: vertical; }
     button { color: white; background: #405bd8; border-color: #5871e5; cursor: pointer; }
     .check { display: flex; gap: 10px; align-items: center; }
     pre { white-space: pre-wrap; background: #0e131b; border-radius: 8px; padding: 14px; overflow: auto; }
@@ -56,6 +57,15 @@ export function renderSettingsPage(sessionToken) {
         <input id="origin-token" type="password" autocomplete="new-password">
         <span id="token-status" class="note"></span>
       </div>
+      <div class="field">
+        <label for="github-app-id">GitHub App ID</label>
+        <input id="github-app-id" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="github-app-private-key">GitHub App private key PEM（変更時のみ入力）</label>
+        <textarea id="github-app-private-key" autocomplete="off"></textarea>
+        <span id="github-app-status" class="note"></span>
+      </div>
       <button type="submit">設定を保存</button>
       <p id="message" role="status"></p>
     </form>
@@ -86,9 +96,13 @@ export function renderSettingsPage(sessionToken) {
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
     document.querySelector('#concordia-context').checked = state.settings.concordiaContextEnabled;
+    document.querySelector('#github-app-id').value = state.settings.githubAppId;
     document.querySelector('#token-status').textContent = state.originTokenConfigured
       ? 'origin token 設定済み'
       : 'origin token 未設定';
+    document.querySelector('#github-app-status').textContent = state.githubAppConfigured
+      ? 'GitHub App 設定済み'
+      : 'GitHub App 未設定';
   }
 
   async function refreshQueue() {
@@ -119,10 +133,13 @@ export function renderSettingsPage(sessionToken) {
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
           workerCount: Number(document.querySelector('#worker-count').value),
           concordiaContextEnabled: document.querySelector('#concordia-context').checked,
+          githubAppId: document.querySelector('#github-app-id').value,
+          githubAppPrivateKey: document.querySelector('#github-app-private-key').value,
           originToken: document.querySelector('#origin-token').value,
         }),
       });
       document.querySelector('#origin-token').value = '';
+      document.querySelector('#github-app-private-key').value = '';
       await refreshSettings();
       message.textContent = '保存しました。ワーカー数は次回起動から適用されます。';
     } catch (error) {
