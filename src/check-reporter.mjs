@@ -16,6 +16,19 @@ function resultSummary(job) {
   const reasons = Array.isArray(result?.reasons) && result.reasons.length > 0
     ? result.reasons.map((reason) => `- ${reason}`).join("\n")
     : "- No blocking findings.";
+  const leakageFindings = Array.isArray(result?.leakage?.findings)
+    ? result.leakage.findings.slice(0, 20)
+    : [];
+  const leakage = leakageFindings.length > 0
+    ? [
+        "",
+        "Potential information leakage (values withheld):",
+        ...leakageFindings.map((finding) => {
+          const path = String(finding.path).replace(/[\r\n`]/g, "?");
+          return `- ${finding.rule}: \`${path}:${finding.line}\``;
+        }),
+      ]
+    : [];
   return [
     `Mode: ${reviewLabel(job.request)}`,
     `Original head: \`${job.request.headSha}\``,
@@ -28,6 +41,7 @@ function resultSummary(job) {
     "",
     "Gate findings:",
     reasons,
+    ...leakage,
   ].filter((line) => line !== null).join("\n");
 }
 

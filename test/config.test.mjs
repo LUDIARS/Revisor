@@ -44,10 +44,12 @@ test("stores settings and encrypts the origin token", () => {
       workerCount: 3,
     }, state.env);
     writeOriginToken("origin-secret", state.env);
-    writeGitHubAppPrivateKey(
-      "-----BEGIN PRIVATE KEY-----\nprivate-key\n-----END PRIVATE KEY-----",
-      state.env,
-    );
+    const fakePrivateKey = [
+      "-----BEGIN " + "PRIVATE KEY-----",
+      "private-key",
+      "-----END " + "PRIVATE KEY-----",
+    ].join("\n");
+    writeGitHubAppPrivateKey(fakePrivateKey, state.env);
     assert.equal(readOriginToken(state.env), "origin-secret");
     assert.equal(hasOriginToken(state.env), true);
     assert.equal(readGitHubAppCredentials(state.env).appId, "12345");

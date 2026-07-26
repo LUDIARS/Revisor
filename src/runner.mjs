@@ -7,6 +7,7 @@ import {
   targetDomainQuestion,
 } from "./concordia-context.mjs";
 import { readSettings } from "./config.mjs";
+import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
 import {
   cleanupWorktrees,
@@ -15,13 +16,21 @@ import {
   resolveRepositoryPath,
 } from "./workspace.mjs";
 
-function buildReviewerPrompt({ request, analysis, authorContext, unifiedDiff }) {
+function buildReviewerPrompt({
+  request,
+  analysis,
+  authorContext,
+  unifiedDiff,
+  leakage,
+}) {
   const needsDomain = !analysis.domain.hasTargetDomain;
   return [
     `Review and autofix PR ${request.repository}#${request.number}.`,
     `Compare the checked-out HEAD with ${request.baseRef}.`,
     "You may read and edit files only. Do not run repository code, install dependencies, use network access, commit, or push; Revisor owns Git operations and GitHub CI owns execution.",
     "Perform a normal correctness, security, and maintainability review and directly fix actionable issues.",
+    "Explicitly check for information leakage: credentials, personal data, private endpoints, session transcripts, logs, local configuration, and proprietary artifacts that should not enter the repository.",
+    `Local high-confidence leakage scan (contains locations only, never matched values):\n${JSON.stringify(leakage, null, 2)}`,
     "Preserve existing user changes and keep edits scoped to this PR.",
     `Anatomia temporary analysis (may be truncated):\n${JSON.stringify(analysis, null, 2).slice(0, 80_000)}`,
     `Unified PR diff (may be truncated):\n${unifiedDiff}`,
@@ -58,7 +67,13 @@ async function commitAndPushAutofix(cwd, request) {
   return reviewedHead;
 }
 
-function gateReasons(finalAnalysis, complexityScoreDelta, threshold, reviewerOutput) {
+function gateReasons(
+  finalAnalysis,
+  complexityScoreDelta,
+  threshold,
+  reviewerOutput,
+  leakage,
+) {
   const reasons = [];
   if (!finalAnalysis.domain.hasTargetDomain) reasons.push("target domain is still missing");
   if (finalAnalysis.quality.changedOrphans.length > 0) {
@@ -77,6 +92,9 @@ function gateReasons(finalAnalysis, complexityScoreDelta, threshold, reviewerOut
   }
   if (reviewerOutput.includes("PR_GATE_NEEDS_HUMAN")) {
     reasons.push("reviewer reported insufficient information for a safe domain/spec definition");
+  }
+  if (leakage.totalFindings > 0) {
+    reasons.push(`${leakage.totalFindings} potential information leakage finding(s) remain`);
   }
   return reasons;
 }
@@ -100,6 +118,8 @@ function buildGateResult({
   reviewedHeadSha,
   reviewerOutput = "",
   complexityDropThreshold,
+  initialLeakage,
+  leakage,
 }) {
   const complexityScoreDelta =
     finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
@@ -108,6 +128,7 @@ function buildGateResult({
     complexityScoreDelta,
     complexityDropThreshold,
     reviewerOutput,
+    leakage,
   );
   return {
     conclusion: reasons.length === 0 ? "success" : "action_required",
@@ -126,8 +147,19 @@ function buildGateResult({
     analysis: finalAnalysis,
     baselineComplexityScore: baseline.quality.complexity.score,
     complexityScoreDelta,
+    initialLeakage,
+    leakage,
     reasons,
   };
+}
+
+async function readUnifiedDiff(cwd, mergeBase) {
+  return git(cwd, [
+    "diff",
+    "--no-ext-diff",
+    mergeBase,
+    "--",
+  ]);
 }
 
 export function createPrReviewRunner({
@@ -165,6 +197,8 @@ export function createPrReviewRunner({
           base: "HEAD",
         }),
       ]);
+      const initialUnifiedDiff = await readUnifiedDiff(worktrees.head, worktrees.mergeBase);
+      const initialLeakage = scanAddedDiffForLeaks(initialUnifiedDiff);
       if (request.reviewMode === "verification") {
         return {
           ...buildGateResult({
@@ -176,6 +210,8 @@ export function createPrReviewRunner({
             contextSource: "verification-only",
             reviewedHeadSha: request.headSha,
             complexityDropThreshold,
+            initialLeakage,
+            leakage: initialLeakage,
           }),
           humanQuestion: !initial.domain.hasTargetDomain
             ? targetDomainQuestion(request.repository, request.number)
@@ -199,6 +235,29 @@ export function createPrReviewRunner({
             })
           : null
       );
+      if (initialLeakage.totalFindings > 0) {
+        await notifyConcordia({
+          baseUrl: concordiaUrl,
+          sessionId: authorContext?.sessionId,
+          text: `PRレビュー: ${request.repository}#${request.number} に情報流出の可能性がある追加箇所を ${initialLeakage.totalFindings} 件検出しました。外部レビュアーへ差分を送らず、人間の修正を待ちます。`,
+          transport,
+        });
+        return {
+          ...buildGateResult({
+            request,
+            firstAnalysis,
+            finalAnalysis: initial,
+            baseline,
+            reviewer: null,
+            contextSource: authorContext?.source ?? "leakage-blocked",
+            reviewedHeadSha: request.headSha,
+            complexityDropThreshold,
+            initialLeakage,
+            leakage: initialLeakage,
+          }),
+          humanQuestion: "Potential information leakage must be removed before automated review.",
+        };
+      }
       const reviewer = reviewerForProvider(authorContext?.provider, settings.fallbackReviewer);
       if (!initial.domain.hasTargetDomain) {
         await notifyConcordia({
@@ -215,26 +274,29 @@ export function createPrReviewRunner({
           request,
           analysis: initial,
           authorContext,
-          unifiedDiff: (await git(worktrees.head, [
-            "diff",
-            "--no-ext-diff",
-            worktrees.mergeBase,
-            "--",
-          ])).slice(0, 120_000),
+          unifiedDiff: initialUnifiedDiff.slice(0, 120_000),
+          leakage: initialLeakage,
         }),
         timeoutMs: reviewerTimeoutMs,
       });
       if (!reviewResult.ok) {
-        throw new Error(`Opposite-model reviewer failed: ${
-          reviewResult.stderr.trim() || reviewResult.stdout.trim()
-        }`);
+        throw new Error("Opposite-model reviewer failed; output was withheld from the Check Run.");
+      }
+      const [finalAnalysis, finalUnifiedDiff] = await Promise.all([
+        analyzePr({
+          cliPath: anatomiaCliPath,
+          cwd: worktrees.head,
+          base: worktrees.mergeBase,
+        }),
+        readUnifiedDiff(worktrees.head, worktrees.mergeBase),
+      ]);
+      const finalLeakage = scanAddedDiffForLeaks(finalUnifiedDiff);
+      if (finalLeakage.totalFindings > 0) {
+        throw new Error(
+          "Opposite-model autofix introduced potential information leakage; changes were discarded before commit or push.",
+        );
       }
       const reviewedHeadSha = await commitAndPushAutofix(worktrees.head, request);
-      const finalAnalysis = await analyzePr({
-        cliPath: anatomiaCliPath,
-        cwd: worktrees.head,
-        base: worktrees.mergeBase,
-      });
       const needsHuman = !finalAnalysis.domain.hasTargetDomain
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
       await notifyConcordia({
@@ -256,6 +318,8 @@ export function createPrReviewRunner({
           reviewedHeadSha,
           reviewerOutput: reviewResult.stdout,
           complexityDropThreshold,
+          initialLeakage,
+          leakage: finalLeakage,
         }),
         humanQuestion: needsHuman
           ? targetDomainQuestion(request.repository, request.number)

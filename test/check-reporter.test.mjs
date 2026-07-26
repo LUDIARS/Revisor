@@ -50,6 +50,29 @@ test("creates, advances, and completes a check run", async () => {
   assert.match(calls[2].body.output.summary, /No blocking findings/);
 });
 
+test("shows leakage locations without values", async () => {
+  const calls = [];
+  const reporter = new GitHubCheckReporter({
+    async request(_repository, method, _path, body) {
+      calls.push({ method, body });
+      return { id: 44 };
+    },
+  });
+  const state = job();
+  await reporter.queued(state);
+  state.result = {
+    conclusion: "action_required",
+    reasons: ["1 potential information leakage finding(s) remain"],
+    leakage: {
+      findings: [{ rule: "github-token", path: "src/config.mjs", line: 9 }],
+    },
+  };
+  await reporter.completed(state);
+  const summary = calls.at(-1).body.output.summary;
+  assert.match(summary, /github-token: `src\/config\.mjs:9`/);
+  assert.doesNotMatch(summary, /secret-value/);
+});
+
 test("reports worker failures as a completed failed check", async () => {
   const calls = [];
   const reporter = new GitHubCheckReporter({

@@ -16,6 +16,8 @@ information it consumes.
 - `runner.mjs` orchestrates one admitted review.
 - `workspace.mjs` owns disposable Git worktrees and exact-head validation.
 - `anatomia.mjs` owns direct CLI analysis.
+- `leakage.mjs` owns value-free secret and sensitive-file detection on added
+  unified-diff lines.
 - `concordia-context.mjs` owns optional live and persisted session context.
 - `config.mjs` owns local settings and encrypted origin-token/private-key
   persistence.
@@ -28,6 +30,8 @@ runs than the pool has workers.
 ## Data boundaries
 
 - Job state and PR-diff reports are process-local and temporary.
+- Leakage findings contain only rule, path, and line metadata. Suspected values
+  are neither persisted nor projected to GitHub.
 - Stable Anatomia project data remains owned by Anatomia's configured CLI
   checkout and cache.
 - Concordia SQLite access is read-only.
@@ -45,3 +49,8 @@ Worker crashes fail their active job and cause the pool to create a replacement
 worker. A GitHub authentication or Check Run update failure fails the job
 explicitly instead of silently losing the required status. Shutdown rejects
 waiting work and terminates every owned child process.
+
+High-confidence leakage findings stop the full review before the diff or
+session context reaches an external model. Verification findings complete the
+Check Run as `action_required`. Post-autofix findings fail the job and the
+disposable worktree is discarded before any commit or push.

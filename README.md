@@ -11,6 +11,7 @@ Revisor combines:
 - target-domain and spec traceability checks;
 - changed orphan-function and architecture-gate checks;
 - complexity-score regression detection;
+- high-confidence information-leakage detection on added diff lines;
 - optional original-session context from Concordia.
 
 ## Independence
@@ -27,6 +28,14 @@ Anatomia web service.
 
 The review worker never executes PR repository code. Build, test, and lint
 run on the GitHub-hosted runner before it submits the review request.
+
+Before any PR diff is sent to an opposite-provider reviewer, Revisor scans
+added lines for private keys, known provider tokens, webhooks, embedded
+credentials, and sensitive credential files. A high-confidence finding blocks
+external review and reports only its rule, path, and line; the matched value is
+never copied into job state, Check Run output, or errors. Autofix results and
+verification-only runs are scanned again. An unsafe autofix is discarded before
+Revisor commits or pushes it.
 
 ## Requirements
 
