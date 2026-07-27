@@ -1,41 +1,38 @@
 # Revisor
 
-Revisor is LUDIARS' public, independent local pull-request review service.
-It accepts authenticated requests from GitHub Actions, queues exact PR heads,
-and processes them with a bounded child-process worker pool.
+Revisor is the local control plane for **LUDIARS LOCAL PR WORKFLOW**. Feature
+branches stay on the workstation: Revisor records GitHub-compatible pull
+request metadata, runs registered CI and Anatomia analysis, performs an
+opposite-provider review, and squash merges approved changes into local
+`main`.
 
-Revisor combines:
+Only `main` is eligible for a later remote push. A managed pre-push hook scans
+the outgoing `main` diff for high-confidence leakage. Unsafe pushes are
+blocked as `amend_required`; after the local commit is amended, the next push
+is scanned again. Any feature-branch create or update is rejected before data
+leaves the workstation.
 
-- an opposite-provider code review and autofix pass;
-- temporary Anatomia PR-diff analysis;
-- target-domain and spec traceability checks;
-- changed orphan-function and architecture-gate checks;
-- complexity-score regression detection;
-- high-confidence information-leakage detection on added diff lines;
-- optional original-session context from Concordia.
+## Workflow
 
-## Independence
+1. Register a local repository, its base branch, and at least one test case.
+   Revisor installs a repository-scoped pre-push guard without replacing
+   existing shared hooks.
+2. Create a local PR from an existing, clean local branch. Revisor records
+   title, body, author, base/head refs, and exact SHAs. It never fetches or
+   pushes the feature branch.
+3. A disposable detached worktree runs every registered test, leakage scan,
+   and temporary Anatomia PR analysis.
+4. If the first scan and CI pass, the opposite-provider reviewer may apply
+   scoped fixes. Revisor scans and tests the result again before advancing the
+   local head branch.
+5. The UI exposes PR state, per-test outcomes, Anatomia data and complexity
+   score delta. Only passing open PRs appear in the test workflow as
+   `Open / Test OK`.
+6. Revisor creates one squash commit and fast-forwards the local base branch.
+   It does not push.
 
-Revisor has no runtime dependency on Castra, the Concordia process, or the
-Anatomia web service.
-
-- Castra only provisions Cloudflare and GitHub Actions secrets.
-- When Concordia is running, Revisor reads session context over its HTTP API.
-- When Concordia is stopped, Revisor opens `Concordia/concordia.db` read-only.
-- Revisor invokes `bin/anatomia.mjs` from a configured existing Anatomia
-  checkout. If a repository has no persistent Anatomia project yet, it
-  registers and analyzes it before the temporary PR comparison.
-
-The review worker never executes PR repository code. Build, test, and lint
-run on the GitHub-hosted runner before it submits the review request.
-
-Before any PR diff is sent to an opposite-provider reviewer, Revisor scans
-added lines for private keys, known provider tokens, webhooks, embedded
-credentials, and sensitive credential files. A high-confidence finding blocks
-external review and reports only its rule, path, and line; the matched value is
-never copied into job state, Check Run output, or errors. Autofix results and
-verification-only runs are scanned again. An unsafe autofix is discarded before
-Revisor commits or pushes it.
+Matched leakage values and test output are not stored. Findings contain only a
+rule, file path, and line number.
 
 ## Requirements
 
@@ -52,64 +49,74 @@ revisor serve
 revisor config path
 ```
 
-`serve` resolves its port from the Excubitor service code `revisor`; the port
-is not configured inside this repository.
+`guard-push` is an internal command used only by Revisor-managed Git hooks.
 
-## Settings UI
+## Settings and state
 
-The loopback root page configures:
+The loopback UI configures:
 
 - the existing Anatomia folder;
 - fallback reviewer (`Codex Sol` or `Claude Opus`);
-- one through eight child worker processes;
-- optional Concordia context lookup;
-- the encrypted PR-gate origin token.
-- the GitHub App ID and encrypted private key used to publish Check Runs.
+- one through eight worker processes;
+- optional Concordia context;
+- an encrypted local workflow API token.
 
-The worker count controls both child-process count and queue concurrency.
-Changes to the worker count apply on the next service start.
+Repository registrations, local PR status, CI outcome metadata, Anatomia
+projections, and push-guard status are stored in `revisor.state.json` beside
+the configuration. Override the location with `REVISOR_STATE_PATH`.
 
 Configuration defaults to:
 
 - Windows: `%LOCALAPPDATA%\LUDIARS\revisor.config.json`
 - Other platforms: `~/.config/ludiars/revisor.config.json`
 
-The adjacent `revisor.config.key` encrypts the origin token with AES-256-GCM.
-The paths can be overridden with `REVISOR_CONFIG_PATH` and
-`REVISOR_KEY_PATH`. `REVISOR_MASTER_KEY` is available for an intentional
-external key override.
+`REVISOR_CONFIG_PATH`, `REVISOR_KEY_PATH`, and `REVISOR_MASTER_KEY` remain
+available for intentional overrides.
 
-## External API
+## Local API
 
-Cloudflare Access should expose only `/v1/pr-gate/*`.
+The API listens on loopback and requires the workflow token:
 
 ```text
-POST /v1/pr-gate/jobs
-GET  /v1/pr-gate/jobs/:id
+POST /v1/repositories
+GET  /v1/repositories
+POST /v1/local-prs
+GET  /v1/local-prs
+GET  /v1/local-prs/:id
+POST /v1/local-prs/:id/merge
+GET  /v1/test-workflow
 ```
 
-Requests require the configured origin token as a Bearer token. Fork PRs are
-rejected before queueing. The same repository, PR number, and head SHA are
-deduplicated. A successful submission creates a queued `Revisor review` Check
-Run. Revisor updates it to `in_progress` and finally to `success`,
-`action_required`, or `failure`; the GitHub-hosted workflow does not poll.
+Repository registration includes test cases as argv, never a shell string:
 
-The request `review_mode` is either `full` or `verification`. Revisor autofix
-commits carry the `Revisor-Autofix: true` trailer. CI reruns on those exact
-heads submit `verification`, which performs the Anatomia gates without
-repeating the opposite-provider review.
+```json
+{
+  "repository": "LUDIARS/Revisor",
+  "root_path": "E:/Document/Ars/Revisor",
+  "base_ref": "main",
+  "test_cases": [
+    { "name": "unit", "command": "npm", "args": ["test"], "cwd": "." },
+    { "name": "check", "command": "npm", "args": ["run", "check"], "cwd": "." }
+  ]
+}
+```
 
-## GitHub App
+A local PR contains the same author-facing metadata as a hosted PR, while SHAs
+are resolved by Revisor from local refs:
 
-Create and install a GitHub App on every reviewed repository with:
-
-- Repository permissions: `Checks: Read and write`
-- No webhook events are required for the enqueue flow
-
-Enter the App ID and generated PEM private key in the loopback settings UI.
-The private key is encrypted with the same local master key as the origin
-token. Installation access tokens are requested per repository and cached
-only until shortly before their one-hour expiry.
+```json
+{
+  "repository": "LUDIARS/Revisor",
+  "title": "Add local workflow",
+  "body": "Feature branch remains local.",
+  "author": "neco",
+  "draft": false,
+  "labels": ["workflow"],
+  "assignees": ["neco"],
+  "reviewers": ["revisor"],
+  "head_ref": "feat/local-workflow"
+}
+```
 
 ## Development
 

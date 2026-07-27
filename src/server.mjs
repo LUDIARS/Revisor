@@ -1,81 +1,53 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { bearerToken, tokenMatches } from "./auth.mjs";
-import { ConfiguredGitHubCheckReporter } from "./check-reporter.mjs";
+import { readSettings, readWorkflowToken } from "./config.mjs";
 import {
-  readGitHubAppCredentials,
-  readOriginToken,
-  readSettings,
-} from "./config.mjs";
-import { GitHubAppClient } from "./github-app.mjs";
+  validatePullRequestSubmission,
+  validateRepositoryRegistration,
+} from "./local-contracts.mjs";
+import { LocalPrReporter } from "./local-reporter.mjs";
+import { LocalPrService } from "./local-pr-service.mjs";
 import { PrReviewQueue } from "./queue.mjs";
+import { LocalPrStore, resolveStatePath } from "./state-store.mjs";
 import { createUiRequestHandler, readJsonBody, sendJson } from "./ui-server.mjs";
 import { PrReviewWorkerPool } from "./worker-pool.mjs";
 
-const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
-const HEAD_SHA = /^[0-9a-f]{40,64}$/i;
-
-function validateRequest(body) {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error("Request body must be an object.");
-  }
-  if (!REPOSITORY.test(body.repository ?? "")) throw new Error("repository is invalid.");
-  if (!Number.isInteger(body.number) || body.number < 1) throw new Error("number is invalid.");
-  if (!HEAD_SHA.test(body.head_sha ?? "")) throw new Error("head_sha is invalid.");
-  if (typeof body.head_ref !== "string" || !body.head_ref || body.head_ref.length > 255) {
-    throw new Error("head_ref is invalid.");
-  }
-  if (!REPOSITORY.test(body.head_repository ?? "")) {
-    throw new Error("head_repository is invalid.");
-  }
-  if (typeof body.base_ref !== "string" || !body.base_ref || body.base_ref.length > 255) {
-    throw new Error("base_ref is invalid.");
-  }
-  if (
-    body.review_mode !== undefined
-    && body.review_mode !== "full"
-    && body.review_mode !== "verification"
-  ) {
-    throw new Error("review_mode is invalid.");
-  }
-  if (body.repository !== body.head_repository) {
-    throw new Error("Fork pull requests are not eligible for the local autofix review.");
-  }
-  return {
-    repository: body.repository,
-    number: body.number,
-    headSha: body.head_sha,
-    headRef: body.head_ref,
-    headRepository: body.head_repository,
-    baseRef: body.base_ref,
-    reviewMode: body.review_mode === "verification" ? "verification" : "full",
-    pullRequestUrl: typeof body.pull_request_url === "string"
-      ? body.pull_request_url
-      : undefined,
-  };
+function isLocalApi(pathname) {
+  return pathname === "/v1/repositories"
+    || pathname === "/v1/local-prs"
+    || pathname.startsWith("/v1/local-prs/")
+    || pathname === "/v1/test-workflow";
 }
 
-function isPrApi(pathname) {
-  return pathname === "/v1/pr-gate/jobs"
-    || pathname.startsWith("/v1/pr-gate/jobs/");
+function isLoopbackAddress(address) {
+  return !address
+    || address === "::1"
+    || address === "127.0.0.1"
+    || address.startsWith("::ffff:127.");
 }
 
 export function createRequestHandler({
   env = process.env,
   sessionToken,
   queue,
+  localPrService,
 }) {
-  const ui = createUiRequestHandler({ env, sessionToken, queue });
+  const ui = createUiRequestHandler({ env, sessionToken, queue, localPrService });
   return async (request, response) => {
     const host = request.headers.host ?? "127.0.0.1";
     const url = new URL(request.url ?? "/", `http://${host}`);
-    if (!isPrApi(url.pathname)) {
+    if (!isLocalApi(url.pathname)) {
       await ui(request, response);
+      return;
+    }
+    if (!isLoopbackAddress(request.socket?.remoteAddress)) {
+      sendJson(response, 403, { error: "Loopback client required." });
       return;
     }
     let expected;
     try {
-      expected = readOriginToken(env);
+      expected = readWorkflowToken(env);
     } catch {
       sendJson(response, 503, { error: "Revisor is not configured." });
       return;
@@ -87,19 +59,48 @@ export function createRequestHandler({
       return;
     }
     try {
-      if (request.method === "POST" && url.pathname === "/v1/pr-gate/jobs") {
-        const job = await queue.submit(validateRequest(await readJsonBody(request)));
-        sendJson(response, 202, {
-          id: job.id,
-          status: job.status,
-          check_url: job.checkUrl,
-        });
+      if (request.method === "POST" && url.pathname === "/v1/repositories") {
+        const repository = await localPrService.registerRepository(
+          validateRepositoryRegistration(await readJsonBody(request)),
+        );
+        sendJson(response, 201, { repository });
         return;
       }
-      if (request.method === "GET" && url.pathname.startsWith("/v1/pr-gate/jobs/")) {
-        const id = decodeURIComponent(url.pathname.slice("/v1/pr-gate/jobs/".length));
-        const job = queue.get(id);
-        sendJson(response, job ? 200 : 404, job ?? { error: "job not found" });
+      if (request.method === "GET" && url.pathname === "/v1/repositories") {
+        sendJson(response, 200, { repositories: localPrService.listRepositories() });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/v1/local-prs") {
+        const pullRequest = await localPrService.submitPullRequest(
+          validatePullRequestSubmission(await readJsonBody(request)),
+        );
+        sendJson(response, 202, { pullRequest });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/v1/local-prs") {
+        sendJson(response, 200, { pullRequests: localPrService.listPullRequests() });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/v1/test-workflow") {
+        sendJson(response, 200, { products: localPrService.testWorkflowProducts() });
+        return;
+      }
+      const merge = /^\/v1\/local-prs\/([^/]+)\/merge$/.exec(url.pathname);
+      if (request.method === "POST" && merge) {
+        const pullRequest = await localPrService.mergePullRequest(
+          decodeURIComponent(merge[1]),
+        );
+        sendJson(response, 200, { pullRequest });
+        return;
+      }
+      const detail = /^\/v1\/local-prs\/([^/]+)$/.exec(url.pathname);
+      if (request.method === "GET" && detail) {
+        const pullRequest = localPrService.getPullRequest(decodeURIComponent(detail[1]));
+        sendJson(
+          response,
+          pullRequest ? 200 : 404,
+          pullRequest ? { pullRequest } : { error: "Local PR not found." },
+        );
         return;
       }
       sendJson(response, 404, { error: "Not found." });
@@ -116,18 +117,16 @@ export async function startRevisor({
   port,
   cwd = process.cwd(),
   runner,
-  checkReporter,
   createWorkerPool = (options) => new PrReviewWorkerPool(options),
-  createGitHubClient = (options) => new GitHubAppClient(options),
+  stateStore,
+  createLocalPrService = (options) => new LocalPrService(options),
 } = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("Revisor port must be an integer from 1 to 65535.");
   }
   const settings = readSettings(env);
-  const reporter = checkReporter ?? new ConfiguredGitHubCheckReporter({
-    readCredentials: () => readGitHubAppCredentials(env),
-    createClient: createGitHubClient,
-  });
+  const store = stateStore ?? new LocalPrStore({ path: resolveStatePath(env) });
+  const reporter = new LocalPrReporter(store);
   const workerPool = runner
     ? null
     : createWorkerPool({ size: settings.workerCount, cwd, env });
@@ -136,8 +135,14 @@ export async function startRevisor({
     concurrency: settings.workerCount,
     reporter,
   });
+  const localPrService = createLocalPrService({ store, queue });
   const sessionToken = randomBytes(24).toString("base64url");
-  const server = createServer(createRequestHandler({ env, sessionToken, queue }));
+  const server = createServer(createRequestHandler({
+    env,
+    sessionToken,
+    queue,
+    localPrService,
+  }));
   try {
     await new Promise((resolve, reject) => {
       const onError = (error) => reject(error);
@@ -160,6 +165,8 @@ export async function startRevisor({
   return {
     url: `http://127.0.0.1:${address.port}/`,
     queue,
+    store,
+    localPrService,
     workerCount: settings.workerCount,
     close: async () => {
       await new Promise((resolve, reject) => {

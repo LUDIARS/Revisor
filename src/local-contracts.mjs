@@ -1,0 +1,103 @@
+import { isAbsolute, relative, resolve } from "node:path";
+
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
+const SAFE_COMMAND_PART = /^[^\0\r\n"&|<>^%!]*$/;
+
+function object(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function text(value, label, maximum = 255) {
+  if (typeof value !== "string" || !value.trim() || value.length > maximum) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return value.trim();
+}
+
+function gitRef(value, label) {
+  const ref = text(value, label);
+  if (!SAFE_REF.test(ref)) throw new Error(`${label} is not a safe Git ref.`);
+  return ref;
+}
+
+function stringList(value, label) {
+  if (value === undefined) return [];
+  if (
+    !Array.isArray(value)
+    || value.length > 50
+    || value.some((item) =>
+      typeof item !== "string" || !item.trim() || item.length > 100)
+  ) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return [...new Set(value.map((item) => item.trim()))];
+}
+
+function testCase(value, index) {
+  object(value, `test_cases[${index}]`);
+  const name = text(value.name, `test_cases[${index}].name`, 100);
+  const command = text(value.command, `test_cases[${index}].command`, 260);
+  const args = value.args ?? [];
+  if (
+    !Array.isArray(args)
+    || args.length > 64
+    || args.some((argument) =>
+      typeof argument !== "string"
+      || argument.length > 1_000
+      || !SAFE_COMMAND_PART.test(argument))
+  ) {
+    throw new Error(`test_cases[${index}].args is invalid.`);
+  }
+  if (!SAFE_COMMAND_PART.test(command)) {
+    throw new Error(`test_cases[${index}].command contains shell metacharacters.`);
+  }
+  const cwd = value.cwd === undefined ? "." : text(value.cwd, `test_cases[${index}].cwd`);
+  if (isAbsolute(cwd) || relative(".", resolve(".", cwd)).startsWith("..")) {
+    throw new Error(`test_cases[${index}].cwd must stay inside the repository.`);
+  }
+  const timeoutMs = value.timeout_ms === undefined ? 10 * 60_000 : Number(value.timeout_ms);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 60 * 60_000) {
+    throw new Error(`test_cases[${index}].timeout_ms is invalid.`);
+  }
+  return { name, command, args: [...args], cwd, timeoutMs };
+}
+
+export function validateRepositoryRegistration(body) {
+  object(body, "Request body");
+  const repository = text(body.repository, "repository");
+  if (!REPOSITORY.test(repository)) throw new Error("repository is invalid.");
+  const rootPath = text(body.root_path, "root_path", 1_000);
+  if (!isAbsolute(rootPath)) throw new Error("root_path must be absolute.");
+  const baseRef = gitRef(body.base_ref ?? "main", "base_ref");
+  if (!Array.isArray(body.test_cases) || body.test_cases.length === 0) {
+    throw new Error("At least one test case is required when registering a repository.");
+  }
+  if (body.test_cases.length > 32) throw new Error("Too many test cases.");
+  const testCases = body.test_cases.map(testCase);
+  if (new Set(testCases.map((candidate) => candidate.name)).size !== testCases.length) {
+    throw new Error("Test case names must be unique.");
+  }
+  return { repository, rootPath, baseRef, testCases };
+}
+
+export function validatePullRequestSubmission(body) {
+  object(body, "Request body");
+  const repository = text(body.repository, "repository");
+  if (!REPOSITORY.test(repository)) throw new Error("repository is invalid.");
+  return {
+    repository,
+    title: text(body.title, "title", 256),
+    body: typeof body.body === "string" && body.body.length <= 65_536 ? body.body : "",
+    author: text(body.author ?? "local", "author", 100),
+    draft: body.draft === true,
+    labels: stringList(body.labels, "labels"),
+    assignees: stringList(body.assignees, "assignees"),
+    reviewers: stringList(body.reviewers, "reviewers"),
+    headRef: gitRef(body.head_ref, "head_ref"),
+    baseRef: body.base_ref === undefined ? undefined : gitRef(body.base_ref, "base_ref"),
+  };
+}

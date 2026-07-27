@@ -7,13 +7,14 @@ import {
   targetDomainQuestion,
 } from "./concordia-context.mjs";
 import { readSettings } from "./config.mjs";
+import { runRegisteredTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
 import {
+  advanceLocalBranch,
   cleanupWorktrees,
   git,
-  prepareWorktrees,
-  resolveRepositoryPath,
+  prepareLocalWorktrees,
 } from "./workspace.mjs";
 
 function buildReviewerPrompt({
@@ -27,7 +28,7 @@ function buildReviewerPrompt({
   return [
     `Review and autofix PR ${request.repository}#${request.number}.`,
     `Compare the checked-out HEAD with ${request.baseRef}.`,
-    "You may read and edit files only. Do not run repository code, install dependencies, use network access, commit, or push; Revisor owns Git operations and GitHub CI owns execution.",
+    "You may read and edit files only. Do not run repository code, install dependencies, use network access, commit, or push; Revisor owns local Git and CI operations.",
     "Perform a normal correctness, security, and maintainability review and directly fix actionable issues.",
     "Explicitly check for information leakage: credentials, personal data, private endpoints, session transcripts, logs, local configuration, and proprietary artifacts that should not enter the repository.",
     `Local high-confidence leakage scan (contains locations only, never matched values):\n${JSON.stringify(leakage, null, 2)}`,
@@ -48,11 +49,15 @@ function buildReviewerPrompt({
   ].join("\n\n");
 }
 
-async function commitAndPushAutofix(cwd, request) {
+async function commitAndAdvanceAutofix(cwd, repoPath, request) {
   const status = await git(cwd, ["status", "--porcelain"]);
   if (status) {
     await git(cwd, ["add", "--all"]);
     await git(cwd, [
+      "-c",
+      "user.name=LUDIARS Revisor",
+      "-c",
+      "user.email=revisor@localhost",
       "commit",
       "-m",
       "fix(pr-review): apply automated review fixes",
@@ -62,7 +67,12 @@ async function commitAndPushAutofix(cwd, request) {
   }
   const reviewedHead = await git(cwd, ["rev-parse", "HEAD"]);
   if (reviewedHead.toLowerCase() !== request.headSha.toLowerCase()) {
-    await git(cwd, ["push", "origin", `HEAD:refs/heads/${request.headRef}`]);
+    await advanceLocalBranch(
+      repoPath,
+      request.headRef,
+      request.headSha,
+      reviewedHead,
+    );
   }
   return reviewedHead;
 }
@@ -73,8 +83,13 @@ function gateReasons(
   threshold,
   reviewerOutput,
   leakage,
+  ci,
 ) {
   const reasons = [];
+  const failedTests = ci.filter((test) => test.status !== "passed");
+  if (failedTests.length > 0) {
+    reasons.push(`${failedTests.length} registered test case(s) failed`);
+  }
   if (!finalAnalysis.domain.hasTargetDomain) reasons.push("target domain is still missing");
   if (finalAnalysis.quality.changedOrphans.length > 0) {
     reasons.push(`${finalAnalysis.quality.changedOrphans.length} changed function(s) are orphaned`);
@@ -120,6 +135,7 @@ function buildGateResult({
   complexityDropThreshold,
   initialLeakage,
   leakage,
+  ci,
 }) {
   const complexityScoreDelta =
     finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
@@ -129,6 +145,7 @@ function buildGateResult({
     complexityDropThreshold,
     reviewerOutput,
     leakage,
+    ci,
   );
   return {
     conclusion: reasons.length === 0 ? "success" : "action_required",
@@ -149,6 +166,7 @@ function buildGateResult({
     complexityScoreDelta,
     initialLeakage,
     leakage,
+    ci,
     reasons,
   };
 }
@@ -177,13 +195,13 @@ export function createPrReviewRunner({
     const settings = readSettings(env);
     const anatomiaCliPath = await resolveAnatomiaCli(settings.anatomiaFolder);
     const workspaceRoot = resolveWorkspaceRoot(cwd);
-    const repoPath = await resolveRepositoryPath(cwd, request.repository);
+    const repoPath = request.rootPath;
     const firstAnalysis = await ensureInitialAnalysis({
       cliPath: anatomiaCliPath,
       repoPath,
       repository: request.repository,
     });
-    const worktrees = await prepareWorktrees(repoPath, request);
+    const worktrees = await prepareLocalWorktrees(repoPath, request);
     try {
       const [initial, baseline] = await Promise.all([
         analyzePr({
@@ -199,6 +217,11 @@ export function createPrReviewRunner({
       ]);
       const initialUnifiedDiff = await readUnifiedDiff(worktrees.head, worktrees.mergeBase);
       const initialLeakage = scanAddedDiffForLeaks(initialUnifiedDiff);
+      const initialCi = await runRegisteredTests({
+        worktreePath: worktrees.head,
+        testCases: request.testCases,
+        env,
+      });
       if (request.reviewMode === "verification") {
         return {
           ...buildGateResult({
@@ -212,10 +235,29 @@ export function createPrReviewRunner({
             complexityDropThreshold,
             initialLeakage,
             leakage: initialLeakage,
+            ci: initialCi,
           }),
           humanQuestion: !initial.domain.hasTargetDomain
             ? targetDomainQuestion(request.repository, request.number)
             : null,
+        };
+      }
+      if (!testsPassed(initialCi)) {
+        return {
+          ...buildGateResult({
+            request,
+            firstAnalysis,
+            finalAnalysis: initial,
+            baseline,
+            reviewer: null,
+            contextSource: "registered-tests",
+            reviewedHeadSha: request.headSha,
+            complexityDropThreshold,
+            initialLeakage,
+            leakage: initialLeakage,
+            ci: initialCi,
+          }),
+          humanQuestion: "Registered tests must pass before automated review.",
         };
       }
       const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
@@ -254,6 +296,7 @@ export function createPrReviewRunner({
             complexityDropThreshold,
             initialLeakage,
             leakage: initialLeakage,
+            ci: initialCi,
           }),
           humanQuestion: "Potential information leakage must be removed before automated review.",
         };
@@ -296,7 +339,35 @@ export function createPrReviewRunner({
           "Opposite-model autofix introduced potential information leakage; changes were discarded before commit or push.",
         );
       }
-      const reviewedHeadSha = await commitAndPushAutofix(worktrees.head, request);
+      const finalCi = await runRegisteredTests({
+        worktreePath: worktrees.head,
+        testCases: request.testCases,
+        env,
+      });
+      if (!testsPassed(finalCi)) {
+        return {
+          ...buildGateResult({
+            request,
+            firstAnalysis,
+            finalAnalysis: initial,
+            baseline,
+            reviewer,
+            contextSource: authorContext?.source ?? "pr-only",
+            reviewedHeadSha: request.headSha,
+            reviewerOutput: reviewResult.stdout,
+            complexityDropThreshold,
+            initialLeakage,
+            leakage: initialLeakage,
+            ci: finalCi,
+          }),
+          humanQuestion: "Reviewer changes were discarded because registered tests failed.",
+        };
+      }
+      const reviewedHeadSha = await commitAndAdvanceAutofix(
+        worktrees.head,
+        repoPath,
+        request,
+      );
       const needsHuman = !finalAnalysis.domain.hasTargetDomain
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
       await notifyConcordia({
@@ -320,6 +391,7 @@ export function createPrReviewRunner({
           complexityDropThreshold,
           initialLeakage,
           leakage: finalLeakage,
+          ci: finalCi,
         }),
         humanQuestion: needsHuman
           ? targetDomainQuestion(request.repository, request.number)

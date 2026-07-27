@@ -3,14 +3,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { writeOriginToken } from "../src/config.mjs";
+import { writeWorkflowToken } from "../src/config.mjs";
 import { createRequestHandler } from "../src/server.mjs";
 
 function request({ method = "GET", url = "/", headers = {}, body = "" } = {}) {
   return {
     method,
     url,
-    headers: { host: "pr-gate.example.com", ...headers },
+    socket: { remoteAddress: "127.0.0.1" },
+    headers: { host: "127.0.0.1:4240", ...headers },
     async *[Symbol.asyncIterator]() {
       if (body) yield Buffer.from(body, "utf8");
     },
@@ -41,67 +42,63 @@ function fixture() {
   };
 }
 
-test("authenticates and enqueues an external PR request", async () => {
+test("authenticates and creates a local PR without a GitHub head", async () => {
   const state = fixture();
-  writeOriginToken("origin-token", state.env);
+  writeWorkflowToken("workflow-token", state.env);
   let submitted;
   const handler = createRequestHandler({
     env: state.env,
     sessionToken: "ui-token",
-    queue: {
-      async submit(value) {
+    queue: { state: () => ({}) },
+    localPrService: {
+      async submitPullRequest(value) {
         submitted = value;
-        return {
-          id: "job-1",
-          status: "queued",
-          checkUrl: "https://github.com/LUDIARS/Revisor/runs/1",
-        };
+        return { id: "pr-1", number: 1, checkStatus: "queued" };
       },
-      get: () => null,
     },
   });
   const output = response();
   try {
     await handler(request({
       method: "POST",
-      url: "/v1/pr-gate/jobs",
-      headers: { authorization: "Bearer origin-token" },
+      url: "/v1/local-prs",
+      headers: { authorization: "Bearer workflow-token" },
       body: JSON.stringify({
         repository: "LUDIARS/Revisor",
-        number: 1,
-        head_sha: "a".repeat(40),
-        head_ref: "feat/review",
-        head_repository: "LUDIARS/Revisor",
-        base_ref: "main",
-        review_mode: "verification",
+        title: "Local workflow",
+        body: "Never push the head branch.",
+        author: "neco",
+        head_ref: "feat/local-workflow",
       }),
     }), output);
     assert.equal(output.status, 202);
     assert.equal(submitted.repository, "LUDIARS/Revisor");
-    assert.equal(submitted.reviewMode, "verification");
-    assert.deepEqual(JSON.parse(output.body), {
-      id: "job-1",
-      status: "queued",
-      check_url: "https://github.com/LUDIARS/Revisor/runs/1",
+    assert.equal(submitted.headRef, "feat/local-workflow");
+    assert.equal("headSha" in submitted, false);
+    assert.deepEqual(JSON.parse(output.body).pullRequest, {
+      id: "pr-1",
+      number: 1,
+      checkStatus: "queued",
     });
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }
 });
 
-test("rejects unauthenticated external requests", async () => {
+test("rejects unauthenticated local workflow requests", async () => {
   const state = fixture();
-  writeOriginToken("origin-token", state.env);
+  writeWorkflowToken("workflow-token", state.env);
   const handler = createRequestHandler({
     env: state.env,
     sessionToken: "ui-token",
-    queue: { submit: () => null, get: () => null },
+    queue: { state: () => ({}) },
+    localPrService: {},
   });
   const output = response();
   try {
     await handler(request({
       method: "POST",
-      url: "/v1/pr-gate/jobs",
+      url: "/v1/local-prs",
       headers: { authorization: "Bearer wrong" },
       body: "{}",
     }), output);
@@ -109,4 +106,18 @@ test("rejects unauthenticated external requests", async () => {
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }
+});
+
+test("rejects non-loopback clients before reading credentials", async () => {
+  const handler = createRequestHandler({
+    env: {},
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {},
+  });
+  const output = response();
+  const input = request({ method: "GET", url: "/v1/local-prs" });
+  input.socket.remoteAddress = "203.0.113.7";
+  await handler(input, output);
+  assert.equal(output.status, 403);
 });

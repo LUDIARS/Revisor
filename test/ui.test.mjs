@@ -8,7 +8,10 @@ test("renders a dedicated token-free settings page", () => {
   assert.match(page, /<h1>Revisor<\/h1>/);
   assert.match(page, /Anatomiaフォルダ/);
   assert.match(page, /並列ワーカープロセス数/);
-  assert.match(page, /GitHub App ID/);
+  assert.match(page, /LUDIARS LOCAL PR WORKFLOW/);
+  assert.match(page, /プロダクト登録/);
+  assert.match(page, /Open \/ Test OK/);
+  assert.doesNotMatch(page, /GitHub App ID/);
   assert.match(page, /nonce="session-nonce"/);
   assert.doesNotMatch(page, /origin-secret/);
 });

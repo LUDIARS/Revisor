@@ -119,7 +119,7 @@ export class PrReviewQueue {
         await this.reporter.failed(job);
       } catch (reportError) {
         const message = reportError instanceof Error ? reportError.message : String(reportError);
-        job.error = `${job.error}; GitHub check update failed: ${message}`;
+        job.error = `${job.error}; lifecycle reporter update failed: ${message}`;
       }
     } finally {
       job.updatedAt = this.now();

@@ -1,12 +1,14 @@
 import {
-  hasGitHubAppCredentials,
-  hasOriginToken,
+  hasWorkflowToken,
   readSettings,
-  writeGitHubAppPrivateKey,
-  writeOriginToken,
+  writeWorkflowToken,
   writeSettings,
 } from "./config.mjs";
 import { resolveAnatomiaCli } from "./anatomia.mjs";
+import {
+  validatePullRequestSubmission,
+  validateRepositoryRegistration,
+} from "./local-contracts.mjs";
 import { renderSettingsPage } from "./ui-page.mjs";
 import { isAuthorizedSession, isLoopbackHost } from "./ui-security.mjs";
 
@@ -46,6 +48,7 @@ export function createUiRequestHandler({
   env = process.env,
   sessionToken,
   queue,
+  localPrService,
 }) {
   return async (request, response) => {
     if (!isLoopbackHost(request.headers.host)) {
@@ -58,8 +61,7 @@ export function createUiRequestHandler({
         sendJson(response, 200, {
           status: "ok",
           configured: Boolean(readSettings(env).anatomiaFolder)
-            && hasOriginToken(env)
-            && hasGitHubAppCredentials(env),
+            && hasWorkflowToken(env),
         });
       } catch (error) {
         sendJson(response, 503, {
@@ -90,8 +92,7 @@ export function createUiRequestHandler({
       if (request.method === "GET" && url.pathname === "/api/settings") {
         sendJson(response, 200, {
           settings: readSettings(env),
-          githubAppConfigured: hasGitHubAppCredentials(env),
-          originTokenConfigured: hasOriginToken(env),
+          workflowTokenConfigured: hasWorkflowToken(env),
         });
         return;
       }
@@ -99,21 +100,60 @@ export function createUiRequestHandler({
         const body = await readJsonBody(request);
         await resolveAnatomiaCli(body.anatomiaFolder);
         const settings = writeSettings(body, env);
-        if (typeof body.originToken === "string" && body.originToken.trim()) {
-          writeOriginToken(body.originToken, env);
-        }
-        if (typeof body.githubAppPrivateKey === "string" && body.githubAppPrivateKey.trim()) {
-          writeGitHubAppPrivateKey(body.githubAppPrivateKey, env);
+        if (typeof body.workflowToken === "string" && body.workflowToken.trim()) {
+          writeWorkflowToken(body.workflowToken, env);
         }
         sendJson(response, 200, {
           settings,
-          githubAppConfigured: hasGitHubAppCredentials(env),
-          originTokenConfigured: hasOriginToken(env),
+          workflowTokenConfigured: hasWorkflowToken(env),
         });
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/jobs") {
         sendJson(response, 200, queue.state());
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/repositories") {
+        sendJson(response, 200, {
+          repositories: localPrService.listRepositories(),
+        });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/repositories") {
+        sendJson(response, 201, {
+          repository: await localPrService.registerRepository(
+            validateRepositoryRegistration(await readJsonBody(request)),
+          ),
+        });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/local-prs") {
+        sendJson(response, 200, {
+          pullRequests: localPrService.listPullRequests(),
+        });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/local-prs") {
+        sendJson(response, 202, {
+          pullRequest: await localPrService.submitPullRequest(
+            validatePullRequestSubmission(await readJsonBody(request)),
+          ),
+        });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/test-workflow") {
+        sendJson(response, 200, {
+          products: localPrService.testWorkflowProducts(),
+        });
+        return;
+      }
+      const merge = /^\/api\/local-prs\/([^/]+)\/merge$/.exec(url.pathname);
+      if (request.method === "POST" && merge) {
+        sendJson(response, 200, {
+          pullRequest: await localPrService.mergePullRequest(
+            decodeURIComponent(merge[1]),
+          ),
+        });
         return;
       }
       sendJson(response, 404, { error: "Not found." });
