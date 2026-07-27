@@ -1,0 +1,24 @@
+{
+  "name": "@ludiars/revisor",
+  "version": "0.1.0",
+  "description": "Independent local pull-request review service",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "revisor": "src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "spec",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/cli.mjs && node --check src/server.mjs && node --check src/runner.mjs && node --check src/github-app.mjs && node --check src/check-reporter.mjs && node --check src/leakage.mjs",
+    "start": "node src/cli.mjs serve"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
