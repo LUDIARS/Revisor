@@ -102,9 +102,11 @@ Missing configuration, missing test cases, submitted worktrees carrying tracked
 modifications, changed SHAs, failed tests, and blocking Anatomia gates fail
 explicitly. Worktree cleanliness considers tracked changes only: untracked files
 enter neither a review, which reads a fixed SHA in a disposable worktree, nor a
-fast-forward, which Git aborts rather than overwriting them. Worker crashes fail
-their active job and cause pool replacement. Shutdown rejects waiting work and
-terminates owned processes.
+fast-forward, which Git aborts rather than overwriting them. A submodule's own
+uncommitted content is likewise ignored because the parent still records the
+same commit; a moved submodule pointer is a tracked change and still blocks.
+Worker crashes fail their active job and cause pool replacement. Shutdown
+rejects waiting work and terminates owned processes.
 
 Every disposable worktree is removed on normal and exceptional paths. Unsafe
 reviewer changes are discarded before commit or local branch advancement.

@@ -37,8 +37,17 @@ function parseWorktreeList(output) {
 // SHA in a disposable worktree, so an untracked scratch file can never reach it;
 // and a fast-forward ignores untracked files that do not collide, while Git
 // itself aborts one that would overwrite them.
+// A submodule's own uncommitted content belongs to that submodule, not to this
+// PR: the parent still records the same commit, so neither the review nor the
+// fast-forward is affected. A changed submodule *pointer* is a tracked change
+// and is still reported.
 async function trackedChanges(worktreePath) {
-  return git(worktreePath, ["status", "--porcelain", "--untracked-files=no"]);
+  return git(worktreePath, [
+    "status",
+    "--porcelain",
+    "--untracked-files=no",
+    "--ignore-submodules=dirty",
+  ]);
 }
 
 async function branchWorktree(repoPath, ref) {

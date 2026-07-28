@@ -44,17 +44,21 @@ function git(repoPath, ...args) {
   return result.stdout.trim();
 }
 
-function repositoryFixture() {
-  const directory = mkdtempSync(join(tmpdir(), "revisor-local-pr-"));
-  const repoPath = join(directory, "Product");
-  const init = spawnSync("git", ["init", repoPath], {
+function initRepository(path) {
+  const init = spawnSync("git", ["init", path], {
     encoding: "utf8",
     windowsHide: true,
   });
   if (init.status !== 0) throw new Error(init.stderr || init.stdout);
-  git(repoPath, "checkout", "-b", "main");
-  git(repoPath, "config", "user.name", "Test");
-  git(repoPath, "config", "user.email", "test@example.invalid");
+  git(path, "checkout", "-b", "main");
+  git(path, "config", "user.name", "Test");
+  git(path, "config", "user.email", "test@example.invalid");
+}
+
+function repositoryFixture() {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-local-pr-"));
+  const repoPath = join(directory, "Product");
+  initRepository(repoPath);
   writeFileSync(join(repoPath, "product.txt"), "base\n", "utf8");
   git(repoPath, "add", "product.txt");
   git(repoPath, "commit", "-m", "base");
@@ -374,6 +378,73 @@ test("refuses to advance a base branch carrying tracked modifications", async ()
   try {
     const { service, pullRequest } = await readyToMerge(fixture, store);
     writeFileSync(join(fixture.repoPath, "product.txt"), "base\nlocal edit\n", "utf8");
+    await assert.rejects(
+      () => service.mergePullRequest(pullRequest.id),
+      /worktree is no longer clean/,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// Adding the submodule moves 'main' on, so 'feat/local' is rebased back onto it
+// and the recorded base SHA is refreshed; the spread would otherwise hand tests
+// the pre-submodule base.
+function submoduleFixture() {
+  const fixture = repositoryFixture();
+  const modulePath = join(fixture.directory, "Module");
+  initRepository(modulePath);
+  writeFileSync(join(modulePath, "shared.txt"), "shared\n", "utf8");
+  git(modulePath, "add", "shared.txt");
+  git(modulePath, "commit", "-m", "shared base");
+  git(
+    fixture.repoPath,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    modulePath.replace(/\\/g, "/"),
+    "lib/module",
+  );
+  git(fixture.repoPath, "commit", "-m", "add submodule");
+  git(fixture.repoPath, "checkout", "feat/local");
+  git(fixture.repoPath, "rebase", "main");
+  git(fixture.repoPath, "checkout", "main");
+  return {
+    ...fixture,
+    baseSha: git(fixture.repoPath, "rev-parse", "main"),
+    modulePath,
+  };
+}
+
+test("merges while a submodule carries its own uncommitted content", async () => {
+  const fixture = submoduleFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const { service, pullRequest } = await readyToMerge(fixture, store);
+    writeFileSync(join(fixture.repoPath, "lib", "module", "shared.txt"), "edited\n", "utf8");
+    assert.match(
+      git(fixture.repoPath, "status", "--porcelain", "--untracked-files=no"),
+      /lib\/module/,
+    );
+    const merged = await service.mergePullRequest(pullRequest.id);
+    assert.equal(merged.status, "merged");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("still blocks when the submodule pointer itself moved", async () => {
+  const fixture = submoduleFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const { service, pullRequest } = await readyToMerge(fixture, store);
+    writeFileSync(join(fixture.modulePath, "shared.txt"), "next\n", "utf8");
+    git(fixture.modulePath, "add", "shared.txt");
+    git(fixture.modulePath, "commit", "-m", "shared next");
+    const submodulePath = join(fixture.repoPath, "lib", "module");
+    git(submodulePath, "-c", "protocol.file.allow=always", "fetch", "origin");
+    git(submodulePath, "checkout", git(fixture.modulePath, "rev-parse", "HEAD"));
     await assert.rejects(
       () => service.mergePullRequest(pullRequest.id),
       /worktree is no longer clean/,
