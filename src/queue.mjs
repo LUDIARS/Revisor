@@ -35,13 +35,21 @@ export class PrReviewQueue {
     this.now = now;
   }
 
-  async submit(request) {
+  async submit(request, { force = false } = {}) {
     const key = `${request.repository}#${request.number}@${request.headSha}`;
     const submitting = this.#submissions.get(key);
     if (submitting) return submitting;
     const existingId = this.#jobsByKey.get(key);
     const existing = existingId ? this.#jobs.get(existingId) : undefined;
-    if (existing) return existing;
+    if (existing) {
+      // A settled job stays cached under its key, so a forced re-review has to
+      // discard it. An admitted one already is the run the caller asked for.
+      if (!force || existing.status === "queued" || existing.status === "running") {
+        return existing;
+      }
+      this.#jobs.delete(existingId);
+      this.#jobsByKey.delete(key);
+    }
     const submission = this.#create(request, key);
     this.#submissions.set(key, submission);
     try {

@@ -10,6 +10,7 @@ import { readSettings } from "./config.mjs";
 import { runRegisteredTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
+import { gateOutcome } from "./review-gate.mjs";
 import {
   advanceLocalBranch,
   cleanupWorktrees,
@@ -77,43 +78,6 @@ async function commitAndAdvanceAutofix(cwd, repoPath, request) {
   return reviewedHead;
 }
 
-function gateReasons(
-  finalAnalysis,
-  complexityScoreDelta,
-  threshold,
-  reviewerOutput,
-  leakage,
-  ci,
-) {
-  const reasons = [];
-  const failedTests = ci.filter((test) => test.status !== "passed");
-  if (failedTests.length > 0) {
-    reasons.push(`${failedTests.length} registered test case(s) failed`);
-  }
-  if (!finalAnalysis.domain.hasTargetDomain) reasons.push("target domain is still missing");
-  if (finalAnalysis.quality.changedOrphans.length > 0) {
-    reasons.push(`${finalAnalysis.quality.changedOrphans.length} changed function(s) are orphaned`);
-  }
-  if (finalAnalysis.architecture.verify && !finalAnalysis.architecture.verify.pass) {
-    reasons.push("Anatomia five-gate verification did not pass");
-  }
-  const blockingViolations = finalAnalysis.architecture.changedViolations
-    .filter((violation) => violation.severity === "error");
-  if (blockingViolations.length > 0) {
-    reasons.push(`${blockingViolations.length} changed architecture rule violation(s) remain`);
-  }
-  if (complexityScoreDelta <= -threshold) {
-    reasons.push(`complexity score dropped by ${Math.abs(complexityScoreDelta)} points`);
-  }
-  if (reviewerOutput.includes("PR_GATE_NEEDS_HUMAN")) {
-    reasons.push("reviewer reported insufficient information for a safe domain/spec definition");
-  }
-  if (leakage.totalFindings > 0) {
-    reasons.push(`${leakage.totalFindings} potential information leakage finding(s) remain`);
-  }
-  return reasons;
-}
-
 function optionalConcordiaUrl(cwd, enabled) {
   if (!enabled) return null;
   try {
@@ -139,14 +103,14 @@ function buildGateResult({
 }) {
   const complexityScoreDelta =
     finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
-  const reasons = gateReasons(
+  const { reasons, advisories } = gateOutcome({
     finalAnalysis,
     complexityScoreDelta,
-    complexityDropThreshold,
+    threshold: complexityDropThreshold,
     reviewerOutput,
     leakage,
     ci,
-  );
+  });
   return {
     conclusion: reasons.length === 0 ? "success" : "action_required",
     reviewMode: request.reviewMode,
@@ -168,6 +132,7 @@ function buildGateResult({
     leakage,
     ci,
     reasons,
+    advisories,
   };
 }
 

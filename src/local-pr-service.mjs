@@ -1,10 +1,27 @@
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { installPushGuard } from "./push-guard.mjs";
+import { pendingReviewProjection } from "./local-reporter.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
 import { inspectLocalPullRequest, git } from "./workspace.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
+
+function reviewRequest(repository, pullRequest) {
+  return {
+    localPrId: pullRequest.id,
+    repository: repository.repository,
+    number: pullRequest.number,
+    headSha: pullRequest.headSha,
+    headRef: pullRequest.headRef,
+    headRepository: repository.repository,
+    baseRef: pullRequest.baseRef,
+    baseSha: pullRequest.baseSha,
+    rootPath: repository.rootPath,
+    testCases: repository.testCases,
+    reviewMode: "full",
+  };
+}
 
 export class LocalPrService {
   constructor({
@@ -85,20 +102,43 @@ export class LocalPrService {
       headSha: refs.headSha,
       baseSha: refs.baseSha,
     });
+    return this.#enqueue(repository, pullRequest);
+  }
+
+  async retryPullRequest(id) {
+    const pullRequest = this.store.getPullRequest(id);
+    if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
+    if (pullRequest.status !== "open") {
+      throw new Error("Only an open local PR can be reviewed again.");
+    }
+    const repository = this.store.getRepository(pullRequest.repository);
+    if (!repository) {
+      throw new Error(`Repository '${pullRequest.repository}' is not registered.`);
+    }
+    // The branch may have moved since the failed run, so re-resolve both refs.
+    const refs = await inspectLocalPullRequest(
+      repository.rootPath,
+      pullRequest.headRef,
+      pullRequest.baseRef,
+    );
+    return this.#enqueue(
+      repository,
+      this.store.updatePullRequest(id, {
+        ...pendingReviewProjection(),
+        headSha: refs.headSha,
+        baseSha: refs.baseSha,
+        checkStatus: "queued",
+        error: null,
+      }),
+      // The refs may be unchanged, and the queue caches settled jobs by exact
+      // head, so an unforced re-review would resolve to the run being retried.
+      { force: true },
+    );
+  }
+
+  async #enqueue(repository, pullRequest, options) {
     try {
-      await this.queue.submit({
-        localPrId: pullRequest.id,
-        repository: repository.repository,
-        number: pullRequest.number,
-        headSha: pullRequest.headSha,
-        headRef: pullRequest.headRef,
-        headRepository: repository.repository,
-        baseRef: pullRequest.baseRef,
-        baseSha: pullRequest.baseSha,
-        rootPath: repository.rootPath,
-        testCases: repository.testCases,
-        reviewMode: "full",
-      });
+      await this.queue.submit(reviewRequest(repository, pullRequest), options);
     } catch (error) {
       this.store.updatePullRequest(pullRequest.id, {
         checkStatus: "failed",

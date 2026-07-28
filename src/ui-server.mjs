@@ -12,8 +12,14 @@ import {
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
-import { renderSettingsPage } from "./ui-page.mjs";
+import { renderDashboardPage } from "./ui-dashboard-page.mjs";
+import { renderSettingsPage } from "./ui-settings-page.mjs";
 import { isAllowedHost, isAuthorizedSession } from "./ui-security.mjs";
+
+const PAGES = new Map([
+  ["/", renderDashboardPage],
+  ["/settings", renderSettingsPage],
+]);
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -78,12 +84,13 @@ export function createUiRequestHandler({
       }
       return;
     }
-    if (request.method === "GET" && url.pathname === "/") {
+    const renderRequestedPage = PAGES.get(url.pathname);
+    if (request.method === "GET" && renderRequestedPage) {
       send(
         response,
         200,
         "text/html; charset=utf-8",
-        renderSettingsPage(sessionToken),
+        renderRequestedPage(sessionToken),
         {
           "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${sessionToken}'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'`,
         },
@@ -168,6 +175,25 @@ export function createUiRequestHandler({
             decodeURIComponent(merge[1]),
           ),
         });
+        return;
+      }
+      const retry = /^\/api\/local-prs\/([^/]+)\/retry$/.exec(url.pathname);
+      if (request.method === "POST" && retry) {
+        sendJson(response, 202, {
+          pullRequest: await localPrService.retryPullRequest(
+            decodeURIComponent(retry[1]),
+          ),
+        });
+        return;
+      }
+      const detail = /^\/api\/local-prs\/([^/]+)$/.exec(url.pathname);
+      if (request.method === "GET" && detail) {
+        const pullRequest = localPrService.getPullRequest(decodeURIComponent(detail[1]));
+        if (!pullRequest) {
+          sendJson(response, 404, { error: "Local PR was not found." });
+          return;
+        }
+        sendJson(response, 200, { pullRequest });
         return;
       }
       sendJson(response, 404, { error: "Not found." });

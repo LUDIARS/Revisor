@@ -11,7 +11,8 @@ runtime architecture.
 - `server.mjs` owns the loopback-bound HTTP server and authenticated local API.
 - `local-contracts.mjs` validates repository, test-case, and PR inputs.
 - `state-store.mjs` atomically persists repository and local PR projections.
-- `local-pr-service.mjs` orchestrates registration, submission, and merge.
+- `local-pr-service.mjs` orchestrates registration, submission, re-review, and
+  merge.
 - `queue.mjs` owns FIFO state, deduplication, and concurrency admission.
 - `local-reporter.mjs` projects queue and review results into local PR state.
 - `worker-pool.mjs` owns child-process lifetime and one-job-per-worker dispatch.
@@ -30,8 +31,10 @@ runtime architecture.
   allowed-host persistence.
 - `host-policy.mjs` normalizes exact hostnames and authorizes loopback or
   encrypted configured hosts.
-- `ui-*.mjs` own the workflow and settings surface exposed directly on
-  loopback or through a configured local reverse proxy.
+- `ui-*.mjs` own the workflow surface exposed directly on loopback or through a
+  configured local reverse proxy. `ui-layout.mjs` owns the shared shell, the
+  dashboard page owns open PRs and their review detail, and the settings page
+  owns every configuration form.
 
 The queue concurrency and worker-process count use the same validated setting,
 so the queue never admits more runs than the pool can execute.
@@ -46,6 +49,9 @@ sequential repository-local number, base/head refs, exact original SHAs,
 workflow status, CI outcomes, projected Anatomia data, leakage locations, and
 the final reviewed SHA. The test workflow is a derived view containing only
 PRs in `Open / Test OK`.
+
+Re-reviewing an open local PR re-resolves both refs, discards the previous
+run's outcome, and admits a new run even when neither ref moved.
 
 ## Data boundaries
 
@@ -73,10 +79,27 @@ commit must pass a subsequent hook invocation.
 Existing effective hooks are chained and repository-local hook configuration
 does not overwrite the shared hook.
 
+## Merge gate policy
+
+A local PR blocks on registered test failures, information leakage findings,
+error-severity changed architecture violations, a material complexity-score
+drop, a missing target domain, an Anatomia gate other than `spec_linkage`, and
+a reviewer that reports `PR_GATE_NEEDS_HUMAN`.
+
+Spec traceability is reported, not enforced: a failed `spec_linkage` gate,
+changed orphaned functions, and non-error architecture violations are recorded
+as advisories and shown per PR. They do not block a merge, because most
+repositories carry no complete Anatomia spec linkage and blocking on it would
+stop every PR without protecting what this workflow exists for — keeping
+feature branches off the remote and catching information leakage.
+
+An Anatomia verification that fails while naming no gate blocks the merge; it is
+never treated as a pass.
+
 ## Failure policy
 
 Missing configuration, missing test cases, dirty submitted worktrees, changed
-SHAs, failed tests, and failed Anatomia gates fail explicitly. Worker crashes
+SHAs, failed tests, and blocking Anatomia gates fail explicitly. Worker crashes
 fail their active job and cause pool replacement. Shutdown rejects waiting work
 and terminates owned processes.
 

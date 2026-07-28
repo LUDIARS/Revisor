@@ -67,3 +67,37 @@ test("deduplicates exact heads and caps concurrent reviews", async () => {
   assert.equal(events.filter((event) => event === "queued:job-1").length, 1);
   assert.equal(events.filter((event) => event.startsWith("completed:")).length, 3);
 });
+
+test("a forced submission re-runs a settled head but never doubles an active one", async () => {
+  const runs = [];
+  const releases = [];
+  const reporter = {
+    async queued() {},
+    async running() {},
+    async completed() {},
+    async failed() {},
+  };
+  const queue = new PrReviewQueue(async (submission) => {
+    runs.push(submission.headSha);
+    await new Promise((resolve) => releases.push(resolve));
+    return { conclusion: "success" };
+  }, { concurrency: 1, reporter });
+
+  const first = await queue.submit(request(1));
+  await new Promise((resolve) => setImmediate(resolve));
+  const whileRunning = await queue.submit(request(1), { force: true });
+  assert.equal(whileRunning.id, first.id);
+  assert.equal(runs.length, 1);
+
+  releases.splice(0).forEach((release) => release());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(first.status, "completed");
+  assert.equal((await queue.submit(request(1))).id, first.id);
+  assert.equal(runs.length, 1);
+
+  const forced = await queue.submit(request(1), { force: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(forced.id, first.id);
+  assert.equal(runs.length, 2);
+  releases.splice(0).forEach((release) => release());
+});

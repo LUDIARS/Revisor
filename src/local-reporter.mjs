@@ -11,6 +11,21 @@ function analysisProjection(result) {
   };
 }
 
+// The review outcome fields owned by `completed`, cleared. A re-review resolves
+// fresh refs, so the previous run's outcome must not be read as the current one.
+export function pendingReviewProjection() {
+  return {
+    reviewedHeadSha: null,
+    reviewer: null,
+    ci: [],
+    anatomia: null,
+    leakage: null,
+    reasons: [],
+    advisories: [],
+    humanQuestion: null,
+  };
+}
+
 export class LocalPrReporter {
   constructor(store) {
     if (!store || typeof store.updatePullRequest !== "function") {
@@ -42,6 +57,7 @@ export class LocalPrReporter {
       anatomia: analysisProjection(job.result),
       leakage: job.result?.leakage ?? null,
       reasons: job.result?.reasons ?? [],
+      advisories: job.result?.advisories ?? [],
       humanQuestion: job.result?.humanQuestion ?? null,
     });
   }

@@ -93,6 +93,14 @@ export function createRequestHandler({
         sendJson(response, 200, { pullRequest });
         return;
       }
+      const retry = /^\/v1\/local-prs\/([^/]+)\/retry$/.exec(url.pathname);
+      if (request.method === "POST" && retry) {
+        const pullRequest = await localPrService.retryPullRequest(
+          decodeURIComponent(retry[1]),
+        );
+        sendJson(response, 202, { pullRequest });
+        return;
+      }
       const detail = /^\/v1\/local-prs\/([^/]+)$/.exec(url.pathname);
       if (request.method === "GET" && detail) {
         const pullRequest = localPrService.getPullRequest(decodeURIComponent(detail[1]));

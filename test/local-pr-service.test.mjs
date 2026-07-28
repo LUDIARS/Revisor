@@ -9,8 +9,31 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { LocalPrReporter } from "../src/local-reporter.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
+import { PrReviewQueue } from "../src/queue.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
+
+async function waitForCheckStatus(store, id, checkStatus) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const pullRequest = store.getPullRequest(id);
+    if (pullRequest.checkStatus === checkStatus) return pullRequest;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error(`Local PR never reached '${checkStatus}'.`);
+}
+
+async function releaseRun(releases) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const resolve = releases.shift();
+    if (resolve) {
+      resolve();
+      return;
+    }
+    await new Promise((settle) => setImmediate(settle));
+  }
+  throw new Error("The review run never started.");
+}
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
@@ -99,6 +122,159 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
     assert.equal(git(fixture.repoPath, "log", "-1", "--format=%P"), fixture.baseSha);
     assert.match(git(fixture.repoPath, "log", "-1", "--format=%B"), /Revisor-Local-PR/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("re-queues a failed local PR against the current branch heads", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submitted = [];
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request) {
+        submitted.push(request);
+        return { id: `job-${submitted.length}` };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{
+        name: "unit",
+        command: "node",
+        args: ["--test"],
+        cwd: ".",
+        timeoutMs: 60_000,
+      }],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "failed",
+      error: "Anatomia PR analysis failed",
+    });
+
+    git(fixture.repoPath, "checkout", "feat/local");
+    writeFileSync(join(fixture.repoPath, "extra.txt"), "feature three\n", "utf8");
+    git(fixture.repoPath, "add", "extra.txt");
+    git(fixture.repoPath, "commit", "-m", "feature three");
+    git(fixture.repoPath, "checkout", "main");
+    const movedHead = git(fixture.repoPath, "rev-parse", "feat/local");
+
+    const retried = await service.retryPullRequest(pullRequest.id);
+    assert.equal(submitted.length, 2);
+    assert.equal(submitted[1].headSha, movedHead);
+    assert.equal(retried.headSha, movedHead);
+    assert.equal(retried.checkStatus, "queued");
+    assert.equal(retried.error, null);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("re-reviews an unchanged head and drops the previous outcome", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const runs = [];
+  const releases = [];
+  const queue = new PrReviewQueue(async (request) => {
+    runs.push(request.headSha);
+    await new Promise((resolve) => releases.push(resolve));
+    return {
+      conclusion: "action_required",
+      reviewedHeadSha: request.headSha,
+      reviewer: "codex-sol",
+      ci: [{ name: "unit", status: "failed", exitCode: 1, durationMs: 12 }],
+      reasons: ["unit failed"],
+    };
+  }, { concurrency: 1, reporter: new LocalPrReporter(store) });
+  const service = new LocalPrService({
+    store,
+    queue,
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{
+        name: "unit",
+        command: "node",
+        args: ["--test"],
+        cwd: ".",
+        timeoutMs: 60_000,
+      }],
+    });
+    const submitted = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    await releaseRun(releases);
+    const reviewed = await waitForCheckStatus(store, submitted.id, "action_required");
+    assert.equal(reviewed.reviewedHeadSha, submitted.headSha);
+
+    // The head has not moved, so the queue holds a settled job under this key.
+    const retried = await service.retryPullRequest(submitted.id);
+    assert.equal(retried.headSha, submitted.headSha);
+    assert.equal(retried.reviewedHeadSha, null);
+    assert.equal(retried.reviewer, null);
+    assert.deepEqual(retried.ci, []);
+    assert.deepEqual(retried.reasons, []);
+
+    await releaseRun(releases);
+    await waitForCheckStatus(store, submitted.id, "action_required");
+    assert.deepEqual(runs, [submitted.headSha, submitted.headSha]);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses to re-queue a merged local PR", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{
+        name: "unit",
+        command: "node",
+        args: ["--test"],
+        cwd: ".",
+        timeoutMs: 60_000,
+      }],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, { status: "merged" });
+    await assert.rejects(
+      () => service.retryPullRequest(pullRequest.id),
+      /Only an open local PR can be reviewed again/,
+    );
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

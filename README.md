@@ -51,6 +51,22 @@ revisor config path
 
 `guard-push` is an internal command used only by Revisor-managed Git hooks.
 
+## Pages
+
+`/` is the dashboard. It lists the open local pull requests first, then the
+registered projects. Selecting a pull request opens its detail: registered test
+outcomes, review state (reviewer, blocking reasons, advisories, leakage
+findings, open question), and the Anatomia diff analysis. A failed review can be
+re-queued against the branch heads as they stand at that moment.
+
+Advisories are reported without blocking a merge: a failed Anatomia
+`spec_linkage` gate, changed orphaned functions, and non-error architecture
+violations. Everything else — failed tests, leakage findings, error-severity
+violations, a material complexity drop, a missing target domain, any other
+Anatomia gate — still blocks.
+
+`/settings` holds every configuration form, including project registration.
+
 ## Settings and state
 
 The loopback UI configures:
@@ -90,6 +106,7 @@ POST /v1/local-prs
 GET  /v1/local-prs
 GET  /v1/local-prs/:id
 POST /v1/local-prs/:id/merge
+POST /v1/local-prs/:id/retry
 GET  /v1/test-workflow
 ```
 
