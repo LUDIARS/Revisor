@@ -8,7 +8,7 @@ runtime architecture.
 
 ## Components
 
-- `server.mjs` owns the loopback HTTP server and authenticated local API.
+- `server.mjs` owns the loopback-bound HTTP server and authenticated local API.
 - `local-contracts.mjs` validates repository, test-case, and PR inputs.
 - `state-store.mjs` atomically persists repository and local PR projections.
 - `local-pr-service.mjs` orchestrates registration, submission, and merge.
@@ -26,8 +26,12 @@ runtime architecture.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe
   outgoing `main` updates as `amend_required`.
 - `concordia-context.mjs` owns optional live and persisted author context.
-- `config.mjs` owns local settings and encrypted workflow-token persistence.
-- `ui-*.mjs` own the loopback-only workflow and settings surface.
+- `config.mjs` owns local settings plus encrypted workflow-token and
+  allowed-host persistence.
+- `host-policy.mjs` normalizes exact hostnames and authorizes loopback or
+  encrypted configured hosts.
+- `ui-*.mjs` own the workflow and settings surface exposed directly on
+  loopback or through a configured local reverse proxy.
 
 The queue concurrency and worker-process count use the same validated setting,
 so the queue never admits more runs than the pool can execute.
@@ -52,7 +56,8 @@ PRs in `Open / Test OK`.
   leakage scan finds a high-confidence match.
 - Repository code is inspected only at fixed local SHAs in disposable detached
   worktrees.
-- The workflow token is encrypted locally and never returned by the API.
+- The workflow token and configured external hostnames are encrypted locally;
+  the token is never returned by the API.
 
 ## Merge and push boundary
 

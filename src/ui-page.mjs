@@ -61,6 +61,11 @@ export function renderSettingsPage(sessionToken) {
         <input id="workflow-token" type="password" autocomplete="new-password">
         <span id="token-status" class="note"></span>
       </div>
+      <div class="field">
+        <label for="allowed-hosts">許可Host（Cloudflare Tunnel等、1行1件）</label>
+        <textarea id="allowed-hosts" placeholder="revisor.example.com"></textarea>
+        <span class="note">localhost / 127.0.0.1 / ::1 は常に許可されます。登録値は暗号化configへ保存し、保存直後から反映します。</span>
+      </div>
       <button type="submit">設定を保存</button>
       <p id="message" role="status"></p>
     </form>
@@ -132,6 +137,7 @@ export function renderSettingsPage(sessionToken) {
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
     document.querySelector('#concordia-context').checked = state.settings.concordiaContextEnabled;
+    document.querySelector('#allowed-hosts').value = state.allowedHosts.join('\\n');
     document.querySelector('#token-status').textContent = state.workflowTokenConfigured
       ? 'workflow token 設定済み'
       : 'workflow token 未設定';
@@ -233,6 +239,8 @@ export function renderSettingsPage(sessionToken) {
           workerCount: Number(document.querySelector('#worker-count').value),
           concordiaContextEnabled: document.querySelector('#concordia-context').checked,
           workflowToken: document.querySelector('#workflow-token').value,
+          allowedHosts: document.querySelector('#allowed-hosts').value
+            .split('\\n').map((host) => host.trim()).filter(Boolean),
         }),
       });
       document.querySelector('#workflow-token').value = '';

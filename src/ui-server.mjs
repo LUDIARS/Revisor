@@ -1,6 +1,8 @@
 import {
   hasWorkflowToken,
+  readAllowedHosts,
   readSettings,
+  writeAllowedHosts,
   writeWorkflowToken,
   writeSettings,
 } from "./config.mjs";
@@ -9,8 +11,9 @@ import {
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
+import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { renderSettingsPage } from "./ui-page.mjs";
-import { isAuthorizedSession, isLoopbackHost } from "./ui-security.mjs";
+import { isAllowedHost, isAuthorizedSession } from "./ui-security.mjs";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -50,9 +53,12 @@ export function createUiRequestHandler({
   queue,
   localPrService,
 }) {
+  let allowedHosts = readAllowedHosts(env);
   return async (request, response) => {
-    if (!isLoopbackHost(request.headers.host)) {
-      sendJson(response, 403, { error: "Loopback host required." });
+    if (!isAllowedHost(request.headers.host, allowedHosts)) {
+      sendJson(response, 403, {
+        error: "Host is not allowed. Configure it from a loopback address first.",
+      });
       return;
     }
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
@@ -92,6 +98,7 @@ export function createUiRequestHandler({
       if (request.method === "GET" && url.pathname === "/api/settings") {
         sendJson(response, 200, {
           settings: readSettings(env),
+          allowedHosts,
           workflowTokenConfigured: hasWorkflowToken(env),
         });
         return;
@@ -99,12 +106,19 @@ export function createUiRequestHandler({
       if (request.method === "PUT" && url.pathname === "/api/settings") {
         const body = await readJsonBody(request);
         await resolveAnatomiaCli(body.anatomiaFolder);
+        const nextAllowedHosts = body.allowedHosts === undefined
+          ? allowedHosts
+          : normalizeAllowedHosts(body.allowedHosts);
         const settings = writeSettings(body, env);
+        if (body.allowedHosts !== undefined) {
+          allowedHosts = writeAllowedHosts(nextAllowedHosts, env);
+        }
         if (typeof body.workflowToken === "string" && body.workflowToken.trim()) {
           writeWorkflowToken(body.workflowToken, env);
         }
         sendJson(response, 200, {
           settings,
+          allowedHosts,
           workflowTokenConfigured: hasWorkflowToken(env),
         });
         return;

@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { decryptString, encryptString, isEncryptedBlob } from "./crypto.mjs";
 import { RevisorError } from "./errors.mjs";
+import { normalizeAllowedHosts } from "./host-policy.mjs";
 
 const LOCAL_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CONFIG_PATH_ENV = "REVISOR_CONFIG_PATH";
@@ -185,4 +186,45 @@ export function hasWorkflowToken(env = process.env) {
   } catch {
     return false;
   }
+}
+
+export function readAllowedHosts(env = process.env) {
+  const configPath = resolveConfigPath(env);
+  const blob = readConfig(env).secrets.allowedHosts;
+  if (blob === undefined) return [];
+  if (!isEncryptedBlob(blob)) {
+    throw new RevisorError("Allowed hosts config is not encrypted.");
+  }
+  try {
+    const value = JSON.parse(decryptString(blob, readMasterKey(configPath, env)));
+    return normalizeAllowedHosts(value);
+  } catch (error) {
+    throw new RevisorError("Allowed hosts config could not be decrypted.", {
+      cause: error,
+    });
+  }
+}
+
+export function writeAllowedHosts(hosts, env = process.env) {
+  let normalized;
+  try {
+    normalized = normalizeAllowedHosts(hosts);
+  } catch (error) {
+    throw new RevisorError(
+      error instanceof Error ? error.message : "Allowed hosts are invalid.",
+      { cause: error },
+    );
+  }
+  const configPath = resolveConfigPath(env);
+  const config = readConfig(env);
+  if (normalized.length === 0) {
+    delete config.secrets.allowedHosts;
+  } else {
+    config.secrets.allowedHosts = encryptString(
+      JSON.stringify(normalized),
+      readOrCreateMasterKey(configPath, env),
+    );
+  }
+  writeConfig(config, env);
+  return readAllowedHosts(env);
 }

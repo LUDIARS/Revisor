@@ -60,6 +60,12 @@ The loopback UI configures:
 - one through eight worker processes;
 - optional Concordia context;
 - an encrypted local workflow API token.
+- encrypted allowed hostnames for Cloudflare Tunnel or another local reverse
+  proxy. Loopback hostnames remain permanently allowed.
+
+Configure a new external hostname from `http://127.0.0.1:<port>/` first. Host
+entries are exact, case-insensitive hostname matches; schemes and paths are not
+accepted. Changes apply to new requests immediately without restarting Revisor.
 
 Repository registrations, local PR status, CI outcome metadata, Anatomia
 projections, and push-guard status are stored in `revisor.state.json` beside

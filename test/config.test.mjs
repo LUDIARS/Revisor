@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  readAllowedHosts,
   readSettings,
   hasWorkflowToken,
   readWorkflowToken,
+  writeAllowedHosts,
   writeWorkflowToken,
   writeSettings,
 } from "../src/config.mjs";
@@ -23,7 +25,7 @@ function fixture() {
   };
 }
 
-test("stores settings and encrypts the local workflow token", () => {
+test("stores settings and encrypts local workflow secrets", () => {
   const state = fixture();
   try {
     assert.deepEqual(readSettings(state.env), {
@@ -39,10 +41,32 @@ test("stores settings and encrypts the local workflow token", () => {
       workerCount: 3,
     }, state.env);
     writeWorkflowToken("workflow-secret", state.env);
+    assert.deepEqual(writeAllowedHosts([
+      "Revisor.Example.com",
+      "revisor.example.com:443",
+    ], state.env), ["revisor.example.com"]);
     assert.equal(readWorkflowToken(state.env), "workflow-secret");
+    assert.deepEqual(readAllowedHosts(state.env), ["revisor.example.com"]);
     assert.equal(hasWorkflowToken(state.env), true);
-    assert.equal(readFileSync(state.path, "utf8").includes("workflow-secret"), false);
+    const rawConfig = readFileSync(state.path, "utf8");
+    assert.equal(rawConfig.includes("workflow-secret"), false);
+    assert.equal(rawConfig.includes("revisor.example.com"), false);
     assert.equal(readSettings(state.env).workerCount, 3);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("validates configured allowed hosts and permits clearing them", () => {
+  const state = fixture();
+  try {
+    assert.throws(
+      () => writeAllowedHosts(["https://revisor.example.com"], state.env),
+      /Allowed host is invalid/,
+    );
+    writeAllowedHosts(["revisor.example.com"], state.env);
+    assert.deepEqual(writeAllowedHosts([], state.env), []);
+    assert.deepEqual(readAllowedHosts(state.env), []);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }
