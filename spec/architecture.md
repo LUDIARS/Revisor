@@ -98,10 +98,13 @@ never treated as a pass.
 
 ## Failure policy
 
-Missing configuration, missing test cases, dirty submitted worktrees, changed
-SHAs, failed tests, and blocking Anatomia gates fail explicitly. Worker crashes
-fail their active job and cause pool replacement. Shutdown rejects waiting work
-and terminates owned processes.
+Missing configuration, missing test cases, submitted worktrees carrying tracked
+modifications, changed SHAs, failed tests, and blocking Anatomia gates fail
+explicitly. Worktree cleanliness considers tracked changes only: untracked files
+enter neither a review, which reads a fixed SHA in a disposable worktree, nor a
+fast-forward, which Git aborts rather than overwriting them. Worker crashes fail
+their active job and cause pool replacement. Shutdown rejects waiting work and
+terminates owned processes.
 
 Every disposable worktree is removed on normal and exceptional paths. Unsafe
 reviewer changes are discarded before commit or local branch advancement.

@@ -279,3 +279,106 @@ test("refuses to re-queue a merged local PR", async () => {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
+
+async function registeredService(fixture, store) {
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  await service.registerRepository({
+    repository: "LUDIARS/Product",
+    rootPath: fixture.repoPath,
+    baseRef: "main",
+    testCases: [{
+      name: "unit",
+      command: "node",
+      args: ["--test"],
+      cwd: ".",
+      timeoutMs: 60_000,
+    }],
+  });
+  return service;
+}
+
+function submission() {
+  return {
+    repository: "LUDIARS/Product",
+    title: "Add product feature",
+    body: "",
+    author: "neco",
+    headRef: "feat/local",
+  };
+}
+
+async function readyToMerge(fixture, store) {
+  const service = await registeredService(fixture, store);
+  const pullRequest = await service.submitPullRequest(submission());
+  store.updatePullRequest(pullRequest.id, {
+    checkStatus: "test_ok",
+    reviewedHeadSha: git(fixture.repoPath, "rev-parse", "feat/local"),
+  });
+  return { service, pullRequest };
+}
+
+test("submits while untracked files sit in the head worktree", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const service = await registeredService(fixture, store);
+    git(fixture.repoPath, "checkout", "feat/local");
+    writeFileSync(join(fixture.repoPath, "local-notes.txt"), "scratch\n", "utf8");
+    const pullRequest = await service.submitPullRequest(submission());
+    assert.equal(
+      pullRequest.headSha,
+      git(fixture.repoPath, "rev-parse", "feat/local"),
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses to submit a head worktree carrying tracked modifications", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const service = await registeredService(fixture, store);
+    git(fixture.repoPath, "checkout", "feat/local");
+    writeFileSync(join(fixture.repoPath, "product.txt"), "base\nfeature\nlocal edit\n", "utf8");
+    await assert.rejects(
+      () => service.submitPullRequest(submission()),
+      /head branch worktree has uncommitted changes/,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("merges while untracked files sit in the base worktree", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const { service, pullRequest } = await readyToMerge(fixture, store);
+    writeFileSync(join(fixture.repoPath, "local-notes.txt"), "scratch\n", "utf8");
+    const merged = await service.mergePullRequest(pullRequest.id);
+    assert.equal(merged.status, "merged");
+    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses to advance a base branch carrying tracked modifications", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const { service, pullRequest } = await readyToMerge(fixture, store);
+    writeFileSync(join(fixture.repoPath, "product.txt"), "base\nlocal edit\n", "utf8");
+    await assert.rejects(
+      () => service.mergePullRequest(pullRequest.id),
+      /worktree is no longer clean/,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});

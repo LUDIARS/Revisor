@@ -33,6 +33,14 @@ function parseWorktreeList(output) {
     .filter((record) => typeof record.worktree === "string");
 }
 
+// Only tracked changes count as dirty, for both callers. A review reads a fixed
+// SHA in a disposable worktree, so an untracked scratch file can never reach it;
+// and a fast-forward ignores untracked files that do not collide, while Git
+// itself aborts one that would overwrite them.
+async function trackedChanges(worktreePath) {
+  return git(worktreePath, ["status", "--porcelain", "--untracked-files=no"]);
+}
+
 async function branchWorktree(repoPath, ref) {
   const branch = `refs/heads/${ref}`;
   const records = parseWorktreeList(await git(repoPath, ["worktree", "list", "--porcelain"]));
@@ -48,7 +56,7 @@ export async function inspectLocalPullRequest(repoPath, headRef, baseRef) {
   if (headSha === baseSha) throw new Error("The local PR has no commits to review.");
   const checkedOutAt = await branchWorktree(repoPath, headRef);
   if (checkedOutAt) {
-    const status = await git(checkedOutAt, ["status", "--porcelain"]);
+    const status = await trackedChanges(checkedOutAt);
     if (status) {
       throw new Error(
         `The head branch worktree has uncommitted changes: ${checkedOutAt}`,
@@ -115,7 +123,7 @@ export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha) {
     ]);
     return nextSha;
   }
-  const status = await git(checkedOutAt, ["status", "--porcelain"]);
+  const status = await trackedChanges(checkedOutAt);
   if (status) {
     throw new Error(`Cannot advance '${ref}'; its worktree is no longer clean.`);
   }
