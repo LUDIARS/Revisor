@@ -143,7 +143,10 @@ export async function startRevisor({
     concurrency: settings.workerCount,
     reporter,
   });
-  const localPrService = createLocalPrService({ store, queue });
+  // `env` has to reach the service: the pre-merge security scan resolves its
+  // settings from it, and a service left on process.env would scan under a
+  // different configuration than the one /api/settings reads and writes.
+  const localPrService = createLocalPrService({ store, queue, env });
   const sessionToken = randomBytes(24).toString("base64url");
   const server = createServer(createRequestHandler({
     env,

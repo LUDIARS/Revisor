@@ -21,24 +21,38 @@ leaves the workstation.
    title, body, author, base/head refs, and exact SHAs. It never fetches or
    pushes the feature branch.
 3. A disposable detached worktree runs every registered test, leakage scan,
-   and temporary Anatomia PR analysis.
+   temporary Anatomia PR analysis, and — when the leakage scan and tests
+   pass — one Codex Security scan of the committed PR diff.
 4. If the first scan and CI pass, the opposite-provider reviewer may apply
    scoped fixes. Revisor scans and tests the result again before advancing the
    local head branch.
 5. The UI exposes PR state, per-test outcomes, Anatomia data and complexity
    score delta. Only passing open PRs appear in the test workflow as
    `Open / Test OK`.
-6. Revisor creates one squash commit and fast-forwards the local base branch.
-   It does not push.
+6. Revisor creates one squash commit, runs the final Codex Security scan against
+   the exact squashed diff, and fast-forwards the local base branch. It does not
+   push.
+
+The Codex Security scan runs once per review pass and once right before the
+squash merge. It never re-runs after the opposite-provider autofix; the
+pre-merge scan covers those edits. Findings at or above the configured severity
+block, and an incomplete or failed scan also blocks instead of reading as a
+pass. Scan report artifacts are deleted after each run.
 
 Matched leakage values and test output are not stored. Findings contain only a
-rule, file path, and line number.
+rule, file path, and line number; Codex Security findings additionally keep
+their severity, but never source excerpts or reproduction steps.
 
 ## Requirements
 
 - Node.js 22.5 or newer
 - Git
 - authenticated `codex` and `claude` CLIs
+- the `codex-security` CLI (`npm install -g @openai/codex-security`) signed in
+  to a ChatGPT/Codex subscription, unless the security scan is disabled in the
+  settings. Revisor pins the scan to `--auth chatgpt`, so an `OPENAI_API_KEY` or
+  `CODEX_API_KEY` in the environment never silently switches it to metered API
+  billing — and never substitutes for the sign-in.
 - an existing Anatomia checkout
 - an Excubitor catalog registration when using `revisor serve`
 
@@ -73,6 +87,9 @@ The loopback UI configures:
 
 - the existing Anatomia folder;
 - fallback reviewer (`Codex Sol` or `Claude Opus`);
+- the Codex Security scan: enabled or not, the blocking severity threshold
+  (`critical`/`high`/`medium`/`low`, default `high`), and a per-scan USD cost
+  cap;
 - one through eight worker processes;
 - optional Concordia context;
 - an encrypted local workflow API token.

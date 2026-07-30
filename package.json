@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/cli.mjs && node --check src/server.mjs && node --check src/ui-server.mjs && node --check src/ui-layout.mjs && node --check src/ui-client-request.mjs && node --check src/ui-dashboard-page.mjs && node --check src/ui-settings-page.mjs && node --check src/config.mjs && node --check src/host-policy.mjs && node --check src/runner.mjs && node --check src/review-gate.mjs && node --check src/local-pr-service.mjs && node --check src/local-merge.mjs && node --check src/push-guard.mjs && node --check src/state-store.mjs && node --check src/leakage.mjs",
+    "check": "node --check src/cli.mjs && node --check src/server.mjs && node --check src/ui-server.mjs && node --check src/ui-layout.mjs && node --check src/ui-client-request.mjs && node --check src/ui-dashboard-page.mjs && node --check src/ui-settings-page.mjs && node --check src/config.mjs && node --check src/host-policy.mjs && node --check src/runner.mjs && node --check src/review-gate.mjs && node --check src/local-pr-service.mjs && node --check src/local-merge.mjs && node --check src/push-guard.mjs && node --check src/state-store.mjs && node --check src/leakage.mjs && node --check src/security-scan.mjs",
     "start": "node src/cli.mjs serve"
   },
   "engines": {

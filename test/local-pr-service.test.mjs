@@ -74,6 +74,16 @@ function repositoryFixture() {
   return { directory, repoPath, baseSha };
 }
 
+function passingSecurityScan() {
+  return async () => ({
+    status: "passed",
+    reason: null,
+    failOnSeverity: "high",
+    totalFindings: 0,
+    findings: [],
+  });
+}
+
 test("registers tests, queues a local-only PR, and squash merges it", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
@@ -87,6 +97,7 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
       },
     },
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    securityScan: passingSecurityScan(),
   });
   try {
     await service.registerRepository({
@@ -284,11 +295,12 @@ test("refuses to re-queue a merged local PR", async () => {
   }
 });
 
-async function registeredService(fixture, store) {
+async function registeredService(fixture, store, securityScan = passingSecurityScan()) {
   const service = new LocalPrService({
     store,
     queue: { async submit() { return { id: "job-1" }; } },
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    securityScan,
   });
   await service.registerRepository({
     repository: "LUDIARS/Product",
@@ -315,8 +327,8 @@ function submission() {
   };
 }
 
-async function readyToMerge(fixture, store) {
-  const service = await registeredService(fixture, store);
+async function readyToMerge(fixture, store, securityScan = passingSecurityScan()) {
+  const service = await registeredService(fixture, store, securityScan);
   const pullRequest = await service.submitPullRequest(submission());
   store.updatePullRequest(pullRequest.id, {
     checkStatus: "test_ok",
@@ -367,6 +379,71 @@ test("merges while untracked files sit in the base worktree", async () => {
     const merged = await service.mergePullRequest(pullRequest.id);
     assert.equal(merged.status, "merged");
     assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("blocks the squash merge on pre-merge security findings", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const scanned = [];
+  try {
+    const { service, pullRequest } = await readyToMerge(fixture, store, async (target) => {
+      scanned.push(target);
+      return {
+        status: "findings",
+        reason: null,
+        failOnSeverity: "high",
+        totalFindings: 2,
+        findings: [],
+      };
+    });
+    await assert.rejects(
+      () => service.mergePullRequest(pullRequest.id),
+      /Merge blocked: 2 security finding\(s\) at or above 'high'/,
+    );
+    assert.equal(scanned.length, 1);
+    assert.equal(scanned[0].diffBase, fixture.baseSha);
+    assert.equal(git(fixture.repoPath, "rev-parse", "main"), fixture.baseSha);
+    assert.equal(store.getPullRequest(pullRequest.id).status, "open");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("blocks the squash merge when the pre-merge security scan is incomplete", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const { service, pullRequest } = await readyToMerge(fixture, store, async () => ({
+      status: "error",
+      reason: "codex-security exited with code 2",
+      failOnSeverity: "high",
+      totalFindings: 0,
+      findings: [],
+    }));
+    await assert.rejects(
+      () => service.mergePullRequest(pullRequest.id),
+      /pre-merge security scan did not complete/,
+    );
+    assert.equal(git(fixture.repoPath, "rev-parse", "main"), fixture.baseSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("blocks the squash merge when the pre-merge scan returns no usable result", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const { service, pullRequest } = await readyToMerge(fixture, store, async () => undefined);
+    await assert.rejects(
+      () => service.mergePullRequest(pullRequest.id),
+      /produced no usable result/,
+    );
+    assert.equal(git(fixture.repoPath, "rev-parse", "main"), fixture.baseSha);
+    assert.equal(store.getPullRequest(pullRequest.id).status, "open");
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

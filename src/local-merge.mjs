@@ -1,6 +1,8 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readSettings } from "./config.mjs";
+import { runSecurityScan } from "./security-scan.mjs";
 import {
   advanceLocalBranch,
   cleanupWorktrees,
@@ -17,9 +19,42 @@ function commitMessage(pullRequest) {
   ];
 }
 
+// The default pre-merge scan resolves settings itself, so an injected stub
+// never has to touch the on-disk Revisor configuration.
+async function configuredSecurityScan({ worktreePath, diffBase, env }) {
+  return runSecurityScan({ worktreePath, diffBase, settings: readSettings(env) });
+}
+
+// Runs after the squash commit exists in the integration worktree and before
+// the base branch advances, so the exact bytes about to land are scanned.
+async function assertMergeSecurityScan({ worktreePath, baseSha, env, scan }) {
+  const security = await scan({ worktreePath, diffBase: baseSha, env }) ?? {};
+  if (security.status === "findings") {
+    throw new Error(
+      `Merge blocked: ${security.totalFindings} security finding(s) at or above `
+      + `'${security.failOnSeverity}'`
+      + (security.reason ? ` (${security.reason})` : "")
+      + ". Fix them and submit a new review.",
+    );
+  }
+  if (security.status === "error") {
+    throw new Error(
+      `Merge blocked: the pre-merge security scan did not complete (${security.reason}).`,
+    );
+  }
+  // Only a pass or a deliberate skip may advance the base ref. An absent or
+  // unrecognised result is not a pass, and this is the last check before the
+  // local base branch moves.
+  if (security.status !== "passed" && security.status !== "skipped") {
+    throw new Error("Merge blocked: the pre-merge security scan produced no usable result.");
+  }
+}
+
 export async function squashMergeLocalPullRequest({
   repository,
   pullRequest,
+  env = process.env,
+  scan = configuredSecurityScan,
 }) {
   if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
     throw new Error("Only an Open / Test OK local PR can be squash merged.");
@@ -60,6 +95,12 @@ export async function squashMergeLocalPullRequest({
       ...commitMessage(pullRequest),
     ]);
     const mergeCommitSha = await git(worktrees.head, ["rev-parse", "HEAD"]);
+    await assertMergeSecurityScan({
+      worktreePath: worktrees.head,
+      baseSha,
+      env,
+      scan,
+    });
     await advanceLocalBranch(
       repository.rootPath,
       pullRequest.baseRef,

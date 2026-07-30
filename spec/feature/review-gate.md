@@ -1,13 +1,14 @@
 ---
 type: feature
 title: "review-gate — マージ可否判定ポリシー"
-description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。docs-only 変更は対象ドメイン欠如を advisory に緩和し、ドメインレビュー自体は維持する。"
+description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。docs-only 変更は対象ドメイン欠如を advisory に緩和し、ドメインレビュー自体は維持する。セキュリティスキャンの所見と未完了はブロックする。"
 service: revisor
 domain: review-gate
 tags:
   - merge-gate
   - policy
   - docs-only
+  - security-scan
 status: implemented
 related:
   - ../architecture.md
@@ -17,8 +18,8 @@ updated: 2026-07-30
 # review-gate — マージ可否判定ポリシー
 
 `src/review-gate.mjs` が正本。審査 1 回分の材料 (CI 結果・Anatomia 最終解析・
-complexity 差分・レビュアー出力・leakage スキャン) を受け取り、
-**reasons (マージブロック)** と **advisories (表示のみ)** に振り分ける。
+complexity 差分・レビュアー出力・leakage スキャン・セキュリティスキャン結果) を
+受け取り、**reasons (マージブロック)** と **advisories (表示のみ)** に振り分ける。
 
 ## ブロック条件 (reasons)
 
@@ -29,6 +30,10 @@ complexity 差分・レビュアー出力・leakage スキャン) を受け取�
 - complexity スコアの閾値超過低下
 - レビュアーの `PR_GATE_NEEDS_HUMAN` 報告
 - 情報流出所見
+- 設定 severity 以上のセキュリティ finding (`status: "findings"`)
+- セキュリティスキャンの未完了 (`status: "error"`) — 未完了を合格として読ませない
+- 解釈できないセキュリティスキャン結果 (既知 status 以外) — 判定不能を合格として
+  読ませない
 
 ## advisory 条件 (非ブロック)
 
@@ -36,6 +41,7 @@ complexity 差分・レビュアー出力・leakage スキャン) を受け取�
 - 孤立関数 (orphan)
 - error 未満のアーキテクチャ違反
 - **docs-only 変更の対象ドメイン欠如**
+- 設定無効 (`disabled by settings`) 以外の理由でスキップされたセキュリティスキャン
 
 ## docs-only 緩和 (neco 決定 2026-07-30)
 
@@ -58,3 +64,26 @@ complexity 差分・レビュアー出力・leakage スキャン) を受け取�
 - 維持されるもの: 相互モデルレビューは docs-only でも実行する (仕様と記述の
   整合性チェック)。`PR_GATE_NEEDS_HUMAN`・登録テスト・leakage・他ゲートの
   ブロックは不変。
+
+## セキュリティスキャン結果の扱い
+
+`src/security-scan.mjs` (`codex-security`) の結果を `security` として受け取る。
+判定は status のみで決まり、ゲートはスキャナを起動しない。
+
+- `findings`: `totalFindings` 件と閾値 `failOnSeverity` を reasons に記録する。
+  `totalFindings` は閾値以上の finding だけを数える (レポートが閾値未満の
+  finding も併記しうるため)。順序が定義できない severity は比較不能なので
+  除外せず数える。件数が下限値 1 になる場合は測定値と区別するため `reason` を
+  併記する: レポートが読めなかったときは `the scan report could not be read`、
+  読めたが閾値以上の finding が無かったときは
+  `the scan report listed no finding at or above the threshold`。
+- `error`: スキャン未完了を reasons に記録する。理由は終了コードのみで、
+  スキャン対象を引用しうる stderr は保持しない。
+- `skipped`: 設定無効 (`disabled by settings`) のときは無音。leakage ゲートや
+  登録テストが既にブロックしているためのスキップは advisory
+  (ブロック理由は既に別途記録済み)。
+- 未指定 (`undefined`): runner は常に結果を渡すため、判定材料としては扱わない。
+- 既知 status 以外 (`passed`/`findings`/`error`/`skipped` のいずれでもない):
+  合格と読めないためブロックする (`the security scan produced no usable result`)。
+  マージ直前の `assertMergeSecurityScan` と同じ fail-closed 規則で、審査時点と
+  マージ時点の判定が食い違わないようにする。

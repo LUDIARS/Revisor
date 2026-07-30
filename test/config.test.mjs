@@ -33,13 +33,22 @@ test("stores settings and encrypts local workflow secrets", () => {
       fallbackReviewer: "codex-sol",
       concordiaContextEnabled: true,
       workerCount: 1,
+      securityScanEnabled: true,
+      securityFailOnSeverity: "high",
+      securityMaxCostUsd: 5,
     });
     writeSettings({
       anatomiaFolder: "E:/Document/Ars/Anatomia",
       fallbackReviewer: "claude-opus",
       concordiaContextEnabled: false,
       workerCount: 3,
+      securityScanEnabled: false,
+      securityFailOnSeverity: "medium",
+      securityMaxCostUsd: 2.5,
     }, state.env);
+    assert.deepEqual(readSettings(state.env).securityScanEnabled, false);
+    assert.equal(readSettings(state.env).securityFailOnSeverity, "medium");
+    assert.equal(readSettings(state.env).securityMaxCostUsd, 2.5);
     writeWorkflowToken("workflow-secret", state.env);
     assert.deepEqual(writeAllowedHosts([
       "Revisor.Example.com",
@@ -81,6 +90,32 @@ test("rejects invalid worker settings", () => {
       concordiaContextEnabled: true,
       workerCount: 0,
     }, state.env), /Worker count/);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects invalid security scan settings and defaults omitted ones", () => {
+  const state = fixture();
+  const valid = {
+    anatomiaFolder: "Anatomia",
+    fallbackReviewer: "codex-sol",
+    concordiaContextEnabled: true,
+    workerCount: 1,
+  };
+  try {
+    assert.throws(
+      () => writeSettings({ ...valid, securityFailOnSeverity: "urgent" }, state.env),
+      /Security severity/,
+    );
+    assert.throws(
+      () => writeSettings({ ...valid, securityMaxCostUsd: 0 }, state.env),
+      /Security scan max cost/,
+    );
+    const written = writeSettings(valid, state.env);
+    assert.equal(written.securityScanEnabled, true);
+    assert.equal(written.securityFailOnSeverity, "high");
+    assert.equal(written.securityMaxCostUsd, 5);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

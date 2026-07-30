@@ -1,6 +1,6 @@
 {
   "name": "review-gate",
-  "description": "ローカル PR のマージ可否判定ポリシー。CI・Anatomia ゲート・leakage・complexity・レビュアー出力を集約して reasons (ブロック) / advisories (非ブロック) に振り分ける。docs-only 変更の対象ドメイン欠如は advisory に緩和し、ドメインレビュー自体は維持する。",
+  "description": "ローカル PR のマージ可否判定ポリシー。CI・Anatomia ゲート・leakage・セキュリティスキャン・complexity・レビュアー出力を集約して reasons (ブロック) / advisories (非ブロック) に振り分ける。docs-only 変更の対象ドメイン欠如は advisory に緩和し、ドメインレビュー自体は維持する。セキュリティ finding・未完了スキャン・解釈できないスキャン結果はブロックし、設定無効以外のスキップは advisory とする。",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -20,16 +20,20 @@
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the \"review-gate\" domain: ローカル PR のマージ可否判定ポリシー (gate/advisory 判定・docs-only 緩和)。",
+  "cardTemplate": "Summarise the \"review-gate\" domain: ローカル PR のマージ可否判定ポリシー (gate/advisory 判定・docs-only 緩和・セキュリティスキャン結果の扱い)。",
   "source": "spec-draft",
   "mechanics": [
     "merge-gate-policy",
-    "docs-only-relaxation"
+    "docs-only-relaxation",
+    "security-scan-outcome"
   ],
   "specRefs": [
     "review-gate — マージ可否判定ポリシー / ブロックと advisory の振り分け",
-    "review-gate — docs-only 変更の対象ドメイン緩和 (neco 2026-07-30)"
+    "review-gate — docs-only 変更の対象ドメイン緩和 (neco 2026-07-30)",
+    "review-gate — セキュリティスキャン結果の扱い (findings/error はブロック、skipped は advisory)",
+    "review-gate — 解釈できないスキャン結果の fail-closed (既知 status 以外はブロック)",
+    "security-scan — codex-security スキャンの起動と結果の正規化 (終了コード→status、保持は severity/rule/file/line のみ)"
   ],
-  "rationale": "マージ可否の判定基準は runner (審査オーケストレーション) から独立した単一のポリシー責務。gateOutcome / needsTargetDomain を正本とし、レビュアープロンプト・humanQuestion も同じ判定を共有する。",
-  "updatedAt": "2026-07-30T02:30:00.000Z"
+  "rationale": "マージ可否の判定基準は runner (審査オーケストレーション) から独立した単一のポリシー責務。gateOutcome / needsTargetDomain を正本とし、レビュアープロンプト・humanQuestion も同じ判定を共有する。スキャナの起動は security-scan が担い、ゲートは status のみを解釈する。",
+  "updatedAt": "2026-07-30T07:20:00.000Z"
 }

@@ -16,12 +16,17 @@ const CONFIG_PATH_ENV = "REVISOR_CONFIG_PATH";
 const KEY_PATH_ENV = "REVISOR_KEY_PATH";
 const MASTER_KEY_ENV = "REVISOR_MASTER_KEY";
 
+const SECURITY_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
+
 function defaults() {
   return {
     anatomiaFolder: "",
     fallbackReviewer: "codex-sol",
     concordiaContextEnabled: true,
     workerCount: 1,
+    securityScanEnabled: true,
+    securityFailOnSeverity: "high",
+    securityMaxCostUsd: 5,
   };
 }
 
@@ -120,6 +125,14 @@ export function readSettings(env = process.env) {
       && value.workerCount <= 8
       ? value.workerCount
       : base.workerCount,
+    securityScanEnabled: value.securityScanEnabled !== false,
+    securityFailOnSeverity: SECURITY_SEVERITIES.has(value.securityFailOnSeverity)
+      ? value.securityFailOnSeverity
+      : base.securityFailOnSeverity,
+    securityMaxCostUsd: Number.isFinite(value.securityMaxCostUsd)
+      && value.securityMaxCostUsd > 0
+      ? value.securityMaxCostUsd
+      : base.securityMaxCostUsd,
   };
 }
 
@@ -138,12 +151,28 @@ export function writeSettings(settings, env = process.env) {
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > 8) {
     throw new RevisorError("Worker count must be an integer from 1 to 8.");
   }
+  const securityFailOnSeverity = settings.securityFailOnSeverity
+    ?? defaults().securityFailOnSeverity;
+  if (!SECURITY_SEVERITIES.has(securityFailOnSeverity)) {
+    throw new RevisorError(
+      "Security severity must be one of: critical, high, medium, low.",
+    );
+  }
+  const securityMaxCostUsd = settings.securityMaxCostUsd === undefined
+    ? defaults().securityMaxCostUsd
+    : Number(settings.securityMaxCostUsd);
+  if (!Number.isFinite(securityMaxCostUsd) || securityMaxCostUsd <= 0) {
+    throw new RevisorError("Security scan max cost must be a positive USD amount.");
+  }
   const config = readConfig(env);
   config.settings = {
     anatomiaFolder,
     fallbackReviewer: settings.fallbackReviewer,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,
+    securityScanEnabled: settings.securityScanEnabled !== false,
+    securityFailOnSeverity,
+    securityMaxCostUsd,
   };
   writeConfig(config, env);
   return readSettings(env);

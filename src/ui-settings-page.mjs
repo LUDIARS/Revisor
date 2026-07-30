@@ -27,6 +27,26 @@ const BODY = `
         </label>
       </div>
       <div class="field">
+        <label class="check">
+          <input id="security-scan-enabled" type="checkbox">
+          Codex Security スキャンを実行する（初回レビュー時とマージ直前のみ）
+        </label>
+        <span class="note">codex-security CLI（npm i -g @openai/codex-security）と ChatGPT/Codex サブスクリプションのサインインが必要です。スキャンは --auth chatgpt 固定で、OPENAI_API_KEY 等による従量課金へは切り替わりません。</span>
+      </div>
+      <div class="field">
+        <label for="security-severity">セキュリティ finding のブロック閾値</label>
+        <select id="security-severity">
+          <option value="critical">critical</option>
+          <option value="high">high</option>
+          <option value="medium">medium</option>
+          <option value="low">low</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="security-max-cost">スキャン1回あたりの上限コスト（USD）</label>
+        <input id="security-max-cost" type="number" min="0.5" step="0.5" required>
+      </div>
+      <div class="field">
         <label for="workflow-token">ローカル workflow API token（変更時のみ入力）</label>
         <input id="workflow-token" type="password" autocomplete="new-password">
         <span id="token-status" class="note"></span>
@@ -80,6 +100,9 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
     document.querySelector('#concordia-context').checked = state.settings.concordiaContextEnabled;
+    document.querySelector('#security-scan-enabled').checked = state.settings.securityScanEnabled;
+    document.querySelector('#security-severity').value = state.settings.securityFailOnSeverity;
+    document.querySelector('#security-max-cost').value = String(state.settings.securityMaxCostUsd);
     document.querySelector('#allowed-hosts').value = state.allowedHosts.join('\\n');
     document.querySelector('#token-status').textContent = state.workflowTokenConfigured
       ? 'workflow token 設定済み'
@@ -112,6 +135,9 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
           workerCount: Number(document.querySelector('#worker-count').value),
           concordiaContextEnabled: document.querySelector('#concordia-context').checked,
+          securityScanEnabled: document.querySelector('#security-scan-enabled').checked,
+          securityFailOnSeverity: document.querySelector('#security-severity').value,
+          securityMaxCostUsd: Number(document.querySelector('#security-max-cost').value),
           workflowToken: document.querySelector('#workflow-token').value,
           allowedHosts: document.querySelector('#allowed-hosts').value
             .split('\\n').map((host) => host.trim()).filter(Boolean),

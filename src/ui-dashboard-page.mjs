@@ -179,6 +179,13 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     definition(list, '流出スキャン', pr.leakage
       ? (pr.leakage.totalFindings + ' 件 / 追加 ' + pr.leakage.scannedAddedLines + ' 行を検査')
       : '未実施');
+    definition(list, 'セキュリティスキャン', pr.security
+      ? (pr.security.status === 'skipped'
+        ? 'スキップ: ' + pr.security.reason
+        : pr.security.status + ' / ' + pr.security.totalFindings + ' 件 (閾値 '
+          + pr.security.failOnSeverity + ')'
+          + (pr.security.reason ? ' — ' + pr.security.reason : ''))
+      : '未実施');
     if (pr.error) definition(list, 'エラー', pr.error);
     if (pr.humanQuestion) definition(list, '人間への確認', pr.humanQuestion);
     wrapper.append(list);
@@ -187,6 +194,13 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     const findings = (pr.leakage && pr.leakage.findings || [])
       .map((finding) => finding.rule + '  ' + finding.path + ':' + finding.line);
     wrapper.append(block('流出候補', listOf(findings, '流出候補はありません。')));
+    const securityFindings = (pr.security && pr.security.findings || [])
+      .map((finding) => '[' + finding.severity + '] ' + finding.rule + '  '
+        + finding.file + (finding.line === null ? '' : ':' + finding.line));
+    wrapper.append(block(
+      'セキュリティ finding',
+      listOf(securityFindings, 'セキュリティ finding はありません。'),
+    ));
     return wrapper;
   }
 

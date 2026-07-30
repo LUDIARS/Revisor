@@ -9,6 +9,7 @@ import {
 import { readSettings } from "./config.mjs";
 import { runRegisteredTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
+import { runSecurityScan, skippedSecurityScan } from "./security-scan.mjs";
 import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
 import { gateOutcome, isDocsOnlyChange, needsTargetDomain } from "./review-gate.mjs";
 import {
@@ -116,6 +117,7 @@ function buildGateResult({
   leakage,
   ci,
   docsOnly = false,
+  security,
 }) {
   const complexityScoreDelta =
     finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
@@ -127,6 +129,7 @@ function buildGateResult({
     leakage,
     ci,
     docsOnly,
+    security,
   });
   return {
     conclusion: reasons.length === 0 ? "success" : "action_required",
@@ -148,9 +151,24 @@ function buildGateResult({
     initialLeakage,
     leakage,
     ci,
+    security,
     reasons,
     advisories,
   };
+}
+
+// The security scan runs once per review pass and once right before the squash
+// merge — never after the reviewer autofix, which the pre-merge scan covers. It
+// is skipped while the leakage gate or the registered tests already block, so no
+// potentially leaking diff reaches the scanner and no scan cost is wasted.
+async function reviewSecurityScan({ runSecurity, worktrees, leakage, ci, settings }) {
+  if (leakage.totalFindings > 0) return skippedSecurityScan("blocked by the leakage scan");
+  if (!testsPassed(ci)) return skippedSecurityScan("registered tests failed");
+  return runSecurity({
+    worktreePath: worktrees.head,
+    diffBase: worktrees.mergeBase,
+    settings,
+  });
 }
 
 async function readUnifiedDiff(cwd, mergeBase) {
@@ -187,6 +205,7 @@ export function createPrReviewRunner({
   reviewerTimeoutMs = 30 * 60_000,
   complexityDropThreshold = 10,
   runReview = runReviewer,
+  runSecurity = runSecurityScan,
   transport = fetch,
 } = {}) {
   return async (request) => {
@@ -226,6 +245,13 @@ export function createPrReviewRunner({
         testCases: request.testCases,
         env,
       });
+      const initialSecurity = await reviewSecurityScan({
+        runSecurity,
+        worktrees,
+        leakage: initialLeakage,
+        ci: initialCi,
+        settings,
+      });
       if (request.reviewMode === "verification") {
         return {
           ...buildGateResult({
@@ -241,6 +267,7 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
+            security: initialSecurity,
           }),
           humanQuestion: needsTargetDomain(initial, docsOnly)
             ? targetDomainQuestion(request.repository, request.number)
@@ -262,6 +289,7 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
+            security: initialSecurity,
           }),
           humanQuestion: "Registered tests must pass before automated review.",
         };
@@ -304,6 +332,7 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
+            security: initialSecurity,
           }),
           humanQuestion: "Potential information leakage must be removed before automated review.",
         };
@@ -373,6 +402,7 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: finalCi,
             docsOnly,
+            security: initialSecurity,
           }),
           humanQuestion: "Reviewer changes were discarded because registered tests failed.",
         };
@@ -407,6 +437,7 @@ export function createPrReviewRunner({
           leakage: finalLeakage,
           ci: finalCi,
           docsOnly: finalDocsOnly,
+          security: initialSecurity,
         }),
         humanQuestion: needsHuman
           ? targetDomainQuestion(request.repository, request.number)

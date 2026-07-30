@@ -149,3 +149,45 @@ test("needsTargetDomain follows the docs-only relaxation", () => {
   assert.equal(needsTargetDomain(withDomain), false);
   assert.equal(needsTargetDomain(withDomain, true), false);
 });
+
+test("blocks on security findings and on an incomplete security scan", () => {
+  const findings = evaluate(analysis(), {
+    security: { status: "findings", totalFindings: 3, failOnSeverity: "high" },
+  });
+  assert.deepEqual(findings.reasons, ["3 security finding(s) at or above 'high'"]);
+  const incomplete = evaluate(analysis(), {
+    security: { status: "error", reason: "codex-security exited with code 2" },
+  });
+  assert.deepEqual(incomplete.reasons, [
+    "the security scan did not complete: codex-security exited with code 2",
+  ]);
+});
+
+test("treats a skipped security scan as advisory and a disabled one as silent", () => {
+  const skipped = evaluate(analysis(), {
+    security: { status: "skipped", reason: "registered tests failed" },
+  });
+  assert.deepEqual(skipped.reasons, []);
+  assert.deepEqual(skipped.advisories, [
+    "security scan skipped: registered tests failed",
+  ]);
+  const disabled = evaluate(analysis(), {
+    security: { status: "skipped", reason: "disabled by settings" },
+  });
+  assert.deepEqual(disabled.reasons, []);
+  assert.deepEqual(disabled.advisories, []);
+  const passed = evaluate(analysis(), {
+    security: { status: "passed", totalFindings: 0, failOnSeverity: "high" },
+  });
+  assert.deepEqual(passed.reasons, []);
+  assert.deepEqual(passed.advisories, []);
+});
+
+test("blocks on a security result the policy cannot read", () => {
+  // Same fail-closed rule as the pre-merge check, so a status the gate does not
+  // know cannot pass here and then block at merge time.
+  const unknown = evaluate(analysis(), { security: { status: "queued" } });
+  assert.deepEqual(unknown.reasons, ["the security scan produced no usable result"]);
+  const empty = evaluate(analysis(), { security: {} });
+  assert.deepEqual(empty.reasons, ["the security scan produced no usable result"]);
+});

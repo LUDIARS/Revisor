@@ -22,8 +22,11 @@ runtime architecture.
 - `ci.mjs` runs registered argv test cases and retains outcome metadata only.
 - `anatomia.mjs` owns direct CLI analysis.
 - `leakage.mjs` detects sensitive additions without retaining matched values.
-- `local-merge.mjs` creates a squash commit in a disposable worktree and
-  advances the local base branch.
+- `security-scan.mjs` runs the `codex-security` CLI over a committed diff in a
+  disposable worktree, retains finding locations only, and deletes the scan
+  report artifacts.
+- `local-merge.mjs` creates a squash commit in a disposable worktree, scans that
+  exact squashed diff, and advances the local base branch.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe
   outgoing `main` updates as `amend_required`.
 - `concordia-context.mjs` owns optional live and persisted author context.
@@ -46,9 +49,9 @@ managed hook path. At least one test case is required.
 
 A local PR records title, body, author, draft, labels, assignees, reviewers,
 sequential repository-local number, base/head refs, exact original SHAs,
-workflow status, CI outcomes, projected Anatomia data, leakage locations, and
-the final reviewed SHA. The test workflow is a derived view containing only
-PRs in `Open / Test OK`.
+workflow status, CI outcomes, projected Anatomia data, leakage locations,
+the security scan outcome and its finding locations, and the final reviewed SHA.
+The test workflow is a derived view containing only PRs in `Open / Test OK`.
 
 Re-reviewing an open local PR re-resolves both refs, discards the previous
 run's outcome, and admits a new run even when neither ref moved.
@@ -57,9 +60,12 @@ run's outcome, and admits a new run even when neither ref moved.
 
 - Feature branches, diffs, and matched leakage values are never sent to GitHub.
 - Test stdout/stderr is process-local and is not persisted.
-- Leakage findings contain only rule, path, and line metadata.
+- Leakage findings contain only rule, path, and line metadata. Security findings
+  additionally keep their severity, never source excerpts, reproduction steps, or
+  scanner stderr. Saved scan reports are deleted on every path.
 - Reviewer access is blocked before external-model invocation when the local
-  leakage scan finds a high-confidence match.
+  leakage scan finds a high-confidence match. The security scanner is an external
+  model too, so the same leakage match also suppresses the scan.
 - Repository code is inspected only at fixed local SHAs in disposable detached
   worktrees.
 - The workflow token and configured external hostnames are encrypted locally;
@@ -69,8 +75,14 @@ run's outcome, and admits a new run even when neither ref moved.
 
 Only `Open / Test OK` PRs can merge. Revisor verifies that both base and
 reviewed head still match their recorded SHAs, builds one squash commit in a
-disposable worktree, then compare-and-swap advances the local base ref. It
-never pushes.
+disposable worktree, scans that commit against the recorded base SHA, then
+compare-and-swap advances the local base ref. It never pushes.
+
+The security scan runs once per review pass and once immediately before the base
+ref advances; it never runs after the opposite-provider autofix, because the
+pre-merge scan already covers those edits. Findings at or above the configured
+severity block the merge, and a scan that does not complete blocks it as well
+rather than reading as a pass.
 
 The managed pre-push hook inspects only outgoing updates to the registered base
 branch and rejects every non-base branch create/update. A main finding blocks
@@ -82,9 +94,16 @@ does not overwrite the shared hook.
 ## Merge gate policy
 
 A local PR blocks on registered test failures, information leakage findings,
-error-severity changed architecture violations, a material complexity-score
-drop, a missing target domain, an Anatomia gate other than `spec_linkage`, and
-a reviewer that reports `PR_GATE_NEEDS_HUMAN`.
+security findings at or above the configured severity, a security scan that did
+not complete, error-severity changed architecture violations, a material
+complexity-score drop, a missing target domain, an Anatomia gate other than
+`spec_linkage`, and a reviewer that reports `PR_GATE_NEEDS_HUMAN`.
+
+A security scan skipped because it is disabled in the settings is silent; a scan
+skipped because the leakage gate or the registered tests already block is an
+advisory, since the blocking reason is already recorded. A scan result the policy
+cannot read — any status other than passed, findings, error, or skipped — blocks
+as well, so the review gate and the pre-merge check fail closed on the same rule.
 
 A change that touches documentation files only is exempt from the target-domain
 requirement: documentation is itself the domain of such a change, so a missing

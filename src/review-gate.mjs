@@ -38,6 +38,7 @@ export function gateOutcome({
   leakage,
   ci,
   docsOnly = false,
+  security,
 }) {
   const reasons = [];
   const advisories = [];
@@ -84,6 +85,26 @@ export function gateOutcome({
   }
   if (leakage.totalFindings > 0) {
     reasons.push(`${leakage.totalFindings} potential information leakage finding(s) remain`);
+  }
+  if (security) {
+    if (security.status === "findings") {
+      reasons.push(
+        `${security.totalFindings} security finding(s) at or above '${security.failOnSeverity}'`
+        + (security.reason ? ` (${security.reason})` : ""),
+      );
+    } else if (security.status === "error") {
+      // An incomplete scan must not read as a passing policy.
+      reasons.push(`the security scan did not complete: ${security.reason}`);
+    } else if (security.status === "skipped") {
+      if (security.reason !== "disabled by settings") {
+        advisories.push(`security scan skipped: ${security.reason}`);
+      }
+    } else if (security.status !== "passed") {
+      // Symmetric with the pre-merge check in local-merge.mjs: only a pass or a
+      // deliberate skip is a pass. A status the policy cannot read must not fall
+      // through the chain silently and leave the PR at Open / Test OK.
+      reasons.push("the security scan produced no usable result");
+    }
   }
   return { reasons, advisories };
 }

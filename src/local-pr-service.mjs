@@ -29,6 +29,8 @@ export class LocalPrService {
     queue,
     installGuard = installPushGuard,
     merge = squashMergeLocalPullRequest,
+    securityScan,
+    env = process.env,
     cliPath = CLI_PATH,
   }) {
     if (!store || !queue) {
@@ -38,6 +40,8 @@ export class LocalPrService {
     this.queue = queue;
     this.installGuard = installGuard;
     this.merge = merge;
+    this.securityScan = securityScan;
+    this.env = env;
     this.cliPath = cliPath;
   }
 
@@ -168,7 +172,12 @@ export class LocalPrService {
     if (!repository) {
       throw new Error(`Repository '${pullRequest.repository}' is not registered.`);
     }
-    const mergeCommitSha = await this.merge({ repository, pullRequest });
+    const mergeCommitSha = await this.merge({
+      repository,
+      pullRequest,
+      env: this.env,
+      ...(this.securityScan ? { scan: this.securityScan } : {}),
+    });
     return this.store.updatePullRequest(id, {
       status: "merged",
       checkStatus: "test_ok",
