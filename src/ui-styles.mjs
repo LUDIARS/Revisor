@@ -77,6 +77,9 @@ export const STYLES = `
     .factor-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
     .factor-list li { display: flex; gap: 10px; font-size: .9rem; }
     .factor-list .points { min-width: 3.2em; text-align: right; color: #f5c66b; font-variant-numeric: tabular-nums; }
+    .test-outputs { display: grid; gap: 8px; }
+    .test-output > summary { cursor: pointer; color: #ff7d8d; font-size: .9rem; }
+    .test-output > pre { margin: 8px 0 0; max-height: 420px; font-size: .8rem; }
 
     @media (max-width: 700px) {
       main { width: calc(100% - 16px); margin: 12px auto; gap: 12px; }

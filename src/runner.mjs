@@ -93,6 +93,7 @@ function buildGateResult({
   leakage,
   ci,
   docsOnly = false,
+  docsOrConfigOnly = docsOnly,
   plan,
   classification,
   security,
@@ -108,6 +109,7 @@ function buildGateResult({
     leakage,
     ci,
     docsOnly,
+    docsOrConfigOnly,
     plan,
     security,
   });
@@ -210,6 +212,7 @@ export function createPrReviewRunner({
       // runs, so the change profile is the first thing this review establishes.
       const submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
       const docsOnly = submitted.classification.docsOnly;
+      const docsOrConfigOnly = submitted.classification.docsOrConfigOnly;
       const initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
       const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
       const authorContext = request.reviewMode === "verification"
@@ -289,9 +292,10 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
+            docsOrConfigOnly,
             security: initialSecurity,
           }),
-          humanQuestion: needsTargetDomain(initial, docsOnly)
+          humanQuestion: needsTargetDomain(initial, docsOrConfigOnly)
             ? targetDomainQuestion(request.repository, request.number)
             : null,
         };
@@ -307,6 +311,7 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
+            docsOrConfigOnly,
             security: initialSecurity,
           }),
           humanQuestion: "Registered tests must pass before automated review.",
@@ -329,12 +334,13 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
+            docsOrConfigOnly,
             security: initialSecurity,
           }),
           humanQuestion: "Potential information leakage must be removed before automated review.",
         };
       }
-      if (needsTargetDomain(initial, docsOnly)) {
+      if (needsTargetDomain(initial, docsOrConfigOnly)) {
         await notifyConcordia({
           baseUrl: concordiaUrl,
           sessionId: authorContext?.sessionId,
@@ -352,6 +358,7 @@ export function createPrReviewRunner({
           unifiedDiff: submitted.unifiedDiff.slice(0, 120_000),
           leakage: initialLeakage,
           docsOnly,
+          docsOrConfigOnly,
           plan,
         }),
         timeoutMs: reviewerTimeoutMs,
@@ -369,8 +376,9 @@ export function createPrReviewRunner({
       ]);
       // The relaxation and the risk profile must follow the reviewed diff, not the
       // submitted one: an autofix that touches code makes the change no longer
-      // docs-only, and the missing target domain has to block again.
+      // docs/config-only, and the missing target domain has to block again.
       const finalDocsOnly = reviewed.classification.docsOnly;
+      const finalDocsOrConfigOnly = reviewed.classification.docsOrConfigOnly;
       // For the same reason the plan itself has to follow the reviewed diff. A
       // plan made for a documentation edit switched the registered tests and the
       // code-analysis gating off; if the autofix introduced executable content,
@@ -420,6 +428,7 @@ export function createPrReviewRunner({
             leakage: initialLeakage,
             ci: finalCi,
             docsOnly,
+            docsOrConfigOnly,
             plan: finalPlan,
             security: finalSecurity,
           }),
@@ -431,7 +440,7 @@ export function createPrReviewRunner({
         repoPath,
         request,
       );
-      const needsHuman = needsTargetDomain(finalAnalysis, finalDocsOnly)
+      const needsHuman = needsTargetDomain(finalAnalysis, finalDocsOrConfigOnly)
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
       await notifyConcordia({
         baseUrl: concordiaUrl,
@@ -452,6 +461,7 @@ export function createPrReviewRunner({
           leakage: finalLeakage,
           ci: finalCi,
           docsOnly: finalDocsOnly,
+          docsOrConfigOnly: finalDocsOrConfigOnly,
           plan: finalPlan,
           classification: reviewed.classification,
           security: finalSecurity,

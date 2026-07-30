@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderDashboardPage } from "../src/ui-dashboard-page.mjs";
 import { renderSettingsPage } from "../src/ui-settings-page.mjs";
+import { PR_VIEW_SOURCE } from "../src/ui-pr-view-script.mjs";
 import {
   isAllowedHost,
   isAuthorizedSession,
@@ -78,4 +79,86 @@ test("limits settings access to loopback and the UI session", () => {
   assert.equal(isAllowedHost("other.example.com", ["review.example.com"]), false);
   assert.equal(isAuthorizedSession({ "x-revisor-session": "a" }, "a"), true);
   assert.equal(isAuthorizedSession({ "x-revisor-session": "b" }, "a"), false);
+});
+
+// The PR detail view is client script, so it is exercised the way the browser does:
+// evaluated against a minimal DOM. Asserting on the source text would pass even if
+// the failed-output section were never appended.
+function fakeDocument() {
+  const node = (tag) => ({
+    tag,
+    className: "",
+    textContent: "",
+    children: [],
+    dataset: {},
+    style: {},
+    tabIndex: 0,
+    append(...nodes) {
+      this.children.push(...nodes);
+    },
+    setAttribute() {},
+    addEventListener() {},
+  });
+  return {
+    createElement: node,
+    createDocumentFragment: () => node("#fragment"),
+    createTextNode: (value) => ({ ...node("#text"), textContent: String(value) }),
+  };
+}
+
+function renderTests(pr) {
+  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn testsOf;`);
+  return view(fakeDocument())(pr);
+}
+
+function flatten(node) {
+  const own = node.textContent ? [node.textContent] : [];
+  return [...own, ...(node.children ?? []).flatMap(flatten)];
+}
+
+test("the test panel shows the output of failed cases only", () => {
+  const rendered = renderTests({
+    ci: [
+      { name: "unit", status: "passed", exitCode: 0, durationMs: 1000 },
+      {
+        name: "typecheck",
+        status: "failed",
+        exitCode: 1,
+        durationMs: 2000,
+        output: { text: "--- stderr ---\nTS2345: not assignable", truncated: false },
+      },
+    ],
+  });
+  const texts = flatten(rendered);
+  assert.equal(texts.includes("失敗したテストの出力 (秘匿値はマスク済み)"), true);
+  assert.equal(texts.includes("typecheck"), true);
+  assert.equal(texts.some((entry) => entry.includes("TS2345: not assignable")), true);
+  assert.equal(texts.some((entry) => entry.includes("(末尾のみ)")), false);
+});
+
+test("the test panel marks a truncated output as a tail", () => {
+  const rendered = renderTests({
+    ci: [{
+      name: "unit",
+      status: "failed",
+      exitCode: 1,
+      durationMs: 1000,
+      output: { text: "[truncated: kept the last 12288 of 40000 bytes]\nnot ok 9", truncated: true },
+    }],
+  });
+  const texts = flatten(rendered);
+  assert.equal(texts.includes("unit (末尾のみ)"), true);
+  assert.equal(texts.some((entry) => entry.includes("[truncated: kept the last 12288")), true);
+});
+
+test("a review recorded before test output was kept still renders its table", () => {
+  const rendered = renderTests({
+    ci: [
+      { name: "unit", status: "failed", exitCode: 1, durationMs: 1000 },
+      { name: "smoke", status: "skipped", reason: "変更種別を担当しません" },
+    ],
+  });
+  const texts = flatten(rendered);
+  assert.equal(texts.includes("unit"), true);
+  assert.equal(texts.includes("失敗したテストの出力 (秘匿値はマスク済み)"), false);
 });

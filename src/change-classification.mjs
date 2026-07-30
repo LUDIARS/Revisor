@@ -4,6 +4,31 @@
 
 const DOC_FILE = /\.(md|markdown|mdx|txt|adoc|rst)$/i;
 
+// Settings text that carries no domain of its own. Deliberately narrower than the
+// `config` change kind below: this list decides a gate relaxation, so it names the
+// declarative formats and the well-known dotfiles only and contains no code
+// extension — a `.js`/`.mjs`/`.ts`/`.py` file that happens to configure something
+// is still code and still owes a target domain.
+const CONFIG_FILE =
+  /(?:^|\/)(?:\.env\.(?:example|sample|template)|\.editorconfig|\.gitignore|\.gitattributes|\.gitmodules|\.npmrc|\.nvmrc|\.dockerignore|\.eslintignore|\.prettierignore)$|\.(?:ya?ml|json|jsonc|json5|toml|ini|cfg|conf|properties)$/i;
+
+// Dependency manifests match CONFIG_FILE by extension but are not settings text:
+// editing them pulls third-party code into the build, which is the change class
+// that should keep every gate it has. Excluded from the relaxation so a dependency
+// bump still owes a target domain (neco 2026-07-30).
+const DEPENDENCY_MANIFEST =
+  /(?:^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|Cargo\.(?:toml|lock)|poetry\.lock|pyproject\.toml|requirements[^/]*\.txt|Gemfile(?:\.lock)?|composer\.(?:json|lock)|go\.(?:mod|sum))$/i;
+
+// CI pipelines and compose files are YAML, so CONFIG_FILE matches them, but they
+// are not settings text either: they describe what gets executed, with what
+// credentials, on every push. That is the same reason dependency manifests are
+// excluded — the file decides which code runs — and it is also what `KIND_RULES`
+// below already encodes by classifying a workflow as `infra` before `config`.
+// Without this the relaxation would be stricter about `Dockerfile` (no config
+// extension, so never relaxed) than about the pipeline that runs it.
+const EXECUTABLE_CONFIG =
+  /(?:^|\/)(?:\.github\/workflows|\.circleci|\.gitlab)\/|(?:^|\/)(?:\.gitlab-ci|docker-compose[^/]*|azure-pipelines[^/]*|cloudbuild)\.ya?ml$/i;
+
 // Evaluated in order: the first match wins. Order matters more than the
 // individual patterns — a lock file is generated before it is config, a
 // workflow file is infrastructure before it is config, and a test file is a
@@ -101,6 +126,19 @@ export function isDocsOnlyChange(changedPaths) {
   return changedPaths.length > 0 && changedPaths.every((path) => DOC_FILE.test(path));
 }
 
+// Documentation and settings files have no code target domain to point at, so a
+// change made only of them can never satisfy the target-domain gate: keeping the
+// gate would make configuration changes permanently unmergeable (a one-line
+// `excubitor.catalog.yaml` edit was blocked exactly this way, Genius#6). A single
+// code file brings the requirement back — `every` is what makes that hold.
+export function isDocsOrConfigOnlyChange(changedPaths) {
+  return changedPaths.length > 0
+    && changedPaths.every((path) =>
+      !DEPENDENCY_MANIFEST.test(path)
+      && !EXECUTABLE_CONFIG.test(path)
+      && (DOC_FILE.test(path) || CONFIG_FILE.test(path)));
+}
+
 export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
   const files = changedPaths.map((path) => ({
     path,
@@ -118,6 +156,7 @@ export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
     changedFiles: files.length,
     ...stats,
     docsOnly: isDocsOnlyChange(changedPaths),
+    docsOrConfigOnly: isDocsOrConfigOnlyChange(changedPaths),
     touchesSpec: changedPaths.some((path) => SPEC_FILE.test(path)),
     touchesTests: counts.test > 0,
     // A docs-only change carries no runtime surface even when a documentation

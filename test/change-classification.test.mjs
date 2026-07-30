@@ -5,6 +5,7 @@ import {
   classifyPath,
   diffLineStats,
   isDocsOnlyChange,
+  isDocsOrConfigOnlyChange,
 } from "../src/change-classification.mjs";
 
 test("classifies a path by the cost decision it drives, not by extension alone", () => {
@@ -54,6 +55,65 @@ test("treats a change as docs-only only when every path is documentation", () =>
   assert.equal(isDocsOnlyChange([]), false);
 });
 
+test("treats a change as docs/config-only when no path is code", () => {
+  assert.equal(isDocsOrConfigOnlyChange(["excubitor.catalog.yaml"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["tsconfig.json", "config/app.toml"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["README.md", "excubitor.catalog.yaml"]), true);
+  assert.equal(isDocsOrConfigOnlyChange([".env.example", ".gitignore", ".npmrc"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["README.md"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["app.yaml", "src/runner.mjs"]), false);
+  assert.equal(isDocsOrConfigOnlyChange(["scripts/deploy.ps1"]), false);
+  assert.equal(isDocsOrConfigOnlyChange([]), false);
+});
+
+test("a dependency manifest keeps the target-domain gate even though it looks like config", () => {
+  // Editing these pulls third-party code into the build, so the relaxation must
+  // not cover them (neco 2026-07-30).
+  for (const path of [
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "Cargo.toml",
+    "requirements-dev.txt",
+    "composer.json",
+    "go.mod",
+  ]) {
+    assert.equal(isDocsOrConfigOnlyChange([path]), false, path);
+  }
+  // Pairing one with docs does not launder it either.
+  assert.equal(isDocsOrConfigOnlyChange(["README.md", "package.json"]), false);
+});
+
+test("a pipeline definition keeps the target-domain gate even though it is YAML", () => {
+  // These say what runs and with which credentials, so they are the same change
+  // class as a dependency manifest rather than settings text — and `Dockerfile`
+  // was never relaxed, so relaxing the compose file that runs it would be
+  // asymmetric.
+  for (const path of [
+    ".github/workflows/ci.yml",
+    ".circleci/config.yml",
+    ".gitlab-ci.yml",
+    "docker-compose.yml",
+    "deploy/docker-compose.prod.yaml",
+    "azure-pipelines.yml",
+  ]) {
+    assert.equal(isDocsOrConfigOnlyChange([path]), false, path);
+  }
+  assert.equal(isDocsOrConfigOnlyChange(["README.md", ".github/workflows/ci.yml"]), false);
+  // A plain settings file that merely lives near them is still relaxed.
+  assert.equal(isDocsOrConfigOnlyChange([".github/dependabot.yml"]), true);
+});
+
+test("a settings-only change is docs/config-only but not docs-only", () => {
+  const profile = classifyChange({
+    changedPaths: ["excubitor.catalog.yaml"],
+    unifiedDiff: "+++ b/excubitor.catalog.yaml\n+  - genius\n",
+  });
+  assert.equal(profile.docsOnly, false);
+  assert.equal(profile.docsOrConfigOnly, true);
+  assert.deepEqual(profile.kinds, ["config"]);
+});
+
 test("reports the runtime surfaces a registered unit test cannot stand in for", () => {
   const profile = classifyChange({
     changedPaths: ["src/server.mjs", "migrations/031_add_index.sql", "src/ui-layout.mjs"],
@@ -72,6 +132,7 @@ test("a docs-only change carries no runtime surface even under a ui folder", () 
     unifiedDiff: "+++ b/src/ui/guide.md\n+text\n",
   });
   assert.equal(profile.docsOnly, true);
+  assert.equal(profile.docsOrConfigOnly, true);
   assert.deepEqual(profile.runtimeSurfaces, []);
   assert.deepEqual(profile.kinds, ["docs"]);
 });

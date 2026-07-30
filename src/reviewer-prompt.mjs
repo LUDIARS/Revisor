@@ -2,11 +2,11 @@ import { RUNTIME_CHECK_MARKER } from "./merge-risk.mjs";
 import { needsTargetDomain } from "./review-gate.mjs";
 import { stageEnabled } from "./review-plan.mjs";
 
-// A docs-only change must not be asked for a code domain: the reviewer would
-// report PR_GATE_NEEDS_HUMAN, which blocks the merge and would undo the
-// relaxation the gate just made for exactly this case.
-export function domainInstruction({ analysis, docsOnly }) {
-  if (needsTargetDomain(analysis, docsOnly)) {
+// A docs-only or configuration-only change must not be asked for a code domain:
+// the reviewer would report PR_GATE_NEEDS_HUMAN, which blocks the merge and would
+// undo the relaxation the gate just made for exactly this case.
+export function domainInstruction({ analysis, docsOnly, docsOrConfigOnly = docsOnly }) {
+  if (needsTargetDomain(analysis, docsOrConfigOnly)) {
     return [
       "Anatomia found no target domain for the changed functions.",
       "Infer the target domain from the PR diff and optional original-session context.",
@@ -14,11 +14,15 @@ export function domainInstruction({ analysis, docsOnly }) {
       "Do not invent a domain if the context is insufficient; include PR_GATE_NEEDS_HUMAN in your final response.",
     ].join(" ");
   }
-  if (docsOnly) {
+  if (docsOrConfigOnly) {
     return [
-      "This change touches documentation files only, so documentation is its own domain.",
+      docsOnly
+        ? "This change touches documentation files only, so documentation is its own domain."
+        : "This change touches documentation and configuration files only, which declare settings rather than behaviour and own no code domain.",
       "Do not add a code domain or .anatomia/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
-      "Do check that the documentation stays consistent with the specs and behaviour it describes.",
+      docsOnly
+        ? "Do check that the documentation stays consistent with the specs and behaviour it describes."
+        : "Do check that the changed values stay consistent with the specs, schemas and behaviour that read them.",
     ].join(" ");
   }
   return "Ensure the existing target-domain and spec traceability remains accurate.";
@@ -64,6 +68,7 @@ export function buildReviewerPrompt({
   unifiedDiff,
   leakage,
   docsOnly = false,
+  docsOrConfigOnly = docsOnly,
   plan = null,
 }) {
   return [
@@ -76,7 +81,7 @@ export function buildReviewerPrompt({
     "Preserve existing user changes and keep edits scoped to this PR.",
     `Anatomia temporary analysis (may be truncated):\n${JSON.stringify(analysis, null, 2).slice(0, 80_000)}`,
     `Unified PR diff (may be truncated):\n${unifiedDiff}`,
-    domainInstruction({ analysis, docsOnly }),
+    domainInstruction({ analysis, docsOnly, docsOrConfigOnly }),
     stageEnabled(plan, "anatomia_code_analysis")
       ? "Resolve newly orphaned functions and avoid a material complexity-score regression where practical."
       : null,

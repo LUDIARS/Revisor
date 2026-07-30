@@ -1,6 +1,7 @@
 import { resolve, relative } from "node:path";
 import { runProcess } from "./process.mjs";
 import { selectedTestCases, skippedTestOutcomes } from "./review-plan.mjs";
+import { captureFailedTestOutput } from "./test-output.mjs";
 
 function testCwd(worktreePath, configuredCwd) {
   const path = resolve(worktreePath, configuredCwd);
@@ -50,12 +51,20 @@ export async function runRegisteredTests({
       testCwd(worktreePath, test.cwd),
       env,
     ));
-    results.push({
+    const outcome = {
       name: test.name,
       status: result.ok ? "passed" : "failed",
       exitCode: result.exitCode,
       durationMs: Math.max(0, now() - startedAt),
-    });
+    };
+    // A failure keeps its (redacted, tail-truncated) output: "1 registered test
+    // case(s) failed" alone forces whoever reads the PR to re-run the whole suite
+    // locally to learn what a machine already knew. A pass keeps nothing.
+    if (!result.ok) {
+      const output = captureFailedTestOutput(result);
+      if (output) outcome.output = output;
+    }
+    results.push(outcome);
   }
   return results;
 }

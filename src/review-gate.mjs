@@ -1,10 +1,10 @@
-import { isDocsOnlyChange } from "./change-classification.mjs";
+import { isDocsOnlyChange, isDocsOrConfigOnlyChange } from "./change-classification.mjs";
 import { codeAnalysisGating } from "./review-plan.mjs";
 
 // Re-exported because the gate, the reviewer prompt and the human question all
-// reach for it through this module; the classification itself lives with the rest
+// reach for them through this module; the classification itself lives with the rest
 // of the change profile.
-export { isDocsOnlyChange };
+export { isDocsOnlyChange, isDocsOrConfigOnlyChange };
 
 // Spec traceability is reported, never merge-blocking: most repositories have
 // no complete Anatomia spec linkage yet, and blocking on it stops every PR
@@ -21,9 +21,11 @@ const ADVISORY_GATES = new Set(["spec_linkage", "coupling_delta"]);
 
 // One definition of "this change still owes a code target domain", shared by the
 // merge gate, the reviewer prompt, and the human question, so the relaxation can
-// never apply to one of them and not the others.
-export function needsTargetDomain(analysis, docsOnly = false) {
-  return !analysis.domain.hasTargetDomain && !docsOnly;
+// never apply to one of them and not the others. The flag is the docs/config-only
+// judgement: documentation and settings files carry no code domain of their own,
+// so demanding one of them blocks the change forever instead of improving it.
+export function needsTargetDomain(analysis, docsOrConfigOnly = false) {
+  return !analysis.domain.hasTargetDomain && !docsOrConfigOnly;
 }
 
 function failedGateNames(verify) {
@@ -44,6 +46,9 @@ export function gateOutcome({
   leakage,
   ci,
   docsOnly = false,
+  // A docs-only change is always docs/config-only, so the narrower flag alone
+  // still selects the relaxation for callers that only know about documentation.
+  docsOrConfigOnly = docsOnly,
   plan = null,
   security,
 }) {
@@ -67,10 +72,12 @@ export function gateOutcome({
   }
   // needsTargetDomain stays the only place that decides whether the domain is
   // still owed; the gate only chooses where to record it.
-  if (needsTargetDomain(finalAnalysis, docsOnly)) {
+  if (needsTargetDomain(finalAnalysis, docsOrConfigOnly)) {
     reasons.push("target domain is still missing");
   } else if (!finalAnalysis.domain.hasTargetDomain) {
-    advisories.push("target domain is still missing (docs-only change)");
+    advisories.push(
+      `target domain is still missing (${docsOnly ? "docs-only" : "docs/config-only"} change)`,
+    );
   }
   if (finalAnalysis.quality.changedOrphans.length > 0) {
     advisories.push(

@@ -250,11 +250,34 @@ export const PR_VIEW_SOURCE = `
     return list;
   }
 
+  // Failed cases only, and only when the record carries output: a review stored
+  // before Revisor kept test output has no 'output' key and must still render.
+  function failedTestOutputs(pr) {
+    const failed = pr.ci.filter((entry) =>
+      entry.status === 'failed' && entry.output && entry.output.text);
+    if (failed.length === 0) return null;
+    const wrapper = element('div', 'test-outputs');
+    for (const entry of failed) {
+      const details = element('details', 'test-output');
+      details.append(element(
+        'summary',
+        null,
+        entry.name + (entry.output.truncated ? ' (末尾のみ)' : ''),
+      ));
+      const body = document.createElement('pre');
+      body.textContent = text(entry.output.text);
+      details.append(body);
+      wrapper.append(details);
+    }
+    return wrapper;
+  }
+
   function testsOf(pr) {
     if (!Array.isArray(pr.ci) || pr.ci.length === 0) {
       return paragraph('テスト結果はまだありません。');
     }
-    const wrapper = element('div', 'table-scroll');
+    const wrapper = document.createElement('div');
+    const scroll = element('div', 'table-scroll');
     const table = document.createElement('table');
     const head = document.createElement('thead');
     const headRow = document.createElement('tr');
@@ -276,7 +299,12 @@ export const PR_VIEW_SOURCE = `
       body.append(row);
     }
     table.append(head, body);
-    wrapper.append(table);
+    scroll.append(table);
+    wrapper.append(scroll);
+    const outputs = failedTestOutputs(pr);
+    if (outputs) {
+      wrapper.append(block('失敗したテストの出力 (秘匿値はマスク済み)', outputs));
+    }
     return wrapper;
   }
 

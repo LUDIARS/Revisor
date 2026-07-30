@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gateOutcome, isDocsOnlyChange, needsTargetDomain } from "../src/review-gate.mjs";
+import {
+  gateOutcome,
+  isDocsOnlyChange,
+  isDocsOrConfigOnlyChange,
+  needsTargetDomain,
+} from "../src/review-gate.mjs";
 
 function analysis({ gates = [], changedOrphans = [], changedViolations = [] } = {}) {
   return {
@@ -139,6 +144,51 @@ test("docs-only relaxation never bypasses the other gates", () => {
   ]);
 });
 
+test("relaxes a missing target domain to an advisory for a config-only change", () => {
+  // Settings files declare no behaviour, so they can never gain a target domain:
+  // without this the one-line catalog edit in Genius#6 stays unmergeable forever.
+  const finalAnalysis = analysis();
+  finalAnalysis.domain.hasTargetDomain = false;
+  const outcome = evaluate(finalAnalysis, { docsOrConfigOnly: true });
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, [
+    "target domain is still missing (docs/config-only change)",
+  ]);
+});
+
+test("the config-only relaxation covers the missing domain and nothing else", () => {
+  const finalAnalysis = analysis({ gates: [{ gate: "rule_conformance", pass: false }] });
+  finalAnalysis.domain.hasTargetDomain = false;
+  const outcome = evaluate(finalAnalysis, {
+    docsOrConfigOnly: true,
+    ci: [{ name: "unit", status: "failed" }],
+    reviewerOutput: "PR_GATE_NEEDS_HUMAN",
+    leakage: { totalFindings: 2 },
+    complexityScoreDelta: -14,
+    security: { status: "findings", totalFindings: 1, failOnSeverity: "high" },
+  });
+  assert.deepEqual(outcome.reasons, [
+    "1 registered test case(s) failed",
+    "Anatomia gate(s) did not pass: rule_conformance",
+    "complexity score dropped by 14 points",
+    "reviewer reported insufficient information for a safe domain/spec definition",
+    "2 potential information leakage finding(s) remain",
+    "1 security finding(s) at or above 'high'",
+  ]);
+  assert.equal(
+    outcome.reasons.includes("target domain is still missing"),
+    false,
+  );
+});
+
+test("isDocsOrConfigOnlyChange accepts documentation and settings files only", () => {
+  assert.equal(isDocsOrConfigOnlyChange(["excubitor.catalog.yaml"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["revisor.config.json"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["README.md", "config/app.yml"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["config/app.yml", "src/runner.mjs"]), false);
+  assert.equal(isDocsOrConfigOnlyChange([]), false);
+});
+
 test("isDocsOnlyChange accepts documentation extensions only", () => {
   assert.equal(isDocsOnlyChange(["spec/plan/multi-site.md", "README.md"]), true);
   assert.equal(isDocsOnlyChange(["docs/guide.adoc", "notes.TXT"]), true);
@@ -151,7 +201,7 @@ test("isDocsOnlyChange reads an unquoted non-ASCII documentation path", () => {
   assert.equal(isDocsOnlyChange(["spec/計画.md"]), true);
 });
 
-test("needsTargetDomain follows the docs-only relaxation", () => {
+test("needsTargetDomain follows the docs/config-only relaxation", () => {
   const withDomain = analysis();
   const withoutDomain = structuredClone(withDomain);
   withoutDomain.domain.hasTargetDomain = false;

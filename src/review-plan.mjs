@@ -116,6 +116,7 @@ export function planReview({ classification, testCases = [] }) {
       changedFiles: classification.changedFiles,
       changedLines: classification.changedLines,
       docsOnly: classification.docsOnly,
+      docsOrConfigOnly: classification.docsOrConfigOnly,
       touchesSpec: classification.touchesSpec,
       runtimeSurfaces: classification.runtimeSurfaces,
     },

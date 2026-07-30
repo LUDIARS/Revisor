@@ -75,6 +75,21 @@ function safeFindingPath(path) {
   return rulesForLine(path).length > 0 ? "[redacted-path]" : path;
 }
 
+// Text that Revisor stores verbatim — failed test output, for one — has to obey the
+// same boundary as the findings above: locations and rule names are persisted, the
+// matched value never is. Redaction is per line rather than per match because a line
+// that already proved to carry a secret may carry the rest of it around the match.
+export function redactSecretLines(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .split("\n")
+    .map((line) => {
+      const rules = rulesForLine(line);
+      return rules.length === 0 ? line : `[redacted: ${rules.join(", ")}]`;
+    })
+    .join("\n");
+}
+
 export function scanAddedDiffForLeaks(unifiedDiff) {
   if (typeof unifiedDiff !== "string") {
     throw new TypeError("Leakage scan requires a unified diff string.");

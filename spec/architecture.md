@@ -33,8 +33,11 @@ runtime architecture.
   human and how the board is ordered.
 - `auto-merge.mjs` decides whether a reviewed pull request is below the risk the
   operator accepted.
-- `ci.mjs` runs registered argv test cases and retains outcome metadata only.
-  Cases the plan did not select are recorded as `skipped` with the reason.
+- `ci.mjs` runs registered argv test cases and retains outcome metadata, plus the
+  captured output of the cases that failed. Cases the plan did not select are
+  recorded as `skipped` with the reason.
+- `test-output.mjs` owns that capture: failures only, leakage-redacted, and
+  truncated to a tail whose truncation is stated in the stored text.
 - `anatomia.mjs` owns direct CLI analysis.
 - `leakage.mjs` detects sensitive additions without retaining matched values.
 - `security-scan.mjs` runs the `codex-security` CLI over a committed diff in a
@@ -87,7 +90,10 @@ run's outcome, and admits a new run even when neither ref moved.
 ## Data boundaries
 
 - Feature branches, diffs, and matched leakage values are never sent to GitHub.
-- Test stdout/stderr is process-local and is not persisted.
+- Test stdout/stderr is process-local except for a failed case, whose output is
+  kept so the board can say why it failed. It is redacted line by line with the
+  leakage rules before it is stored and truncated to its last 12 KB, and the
+  truncation is stated in the stored text. A passing case keeps no output.
 - Leakage findings contain only rule, path, and line metadata. Security findings
   additionally keep their severity, never source excerpts, reproduction steps, or
   scanner stderr. Saved scan reports are deleted on every path.

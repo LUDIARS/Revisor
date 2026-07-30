@@ -116,7 +116,7 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
   "repository": "LUDIARS/Revisor",
   "pullRequest": { "number": 7, "title": null },
   "changeProfile": { "kinds": ["docs"], "counts": {}, "changedFiles": 1,
-                     "changedLines": 12, "docsOnly": true,
+                     "changedLines": 12, "docsOnly": true, "docsOrConfigOnly": true,
                      "touchesSpec": false, "runtimeSurfaces": [] },
   "stages": [{ "id": "security_review", "run": false, "reason": "…" }],
   "testCases": [{ "name": "unit", "kinds": null, "runtime": false, "always": false }],

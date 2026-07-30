@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scanAddedDiffForLeaks } from "../src/leakage.mjs";
+import { redactSecretLines, scanAddedDiffForLeaks } from "../src/leakage.mjs";
 
 function diff(path, lines) {
   return [
@@ -71,4 +71,20 @@ test("redacts a credential-shaped file path", () => {
   ]));
   assert.equal(result.findings[0].path, "[redacted-path]");
   assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("redactSecretLines masks the whole matching line and keeps the rest", () => {
+  const secret = "ghp_" + "C".repeat(36);
+  const redacted = redactSecretLines([
+    "not ok 1 - login",
+    `Authorization: Bearer ${secret}`,
+    "  at login (src/auth.mjs:12:3)",
+  ].join("\n"));
+  assert.equal(redacted.includes(secret), false);
+  assert.deepEqual(redacted.split("\n"), [
+    "not ok 1 - login",
+    "[redacted: github-token]",
+    "  at login (src/auth.mjs:12:3)",
+  ]);
+  assert.equal(redactSecretLines(undefined), "");
 });
