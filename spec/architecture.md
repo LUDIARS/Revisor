@@ -128,6 +128,19 @@ reviewed head still match their recorded SHAs, builds one squash commit in a
 disposable worktree, scans that commit against the recorded base SHA, then
 compare-and-swap advances the local base ref. It never pushes.
 
+Squash is the only merge strategy, and it is the workspace-wide default (neco
+2026-07-30): one PR lands as exactly one commit on the base branch, so the base
+history stays reviewable and every landed change maps to one reviewed diff.
+There is no merge-commit or rebase-merge alternative to choose from; the base ref
+only ever fast-forwards onto that one squash commit.
+
+When a PR collides with a base branch that has moved — the recorded base SHA no
+longer matches, or the squash refuses to apply — the author rebases the feature
+branch onto the current base and requests a fresh review; Revisor never rewrites
+the branch itself. A conflict is a signal to re-derive the change against what
+actually landed, and re-reviewing after the rebase is what keeps the recorded
+verdict describing the bytes that will merge.
+
 The security scan runs once per review pass and once immediately before the base
 ref advances; it never runs after the opposite-provider autofix, because the
 pre-merge scan already covers those edits. Findings at or above the configured
