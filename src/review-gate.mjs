@@ -4,6 +4,22 @@
 // the remote and catching information leakage).
 const ADVISORY_GATES = new Set(["spec_linkage"]);
 
+// Documentation is itself the domain of a docs-only change, so a missing code
+// target domain must not block the merge (neco 2026-07-30). The domain review
+// itself still runs; only the gate is relaxed to an advisory.
+const DOC_FILE = /\.(md|markdown|mdx|txt|adoc|rst)$/i;
+
+export function isDocsOnlyChange(changedPaths) {
+  return changedPaths.length > 0 && changedPaths.every((path) => DOC_FILE.test(path));
+}
+
+// One definition of "this change still owes a code target domain", shared by the
+// merge gate, the reviewer prompt, and the human question, so the relaxation can
+// never apply to one of them and not the others.
+export function needsTargetDomain(analysis, docsOnly = false) {
+  return !analysis.domain.hasTargetDomain && !docsOnly;
+}
+
 function failedGateNames(verify) {
   if (!verify || verify.pass) return [];
   const failed = (verify.gates ?? [])
@@ -21,6 +37,7 @@ export function gateOutcome({
   reviewerOutput,
   leakage,
   ci,
+  docsOnly = false,
 }) {
   const reasons = [];
   const advisories = [];
@@ -28,7 +45,13 @@ export function gateOutcome({
   if (failedTests.length > 0) {
     reasons.push(`${failedTests.length} registered test case(s) failed`);
   }
-  if (!finalAnalysis.domain.hasTargetDomain) reasons.push("target domain is still missing");
+  // needsTargetDomain stays the only place that decides whether the domain is
+  // still owed; the gate only chooses where to record it.
+  if (needsTargetDomain(finalAnalysis, docsOnly)) {
+    reasons.push("target domain is still missing");
+  } else if (!finalAnalysis.domain.hasTargetDomain) {
+    advisories.push("target domain is still missing (docs-only change)");
+  }
   if (finalAnalysis.quality.changedOrphans.length > 0) {
     advisories.push(
       `${finalAnalysis.quality.changedOrphans.length} changed function(s) are orphaned`,

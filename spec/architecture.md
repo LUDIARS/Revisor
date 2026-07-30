@@ -86,6 +86,17 @@ error-severity changed architecture violations, a material complexity-score
 drop, a missing target domain, an Anatomia gate other than `spec_linkage`, and
 a reviewer that reports `PR_GATE_NEEDS_HUMAN`.
 
+A change that touches documentation files only is exempt from the target-domain
+requirement: documentation is itself the domain of such a change, so a missing
+code target domain is recorded as an advisory instead. The exemption covers the
+gate, the reviewer prompt, and the human question together, so a docs-only
+change is never asked to invent a code domain and never blocks on the resulting
+`PR_GATE_NEEDS_HUMAN`. The final gate re-derives the exemption from the reviewed
+diff, so an autofix that reaches code files makes the change no longer docs-only
+and the missing target domain blocks again. It relaxes nothing else: tests,
+leakage, architecture violations, complexity, and every other gate apply
+unchanged.
+
 Spec traceability is reported, not enforced: a failed `spec_linkage` gate,
 changed orphaned functions, and non-error architecture violations are recorded
 as advisories and shown per PR. They do not block a merge, because most

@@ -10,7 +10,7 @@ import { readSettings } from "./config.mjs";
 import { runRegisteredTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
-import { gateOutcome } from "./review-gate.mjs";
+import { gateOutcome, isDocsOnlyChange, needsTargetDomain } from "./review-gate.mjs";
 import {
   advanceLocalBranch,
   cleanupWorktrees,
@@ -18,14 +18,36 @@ import {
   prepareLocalWorktrees,
 } from "./workspace.mjs";
 
+// A docs-only change must not be asked for a code domain: the reviewer would
+// report PR_GATE_NEEDS_HUMAN, which blocks the merge and would undo the
+// relaxation the gate just made for exactly this case.
+function domainInstruction({ analysis, docsOnly }) {
+  if (needsTargetDomain(analysis, docsOnly)) {
+    return [
+      "Anatomia found no target domain for the changed functions.",
+      "Infer the target domain from the PR diff and optional original-session context.",
+      "Add or update both an AIFormat-compatible spec and the minimal .anatomia/domains membership definition so the changed functions are attributable.",
+      "Do not invent a domain if the context is insufficient; include PR_GATE_NEEDS_HUMAN in your final response.",
+    ].join(" ");
+  }
+  if (docsOnly) {
+    return [
+      "This change touches documentation files only, so documentation is its own domain.",
+      "Do not add a code domain or .anatomia/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
+      "Do check that the documentation stays consistent with the specs and behaviour it describes.",
+    ].join(" ");
+  }
+  return "Ensure the existing target-domain and spec traceability remains accurate.";
+}
+
 function buildReviewerPrompt({
   request,
   analysis,
   authorContext,
   unifiedDiff,
   leakage,
+  docsOnly = false,
 }) {
-  const needsDomain = !analysis.domain.hasTargetDomain;
   return [
     `Review and autofix PR ${request.repository}#${request.number}.`,
     `Compare the checked-out HEAD with ${request.baseRef}.`,
@@ -36,14 +58,7 @@ function buildReviewerPrompt({
     "Preserve existing user changes and keep edits scoped to this PR.",
     `Anatomia temporary analysis (may be truncated):\n${JSON.stringify(analysis, null, 2).slice(0, 80_000)}`,
     `Unified PR diff (may be truncated):\n${unifiedDiff}`,
-    needsDomain
-      ? [
-          "Anatomia found no target domain for the changed functions.",
-          "Infer the target domain from the PR diff and optional original-session context.",
-          "Add or update both an AIFormat-compatible spec and the minimal .anatomia/domains membership definition so the changed functions are attributable.",
-          "Do not invent a domain if the context is insufficient; include PR_GATE_NEEDS_HUMAN in your final response.",
-        ].join(" ")
-      : "Ensure the existing target-domain and spec traceability remains accurate.",
+    domainInstruction({ analysis, docsOnly }),
     "Resolve newly orphaned functions and avoid a material complexity-score regression where practical.",
     `Original author provider: ${authorContext?.provider ?? "(unavailable; configured fallback reviewer is in use)"}`,
     `Original session context:\n${authorContext?.text || "(Concordia unavailable or no matching session; review from PR evidence only)"}`,
@@ -100,6 +115,7 @@ function buildGateResult({
   initialLeakage,
   leakage,
   ci,
+  docsOnly = false,
 }) {
   const complexityScoreDelta =
     finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
@@ -110,6 +126,7 @@ function buildGateResult({
     reviewerOutput,
     leakage,
     ci,
+    docsOnly,
   });
   return {
     conclusion: reasons.length === 0 ? "success" : "action_required",
@@ -143,6 +160,25 @@ async function readUnifiedDiff(cwd, mergeBase) {
     mergeBase,
     "--",
   ]);
+}
+
+// -z keeps paths raw: without it Git C-quotes any path containing non-ASCII
+// bytes, and the added quotes would hide a documentation extension and turn a
+// docs-only change back into a blocking one.
+// `git diff` reports tracked files only, so a not-yet-staged file the reviewer
+// created would be invisible here while `git add --all` still commits it. The
+// docs-only re-derivation has to see it, otherwise an autofix that adds a new
+// code file keeps the change "docs-only" and the missing target domain never
+// blocks again. Untracked paths are listed with the same exclusion rules the
+// later `git add --all` applies, so both agree on what enters the commit.
+async function readChangedPaths(cwd, mergeBase) {
+  const outputs = await Promise.all([
+    git(cwd, ["diff", "--name-only", "-z", "--no-renames", mergeBase, "--"]),
+    git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
+  // Each output is split on its own: git() trims the trailing NUL, so joining
+  // them first would glue the last tracked path onto the first untracked one.
+  return [...new Set(outputs.flatMap((output) => output.split("\0").filter(Boolean)))];
 }
 
 export function createPrReviewRunner({
@@ -181,6 +217,9 @@ export function createPrReviewRunner({
         }),
       ]);
       const initialUnifiedDiff = await readUnifiedDiff(worktrees.head, worktrees.mergeBase);
+      const docsOnly = isDocsOnlyChange(
+        await readChangedPaths(worktrees.head, worktrees.mergeBase),
+      );
       const initialLeakage = scanAddedDiffForLeaks(initialUnifiedDiff);
       const initialCi = await runRegisteredTests({
         worktreePath: worktrees.head,
@@ -201,8 +240,9 @@ export function createPrReviewRunner({
             initialLeakage,
             leakage: initialLeakage,
             ci: initialCi,
+            docsOnly,
           }),
-          humanQuestion: !initial.domain.hasTargetDomain
+          humanQuestion: needsTargetDomain(initial, docsOnly)
             ? targetDomainQuestion(request.repository, request.number)
             : null,
         };
@@ -221,6 +261,7 @@ export function createPrReviewRunner({
             initialLeakage,
             leakage: initialLeakage,
             ci: initialCi,
+            docsOnly,
           }),
           humanQuestion: "Registered tests must pass before automated review.",
         };
@@ -262,12 +303,13 @@ export function createPrReviewRunner({
             initialLeakage,
             leakage: initialLeakage,
             ci: initialCi,
+            docsOnly,
           }),
           humanQuestion: "Potential information leakage must be removed before automated review.",
         };
       }
       const reviewer = reviewerForProvider(authorContext?.provider, settings.fallbackReviewer);
-      if (!initial.domain.hasTargetDomain) {
+      if (needsTargetDomain(initial, docsOnly)) {
         await notifyConcordia({
           baseUrl: concordiaUrl,
           sessionId: authorContext?.sessionId,
@@ -284,20 +326,26 @@ export function createPrReviewRunner({
           authorContext,
           unifiedDiff: initialUnifiedDiff.slice(0, 120_000),
           leakage: initialLeakage,
+          docsOnly,
         }),
         timeoutMs: reviewerTimeoutMs,
       });
       if (!reviewResult.ok) {
         throw new Error("Opposite-model reviewer failed; output was withheld from the Check Run.");
       }
-      const [finalAnalysis, finalUnifiedDiff] = await Promise.all([
+      const [finalAnalysis, finalUnifiedDiff, finalChangedPaths] = await Promise.all([
         analyzePr({
           cliPath: anatomiaCliPath,
           cwd: worktrees.head,
           base: worktrees.mergeBase,
         }),
         readUnifiedDiff(worktrees.head, worktrees.mergeBase),
+        readChangedPaths(worktrees.head, worktrees.mergeBase),
       ]);
+      // The relaxation must follow the reviewed diff, not the submitted one: an
+      // autofix that touches code makes the change no longer docs-only, and the
+      // missing target domain has to block again.
+      const finalDocsOnly = isDocsOnlyChange(finalChangedPaths);
       const finalLeakage = scanAddedDiffForLeaks(finalUnifiedDiff);
       if (finalLeakage.totalFindings > 0) {
         throw new Error(
@@ -324,6 +372,7 @@ export function createPrReviewRunner({
             initialLeakage,
             leakage: initialLeakage,
             ci: finalCi,
+            docsOnly,
           }),
           humanQuestion: "Reviewer changes were discarded because registered tests failed.",
         };
@@ -333,7 +382,7 @@ export function createPrReviewRunner({
         repoPath,
         request,
       );
-      const needsHuman = !finalAnalysis.domain.hasTargetDomain
+      const needsHuman = needsTargetDomain(finalAnalysis, finalDocsOnly)
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
       await notifyConcordia({
         baseUrl: concordiaUrl,
@@ -357,6 +406,7 @@ export function createPrReviewRunner({
           initialLeakage,
           leakage: finalLeakage,
           ci: finalCi,
+          docsOnly: finalDocsOnly,
         }),
         humanQuestion: needsHuman
           ? targetDomainQuestion(request.repository, request.number)

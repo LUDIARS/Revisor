@@ -1,0 +1,35 @@
+{
+  "name": "review-gate",
+  "description": "ローカル PR のマージ可否判定ポリシー。CI・Anatomia ゲート・leakage・complexity・レビュアー出力を集約して reasons (ブロック) / advisories (非ブロック) に振り分ける。docs-only 変更の対象ドメイン欠如は advisory に緩和し、ドメインレビュー自体は維持する。",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/review-gate",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "gateOutcome|isDocsOnlyChange|needsTargetDomain|buildGateResult|domainInstruction",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"review-gate\" domain: ローカル PR のマージ可否判定ポリシー (gate/advisory 判定・docs-only 緩和)。",
+  "source": "spec-draft",
+  "mechanics": [
+    "merge-gate-policy",
+    "docs-only-relaxation"
+  ],
+  "specRefs": [
+    "review-gate — マージ可否判定ポリシー / ブロックと advisory の振り分け",
+    "review-gate — docs-only 変更の対象ドメイン緩和 (neco 2026-07-30)"
+  ],
+  "rationale": "マージ可否の判定基準は runner (審査オーケストレーション) から独立した単一のポリシー責務。gateOutcome / needsTargetDomain を正本とし、レビュアープロンプト・humanQuestion も同じ判定を共有する。",
+  "updatedAt": "2026-07-30T02:30:00.000Z"
+}

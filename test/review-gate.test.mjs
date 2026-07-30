@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gateOutcome } from "../src/review-gate.mjs";
+import { gateOutcome, isDocsOnlyChange, needsTargetDomain } from "../src/review-gate.mjs";
 
 function analysis({ gates = [], changedOrphans = [], changedViolations = [] } = {}) {
   return {
@@ -93,4 +93,59 @@ test("passes a clean analysis with no advisories", () => {
   const outcome = evaluate(analysis());
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, []);
+});
+
+test("blocks a code change whose target domain is missing", () => {
+  const finalAnalysis = analysis();
+  finalAnalysis.domain.hasTargetDomain = false;
+  const outcome = evaluate(finalAnalysis);
+  assert.deepEqual(outcome.reasons, ["target domain is still missing"]);
+  assert.deepEqual(outcome.advisories, []);
+});
+
+test("relaxes a missing target domain to an advisory for a docs-only change", () => {
+  const finalAnalysis = analysis();
+  finalAnalysis.domain.hasTargetDomain = false;
+  const outcome = evaluate(finalAnalysis, { docsOnly: true });
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, [
+    "target domain is still missing (docs-only change)",
+  ]);
+});
+
+test("docs-only relaxation never bypasses the other gates", () => {
+  const finalAnalysis = analysis({ gates: [{ gate: "rule_conformance", pass: false }] });
+  finalAnalysis.domain.hasTargetDomain = false;
+  const outcome = evaluate(finalAnalysis, {
+    docsOnly: true,
+    ci: [{ name: "unit", status: "failed" }],
+    reviewerOutput: "PR_GATE_NEEDS_HUMAN",
+  });
+  assert.deepEqual(outcome.reasons, [
+    "1 registered test case(s) failed",
+    "Anatomia gate(s) did not pass: rule_conformance",
+    "reviewer reported insufficient information for a safe domain/spec definition",
+  ]);
+});
+
+test("isDocsOnlyChange accepts documentation extensions only", () => {
+  assert.equal(isDocsOnlyChange(["spec/plan/multi-site.md", "README.md"]), true);
+  assert.equal(isDocsOnlyChange(["docs/guide.adoc", "notes.TXT"]), true);
+  assert.equal(isDocsOnlyChange(["spec/plan/multi-site.md", "src/runner.mjs"]), false);
+  assert.equal(isDocsOnlyChange(["src/index.ts"]), false);
+  assert.equal(isDocsOnlyChange([]), false);
+});
+
+test("isDocsOnlyChange reads an unquoted non-ASCII documentation path", () => {
+  assert.equal(isDocsOnlyChange(["spec/計画.md"]), true);
+});
+
+test("needsTargetDomain follows the docs-only relaxation", () => {
+  const withDomain = analysis();
+  const withoutDomain = structuredClone(withDomain);
+  withoutDomain.domain.hasTargetDomain = false;
+  assert.equal(needsTargetDomain(withoutDomain), true);
+  assert.equal(needsTargetDomain(withoutDomain, true), false);
+  assert.equal(needsTargetDomain(withDomain), false);
+  assert.equal(needsTargetDomain(withDomain, true), false);
 });
