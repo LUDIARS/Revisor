@@ -74,10 +74,10 @@ findings, open question), and the Anatomia diff analysis. A failed review can be
 re-queued against the branch heads as they stand at that moment.
 
 Advisories are reported without blocking a merge: a failed Anatomia
-`spec_linkage` gate, changed orphaned functions, and non-error architecture
-violations. Everything else — failed tests, leakage findings, error-severity
-violations, a material complexity drop, a missing target domain, any other
-Anatomia gate — still blocks.
+`spec_linkage` or `coupling_delta` gate, changed orphaned functions, and
+non-error architecture violations. Everything else — failed tests, leakage
+findings, error-severity violations, a material complexity drop, a missing
+target domain, any other Anatomia gate — still blocks.
 
 `/settings` holds every configuration form, including project registration.
 

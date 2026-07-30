@@ -97,7 +97,8 @@ A local PR blocks on registered test failures, information leakage findings,
 security findings at or above the configured severity, a security scan that did
 not complete, error-severity changed architecture violations, a material
 complexity-score drop, a missing target domain, an Anatomia gate other than
-`spec_linkage`, and a reviewer that reports `PR_GATE_NEEDS_HUMAN`.
+`spec_linkage` and `coupling_delta`, and a reviewer that reports
+`PR_GATE_NEEDS_HUMAN`.
 
 A security scan skipped because it is disabled in the settings is silent; a scan
 skipped because the leakage gate or the registered tests already block is an
@@ -122,6 +123,12 @@ as advisories and shown per PR. They do not block a merge, because most
 repositories carry no complete Anatomia spec linkage and blocking on it would
 stop every PR without protecting what this workflow exists for — keeping
 feature branches off the remote and catching information leakage.
+
+`coupling_delta` is an advisory for a different reason: Anatomia's ephemeral
+pr-review derives the gate's percentile threshold and call graph from the
+analysis environment, so the same commit can fail it in the review worktree and
+pass it in a clean local worktree. Until that non-determinism is fixed upstream,
+an environment-dependent verdict must not block a merge.
 
 An Anatomia verification that fails while naming no gate blocks the merge; it is
 never treated as a pass.

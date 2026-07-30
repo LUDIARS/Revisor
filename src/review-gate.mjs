@@ -2,7 +2,14 @@
 // no complete Anatomia spec linkage yet, and blocking on it stops every PR
 // without protecting the goals this workflow exists for (keeping branches off
 // the remote and catching information leakage).
-const ADVISORY_GATES = new Set(["spec_linkage"]);
+//
+// coupling_delta is advisory as well (neco 2026-07-30): Anatomia's ephemeral
+// pr-review derives its percentile threshold and call graph from the analysis
+// environment, and the same commit measured p95=9 (14 functions flagged) in the
+// review worktree but p95=9.9 (none flagged) in clean local worktrees
+// (Concordia#3). Until that non-determinism is fixed on the Anatomia side
+// (issue filed), an environment-dependent verdict must not block merges.
+const ADVISORY_GATES = new Set(["spec_linkage", "coupling_delta"]);
 
 // Documentation is itself the domain of a docs-only change, so a missing code
 // target domain must not block the merge (neco 2026-07-30). The domain review

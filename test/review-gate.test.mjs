@@ -57,6 +57,17 @@ test("still blocks on gates other than spec linkage", () => {
   assert.deepEqual(outcome.advisories, ["Anatomia gate(s) did not pass: spec_linkage"]);
 });
 
+test("reports coupling_delta without blocking the merge (environment-dependent gate)", () => {
+  const outcome = evaluate(analysis({
+    gates: [
+      { gate: "rule_conformance", pass: true },
+      { gate: "coupling_delta", pass: false },
+    ],
+  }));
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, ["Anatomia gate(s) did not pass: coupling_delta"]);
+});
+
 test("never turns an unexplained verification failure into a pass", () => {
   const finalAnalysis = analysis();
   finalAnalysis.architecture.verify = { pass: false, gates: [] };

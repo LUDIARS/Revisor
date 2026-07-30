@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "review-gate — マージ可否判定ポリシー"
-description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。docs-only 変更は対象ドメイン欠如を advisory に緩和し、ドメインレビュー自体は維持する。セキュリティスキャンの所見と未完了はブロックする。"
+description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。docs-only 変更は対象ドメイン欠如を advisory に緩和し、ドメインレビュー自体は維持する。環境依存の coupling_delta も advisory 扱い。セキュリティスキャンの所見と未完了はブロックする。"
 service: revisor
 domain: review-gate
 tags:
@@ -25,7 +25,8 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 
 - 登録テストの失敗
 - 対象ドメイン欠如 (**docs-only 変更を除く**、下記)
-- `spec_linkage` 以外の Anatomia ゲート不合格 (ゲート名なしの検証失敗もブロック)
+- `spec_linkage` / `coupling_delta` 以外の Anatomia ゲート不合格
+  (ゲート名なしの検証失敗もブロック)
 - severity=error の変更行アーキテクチャ違反
 - complexity スコアの閾値超過低下
 - レビュアーの `PR_GATE_NEEDS_HUMAN` 報告
@@ -38,6 +39,7 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 ## advisory 条件 (非ブロック)
 
 - `spec_linkage` ゲート不合格
+- `coupling_delta` ゲート不合格 (下記)
 - 孤立関数 (orphan)
 - error 未満のアーキテクチャ違反
 - **docs-only 変更の対象ドメイン欠如**
@@ -64,6 +66,15 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 - 維持されるもの: 相互モデルレビューは docs-only でも実行する (仕様と記述の
   整合性チェック)。`PR_GATE_NEEDS_HUMAN`・登録テスト・leakage・他ゲートの
   ブロックは不変。
+
+## coupling_delta の advisory 化 (neco 決定 2026-07-30)
+
+Anatomia の一時 pr-review 解析は、`coupling_delta` の percentile 閾値と
+コールグラフを解析環境から導出する。同一コミットがレビュー用 worktree では
+p95=9 (14 関数が該当) となり、クリーンなローカル worktree では p95=9.9
+(該当なし) となる実測があった (Concordia#3)。Anatomia 側で非決定性が解消される
+までは、環境依存の判定でマージをブロックしない。結合度の増加は advisory として
+記録・表示は続ける。
 
 ## セキュリティスキャン結果の扱い
 
