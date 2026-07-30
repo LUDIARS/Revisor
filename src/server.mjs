@@ -6,7 +6,9 @@ import {
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
+import { notifyConcordia, optionalConcordiaUrl } from "./concordia-context.mjs";
 import { LocalPrReporter } from "./local-reporter.mjs";
+import { notifyReviewCompletion } from "./review-completion-notice.mjs";
 import { LocalPrService } from "./local-pr-service.mjs";
 import { PrReviewQueue } from "./queue.mjs";
 import { LocalPrStore, resolveStatePath } from "./state-store.mjs";
@@ -137,8 +139,16 @@ export async function startRevisor({
   // Late-bound on purpose: the reporter is constructed before the service that
   // owns merging, and the automatic merge has to run the moment a review lands.
   let localPrService;
+  // 投稿元セッションへ終局結果を 1 通。Concordia の場所は catalog 由来なので、
+  // 解決できない環境 (catalog 無し) では通知だけ落ちる。
+  const announceCompletion = (pullRequest) => notifyReviewCompletion({
+    pullRequest,
+    baseUrl: optionalConcordiaUrl(cwd, readSettings(env).concordiaContextEnabled),
+    notify: notifyConcordia,
+  });
   const reporter = new LocalPrReporter(store, {
     afterCompleted: (id) => localPrService?.autoMergeIfEligible(id),
+    notifyCompletion: announceCompletion,
   });
   const workerPool = runner
     ? null
@@ -201,6 +211,15 @@ export async function startRevisor({
       process.stderr.write(
         `Revisor could not resume ${entry.repository} #${entry.number}: ${entry.reason}\n`,
       );
+      // 復旧できなかった PR は reporter を通らずに `failed` になる。 ここで黙ると
+      // 投稿元セッションは running のまま待ち続けるので、終局状態として 1 通送る。
+      // 通知は best-effort: 失敗しても起動を止めない。
+      try {
+        const pullRequest = store.getPullRequest(entry.id);
+        if (pullRequest) await announceCompletion(pullRequest);
+      } catch {
+        // 通知は落としてよい。
+      }
     }
   }
   return {

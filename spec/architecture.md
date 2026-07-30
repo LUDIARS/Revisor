@@ -47,7 +47,10 @@ runtime architecture.
   exact squashed diff, and advances the local base branch.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe
   outgoing `main` updates as `amend_required`.
-- `concordia-context.mjs` owns optional live and persisted author context.
+- `concordia-context.mjs` owns optional live and persisted author context, the
+  optional Concordia loopback location, and session injection.
+- `review-completion-notice.mjs` composes the terminal-verdict message and sends
+  it to the submitting session, if there is one.
 - `config.mjs` owns local settings plus encrypted workflow-token and
   allowed-host persistence.
 - `host-policy.mjs` normalizes exact hostnames and authorizes loopback or
@@ -72,12 +75,12 @@ check (`runtime`). All three are optional; a case that declares nothing covers
 executable change only.
 
 A local PR records title, body, author, draft, labels, assignees, reviewers,
-sequential repository-local number, base/head refs, exact original SHAs,
-workflow status, CI outcomes, projected Anatomia data, leakage locations, the
-security scan outcome and its finding locations, the review plan, the merge-risk
-and runtime-verification assessments, the automatic merge outcome, and the final
-reviewed SHA. The test workflow is a derived view containing only PRs in
-`Open / Test OK`.
+the submitting Concordia session (optional), sequential repository-local number,
+base/head refs, exact original SHAs, workflow status, CI outcomes, projected
+Anatomia data, leakage locations, the security scan outcome and its finding
+locations, the review plan, the merge-risk and runtime-verification assessments,
+the automatic merge outcome, and the final reviewed SHA. The test workflow is a
+derived view containing only PRs in `Open / Test OK`.
 
 Whether a pull request needs a human is not stored. It is derived on every read
 from the stored assessments and the current settings, so moving the accepted
@@ -86,6 +89,31 @@ without re-reviewing anything.
 
 Re-reviewing an open local PR re-resolves both refs, discards the previous
 run's outcome, and admits a new run even when neither ref moved.
+
+## Review completion notice
+
+Reviews run locally and take minutes, so a submitter that had to poll would
+either burn a session waiting or walk away and miss the verdict. A submission may
+name the Concordia session that made it, and every terminal outcome — merged,
+merge-ready, blocked, or a failed run — sends that session exactly one message
+through Concordia, after any automatic merge so the reported state is final. Only
+a non-draft PR left at `Open / Test OK` appears in the TestWorkflow forum, so its
+notice points there for the runtime verification record; an automatically merged
+one reports the merge instead, and a draft is told to leave draft rather than
+sent to a thread it never gets.
+
+Resubmitting the same head joins the review already running for it, so a
+submission that names a session adopts it as the notice target when the review
+it joined has none; an existing target is never replaced, because one review
+sends one notice.
+
+A review a restart could not resume is a failed run too, so startup recovery
+announces the pull requests it had to fail; otherwise the session that submitted
+one would wait on a review no worker will ever own.
+
+The notice is best-effort: a submission without a session, an unreachable
+Concordia, or a failed send never changes the verdict, fails the job, or blocks
+startup.
 
 ## Data boundaries
 

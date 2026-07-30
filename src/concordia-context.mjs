@@ -1,5 +1,19 @@
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { resolveServiceLoopbackUrl } from "./catalog.mjs";
+
+/**
+ * Concordia の loopback URL。場所の正本は Excubitor catalog なので、catalog が
+ * 引けない環境ではコンテキストも通知も無い状態で動く (どちらも任意機能)。
+ */
+export function optionalConcordiaUrl(cwd, enabled) {
+  if (!enabled) return null;
+  try {
+    return resolveServiceLoopbackUrl(cwd, "concordia");
+  } catch {
+    return null;
+  }
+}
 
 function normalizeRepository(value) {
   return String(value ?? "")

@@ -52,7 +52,32 @@ test("normalizes argv test cases and local PR metadata", () => {
     reviewers: [],
     headRef: "feat/local-pr",
     baseRef: undefined,
+    // 投稿元セッション未指定 = 完了通知の宛先なし (CLI / スクリプト投稿)。
+    sessionId: null,
   });
+});
+
+test("keeps the submitting session so the review verdict can reach it", () => {
+  const submission = validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    session_id: "lictor-abc",
+  });
+  assert.equal(submission.sessionId, "lictor-abc");
+  // 宛先は任意項目なので、空欄で埋めてくるクライアントの投稿ごと落とさない。
+  assert.equal(validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    session_id: "  ",
+  }).sessionId, null);
+  assert.throws(() => validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    session_id: "x".repeat(129),
+  }));
 });
 
 test("rejects shell metacharacters in registered test argv", () => {

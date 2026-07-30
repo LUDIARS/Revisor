@@ -354,6 +354,32 @@ test("submits while untracked files sit in the head worktree", async () => {
   }
 });
 
+test("adopts the session of a resubmission that joins an in-flight review", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const service = await registeredService(fixture, store);
+    const first = await service.submitPullRequest(submission());
+    assert.equal(first.sessionId, null);
+    // 同じ head の再投稿は既存レビューに相乗りする。 宛先を拾わないと、投げ直した
+    // セッションは来ない完了通知を待ち続ける。
+    const second = await service.submitPullRequest({
+      ...submission(),
+      sessionId: "lictor-abc",
+    });
+    assert.equal(second.id, first.id);
+    assert.equal(second.sessionId, "lictor-abc");
+    // 既に宛先がある相乗りは奪わない (1 レビュー 1 通)。
+    const third = await service.submitPullRequest({
+      ...submission(),
+      sessionId: "lictor-xyz",
+    });
+    assert.equal(third.sessionId, "lictor-abc");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("refuses to submit a head worktree carrying tracked modifications", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });

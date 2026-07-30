@@ -32,12 +32,31 @@ export function pendingReviewProjection() {
 }
 
 export class LocalPrReporter {
-  constructor(store, { afterCompleted = null } = {}) {
+  constructor(store, { afterCompleted = null, notifyCompletion = null } = {}) {
     if (!store || typeof store.updatePullRequest !== "function") {
       throw new TypeError("Local PR reporter requires a state store.");
     }
+    // 通知は終局状態の PR レコードを読んで組み立てる。読めない store を黙って
+    // 受け取ると、送信側の catch に飲まれて「通知が一度も来ない」だけになる。
+    if (notifyCompletion && typeof store.getPullRequest !== "function") {
+      throw new TypeError("Completion notices require a state store that can read pull requests.");
+    }
     this.store = store;
     this.afterCompleted = afterCompleted;
+    this.notifyCompletion = notifyCompletion;
+  }
+
+  // 終局状態に着いたときだけ、投稿元セッションへ 1 回知らせる。通知は best-effort:
+  // 送信失敗が審査結果やジョブの成否を変えてはならない (throw する reporter は
+  // キューから worker 失敗として扱われる)。
+  async #announce(localPrId) {
+    if (!this.notifyCompletion) return;
+    try {
+      const pullRequest = this.store.getPullRequest(localPrId);
+      if (pullRequest) await this.notifyCompletion(pullRequest);
+    } catch {
+      // 通知は落としてよい。
+    }
   }
 
   async queued(job) {
@@ -82,6 +101,8 @@ export class LocalPrReporter {
         // The attempt records its own outcome on the pull request.
       }
     }
+    // 自動マージの後に送る: マージ済みかどうかまで含めた最終状態を 1 通で伝える。
+    await this.#announce(job.request.localPrId);
   }
 
   async failed(job) {
@@ -89,5 +110,7 @@ export class LocalPrReporter {
       checkStatus: "failed",
       error: job.error || "The local review worker failed.",
     });
+    // 失敗も終局状態。ここで黙ると投稿側は running のまま待ち続ける。
+    await this.#announce(job.request.localPrId);
   }
 }

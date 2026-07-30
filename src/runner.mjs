@@ -1,9 +1,10 @@
 import { analyzePr, ensureInitialAnalysis, resolveAnatomiaCli } from "./anatomia.mjs";
-import { resolveServiceLoopbackUrl, resolveWorkspaceRoot } from "./catalog.mjs";
+import { resolveWorkspaceRoot } from "./catalog.mjs";
 import {
   loadConcordiaContext,
   loadPersistedConcordiaContext,
   notifyConcordia,
+  optionalConcordiaUrl,
   targetDomainQuestion,
 } from "./concordia-context.mjs";
 import { readSettings } from "./config.mjs";
@@ -55,15 +56,6 @@ async function commitAndAdvanceAutofix(cwd, repoPath, request) {
     );
   }
   return reviewedHead;
-}
-
-function optionalConcordiaUrl(cwd, enabled) {
-  if (!enabled) return null;
-  try {
-    return resolveServiceLoopbackUrl(cwd, "concordia");
-  } catch {
-    return null;
-  }
 }
 
 // The baseline analysis exists only to produce a complexity delta, and the

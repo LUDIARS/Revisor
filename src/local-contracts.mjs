@@ -145,5 +145,16 @@ export function validatePullRequestSubmission(body) {
     reviewers: stringList(body.reviewers, "reviewers"),
     headRef: gitRef(body.head_ref, "head_ref"),
     baseRef: body.base_ref === undefined ? undefined : gitRef(body.base_ref, "base_ref"),
+    // Concordia session that submitted the PR. Reviews run locally and take
+    // minutes, so the submitter is told the verdict through Concordia instead of
+    // polling for it. Optional: CLI and script submissions have no session, and
+    // a client that fills the field in unconditionally sends a blank one, which
+    // means the same thing — rejecting the whole submission over an optional
+    // notification target would be worse than not notifying.
+    sessionId: body.session_id === undefined
+      || body.session_id === null
+      || (typeof body.session_id === "string" && !body.session_id.trim())
+      ? null
+      : text(body.session_id, "session_id", 128),
   };
 }

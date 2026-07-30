@@ -98,7 +98,19 @@ export class LocalPrService {
       repository.repository,
       refs.headSha,
     );
-    if (existing) return existing;
+    if (existing) {
+      // 同一 head の再投稿は既存レビューに相乗りする。 その既存 PR がまだ終局して
+      // いないのに宛先を持たないと (CLI 投稿の後にセッションが投げ直した等)、
+      // 投げ直した側は永久に来ない完了通知を待つことになるので、ここで宛先を
+      // 引き継ぐ。 既に宛先がある場合は奪わない (通知は 1 レビュー 1 通)。
+      const inFlight = existing.checkStatus === "queued" || existing.checkStatus === "running";
+      if (inFlight && submission.sessionId && !existing.sessionId) {
+        return this.store.updatePullRequest(existing.id, {
+          sessionId: submission.sessionId,
+        });
+      }
+      return existing;
+    }
     const pullRequest = this.store.createPullRequest({
       repository: repository.repository,
       title: submission.title,
@@ -112,6 +124,7 @@ export class LocalPrService {
       baseRef,
       headSha: refs.headSha,
       baseSha: refs.baseSha,
+      sessionId: submission.sessionId ?? null,
     });
     return this.#enqueue(repository, pullRequest);
   }
