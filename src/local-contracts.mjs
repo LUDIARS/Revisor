@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { CHANGE_KINDS } from "./change-classification.mjs";
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
@@ -63,7 +64,52 @@ function testCase(value, index) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 60 * 60_000) {
     throw new Error(`test_cases[${index}].timeout_ms is invalid.`);
   }
-  return { name, command, args: [...args], cwd, timeoutMs };
+  return {
+    name,
+    command,
+    args: [...args],
+    cwd,
+    timeoutMs,
+    ...testCaseCoverage(value, index),
+  };
+}
+
+// Coverage metadata lets the review plan run a documentation edit without paying
+// for the whole suite. It is optional: a case that declares nothing keeps
+// covering executable change only, which is what every existing registration
+// meant when it was created.
+function testCaseCoverage(value, index) {
+  // `null` reads as "not declared" as well as omission, because that is exactly
+  // what this function emits for an undeclared case: re-registering a repository
+  // from the record this validator returned must not be rejected.
+  const kinds = value.kinds === undefined || value.kinds === null
+    ? null
+    : changeKindList(value.kinds, index);
+  if (value.runtime !== undefined && typeof value.runtime !== "boolean") {
+    throw new Error(`test_cases[${index}].runtime must be a boolean.`);
+  }
+  if (value.always !== undefined && typeof value.always !== "boolean") {
+    throw new Error(`test_cases[${index}].always must be a boolean.`);
+  }
+  return {
+    kinds,
+    runtime: value.runtime === true,
+    always: value.always === true,
+  };
+}
+
+function changeKindList(value, index) {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || value.length > CHANGE_KINDS.length
+    || value.some((kind) => !CHANGE_KINDS.includes(kind))
+  ) {
+    throw new Error(
+      `test_cases[${index}].kinds must be a non-empty subset of ${CHANGE_KINDS.join(", ")}.`,
+    );
+  }
+  return [...new Set(value)];
 }
 
 export function validateRepositoryRegistration(body) {

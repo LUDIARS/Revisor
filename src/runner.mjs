@@ -7,64 +7,27 @@ import {
   targetDomainQuestion,
 } from "./concordia-context.mjs";
 import { readSettings } from "./config.mjs";
-import { runRegisteredTests, testsPassed } from "./ci.mjs";
+import { runPlannedTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
+import { assessMergeRisk, assessRuntimeVerification } from "./merge-risk.mjs";
+import { advisePlan } from "./plan-advisor.mjs";
 import { runSecurityScan, skippedSecurityScan } from "./security-scan.mjs";
 import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
-import { gateOutcome, isDocsOnlyChange, needsTargetDomain } from "./review-gate.mjs";
+import { buildReviewerPrompt } from "./reviewer-prompt.mjs";
+import { gateOutcome, needsTargetDomain } from "./review-gate.mjs";
+import { readChangeProfile } from "./review-diff.mjs";
+import {
+  codeAnalysisGating,
+  hasExecutableChange,
+  planReview,
+  stageEnabled,
+} from "./review-plan.mjs";
 import {
   advanceLocalBranch,
   cleanupWorktrees,
   git,
   prepareLocalWorktrees,
 } from "./workspace.mjs";
-
-// A docs-only change must not be asked for a code domain: the reviewer would
-// report PR_GATE_NEEDS_HUMAN, which blocks the merge and would undo the
-// relaxation the gate just made for exactly this case.
-function domainInstruction({ analysis, docsOnly }) {
-  if (needsTargetDomain(analysis, docsOnly)) {
-    return [
-      "Anatomia found no target domain for the changed functions.",
-      "Infer the target domain from the PR diff and optional original-session context.",
-      "Add or update both an AIFormat-compatible spec and the minimal .anatomia/domains membership definition so the changed functions are attributable.",
-      "Do not invent a domain if the context is insufficient; include PR_GATE_NEEDS_HUMAN in your final response.",
-    ].join(" ");
-  }
-  if (docsOnly) {
-    return [
-      "This change touches documentation files only, so documentation is its own domain.",
-      "Do not add a code domain or .anatomia/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
-      "Do check that the documentation stays consistent with the specs and behaviour it describes.",
-    ].join(" ");
-  }
-  return "Ensure the existing target-domain and spec traceability remains accurate.";
-}
-
-function buildReviewerPrompt({
-  request,
-  analysis,
-  authorContext,
-  unifiedDiff,
-  leakage,
-  docsOnly = false,
-}) {
-  return [
-    `Review and autofix PR ${request.repository}#${request.number}.`,
-    `Compare the checked-out HEAD with ${request.baseRef}.`,
-    "You may read and edit files only. Do not run repository code, install dependencies, use network access, commit, or push; Revisor owns local Git and CI operations.",
-    "Perform a normal correctness, security, and maintainability review and directly fix actionable issues.",
-    "Explicitly check for information leakage: credentials, personal data, private endpoints, session transcripts, logs, local configuration, and proprietary artifacts that should not enter the repository.",
-    `Local high-confidence leakage scan (contains locations only, never matched values):\n${JSON.stringify(leakage, null, 2)}`,
-    "Preserve existing user changes and keep edits scoped to this PR.",
-    `Anatomia temporary analysis (may be truncated):\n${JSON.stringify(analysis, null, 2).slice(0, 80_000)}`,
-    `Unified PR diff (may be truncated):\n${unifiedDiff}`,
-    domainInstruction({ analysis, docsOnly }),
-    "Resolve newly orphaned functions and avoid a material complexity-score regression where practical.",
-    `Original author provider: ${authorContext?.provider ?? "(unavailable; configured fallback reviewer is in use)"}`,
-    `Original session context:\n${authorContext?.text || "(Concordia unavailable or no matching session; review from PR evidence only)"}`,
-  ].join("\n\n");
-}
 
 async function commitAndAdvanceAutofix(cwd, repoPath, request) {
   const status = await git(cwd, ["status", "--porcelain"]);
@@ -103,6 +66,19 @@ function optionalConcordiaUrl(cwd, enabled) {
   }
 }
 
+// The baseline analysis exists only to produce a complexity delta, and the
+// project-wide initial analysis only to report what the repository looks like. A
+// plan that drops code analysis drops both runs, which is where most of the saved
+// time comes from.
+async function analyzeCodeBaseline({ cliPath, repoPath, repository, worktrees, enabled }) {
+  if (!enabled) return { firstAnalysis: null, baseline: null };
+  const [firstAnalysis, baseline] = await Promise.all([
+    ensureInitialAnalysis({ cliPath, repoPath, repository }),
+    analyzePr({ cliPath, cwd: worktrees.base, base: "HEAD" }),
+  ]);
+  return { firstAnalysis, baseline };
+}
+
 function buildGateResult({
   request,
   firstAnalysis,
@@ -117,10 +93,13 @@ function buildGateResult({
   leakage,
   ci,
   docsOnly = false,
+  plan,
+  classification,
   security,
 }) {
-  const complexityScoreDelta =
-    finalAnalysis.quality.complexity.score - baseline.quality.complexity.score;
+  const complexityScoreDelta = baseline
+    ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
+    : null;
   const { reasons, advisories } = gateOutcome({
     finalAnalysis,
     complexityScoreDelta,
@@ -129,7 +108,30 @@ function buildGateResult({
     leakage,
     ci,
     docsOnly,
+    plan,
     security,
+  });
+  const runtimeVerification = assessRuntimeVerification({
+    classification,
+    testCases: request.testCases,
+    ci,
+    reviewerOutput,
+    architectureErrorCount: codeAnalysisGating(plan)
+      ? (finalAnalysis.architecture.changedViolations ?? [])
+          .filter((violation) => violation.severity === "error").length
+      : 0,
+  });
+  const mergeRisk = assessMergeRisk({
+    classification,
+    reasons,
+    advisories,
+    analysis: finalAnalysis,
+    complexityScoreDelta,
+    leakage,
+    ci,
+    runtimeVerification,
+    plan,
+    docsOnly,
   });
   return {
     conclusion: reasons.length === 0 ? "success" : "action_required",
@@ -139,14 +141,17 @@ function buildGateResult({
     analysisSource: "anatomia-cli",
     originalHeadSha: request.headSha,
     reviewedHeadSha,
-    initialAnalysis: {
-      project: firstAnalysis.project.id,
-      files: firstAnalysis.analysis.files,
-      functions: firstAnalysis.analysis.functions,
-      cacheHit: firstAnalysis.analysis.cacheHit,
-    },
+    plan,
+    initialAnalysis: firstAnalysis
+      ? {
+          project: firstAnalysis.project.id,
+          files: firstAnalysis.analysis.files,
+          functions: firstAnalysis.analysis.functions,
+          cacheHit: firstAnalysis.analysis.cacheHit,
+        }
+      : null,
     analysis: finalAnalysis,
-    baselineComplexityScore: baseline.quality.complexity.score,
+    baselineComplexityScore: baseline ? baseline.quality.complexity.score : null,
     complexityScoreDelta,
     initialLeakage,
     leakage,
@@ -154,6 +159,8 @@ function buildGateResult({
     security,
     reasons,
     advisories,
+    runtimeVerification,
+    mergeRisk,
   };
 }
 
@@ -161,7 +168,16 @@ function buildGateResult({
 // merge — never after the reviewer autofix, which the pre-merge scan covers. It
 // is skipped while the leakage gate or the registered tests already block, so no
 // potentially leaking diff reaches the scanner and no scan cost is wasted.
-async function reviewSecurityScan({ runSecurity, worktrees, leakage, ci, settings }) {
+//
+// It is also skipped when the review plan dropped the vulnerability stage. That
+// is the whole point of planning: a change with no executable content has no
+// attack surface to scan, and paying a per-scan cost cap to be told so is the
+// waste the plan exists to remove. The skip is recorded with its reason, so the
+// gate reports it as an advisory rather than passing silently.
+async function reviewSecurityScan({ runSecurity, worktrees, leakage, ci, settings, plan }) {
+  if (!stageEnabled(plan, "security_review")) {
+    return skippedSecurityScan("not required by the review plan");
+  }
   if (leakage.totalFindings > 0) return skippedSecurityScan("blocked by the leakage scan");
   if (!testsPassed(ci)) return skippedSecurityScan("registered tests failed");
   return runSecurity({
@@ -169,34 +185,6 @@ async function reviewSecurityScan({ runSecurity, worktrees, leakage, ci, setting
     diffBase: worktrees.mergeBase,
     settings,
   });
-}
-
-async function readUnifiedDiff(cwd, mergeBase) {
-  return git(cwd, [
-    "diff",
-    "--no-ext-diff",
-    mergeBase,
-    "--",
-  ]);
-}
-
-// -z keeps paths raw: without it Git C-quotes any path containing non-ASCII
-// bytes, and the added quotes would hide a documentation extension and turn a
-// docs-only change back into a blocking one.
-// `git diff` reports tracked files only, so a not-yet-staged file the reviewer
-// created would be invisible here while `git add --all` still commits it. The
-// docs-only re-derivation has to see it, otherwise an autofix that adds a new
-// code file keeps the change "docs-only" and the missing target domain never
-// blocks again. Untracked paths are listed with the same exclusion rules the
-// later `git add --all` applies, so both agree on what enters the commit.
-async function readChangedPaths(cwd, mergeBase) {
-  const outputs = await Promise.all([
-    git(cwd, ["diff", "--name-only", "-z", "--no-renames", mergeBase, "--"]),
-    git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]),
-  ]);
-  // Each output is split on its own: git() trims the trailing NUL, so joining
-  // them first would glue the last tracked path onto the first untracked one.
-  return [...new Set(outputs.flatMap((output) => output.split("\0").filter(Boolean)))];
 }
 
 export function createPrReviewRunner({
@@ -216,33 +204,60 @@ export function createPrReviewRunner({
     const anatomiaCliPath = await resolveAnatomiaCli(settings.anatomiaFolder);
     const workspaceRoot = resolveWorkspaceRoot(cwd);
     const repoPath = request.rootPath;
-    const firstAnalysis = await ensureInitialAnalysis({
-      cliPath: anatomiaCliPath,
-      repoPath,
-      repository: request.repository,
-    });
     const worktrees = await prepareLocalWorktrees(repoPath, request);
     try {
-      const [initial, baseline] = await Promise.all([
+      // The plan is decided from the submitted diff, before any expensive stage
+      // runs, so the change profile is the first thing this review establishes.
+      const submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
+      const docsOnly = submitted.classification.docsOnly;
+      const initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
+      const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
+      const authorContext = request.reviewMode === "verification"
+        ? null
+        : await resolveAuthorContext({
+            settings,
+            concordiaUrl,
+            request,
+            workspaceRoot,
+            env,
+            transport,
+          });
+      const reviewer = reviewerForProvider(authorContext?.provider, settings.fallbackReviewer);
+      const plan = await advisePlan({
+        // Verification-only runs invoke no model at all, so they stay on the
+        // deterministic plan.
+        advisor: request.reviewMode === "verification" ? "none" : settings.planAdvisor,
+        plan: planReview({
+          classification: submitted.classification,
+          testCases: request.testCases,
+        }),
+        request,
+        testCases: request.testCases,
+        cwd: worktrees.head,
+        augurFolder: settings.augurFolder,
+        reviewer,
+        runReview,
+        leakageClear: initialLeakage.totalFindings === 0,
+      });
+      const codeAnalysis = stageEnabled(plan, "anatomia_code_analysis");
+      const [initial, { firstAnalysis, baseline }] = await Promise.all([
         analyzePr({
           cliPath: anatomiaCliPath,
           cwd: worktrees.head,
           base: worktrees.mergeBase,
         }),
-        analyzePr({
+        analyzeCodeBaseline({
           cliPath: anatomiaCliPath,
-          cwd: worktrees.base,
-          base: "HEAD",
+          repoPath,
+          repository: request.repository,
+          worktrees,
+          enabled: codeAnalysis,
         }),
       ]);
-      const initialUnifiedDiff = await readUnifiedDiff(worktrees.head, worktrees.mergeBase);
-      const docsOnly = isDocsOnlyChange(
-        await readChangedPaths(worktrees.head, worktrees.mergeBase),
-      );
-      const initialLeakage = scanAddedDiffForLeaks(initialUnifiedDiff);
-      const initialCi = await runRegisteredTests({
+      const initialCi = await runPlannedTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
+        plan,
         env,
       });
       const initialSecurity = await reviewSecurityScan({
@@ -251,19 +266,26 @@ export function createPrReviewRunner({
         leakage: initialLeakage,
         ci: initialCi,
         settings,
+        plan,
       });
+      const gateInput = {
+        request,
+        firstAnalysis,
+        baseline,
+        complexityDropThreshold,
+        initialLeakage,
+        plan,
+        classification: submitted.classification,
+        security: initialSecurity,
+      };
       if (request.reviewMode === "verification") {
         return {
           ...buildGateResult({
-            request,
-            firstAnalysis,
+            ...gateInput,
             finalAnalysis: initial,
-            baseline,
             reviewer: null,
             contextSource: "verification-only",
             reviewedHeadSha: request.headSha,
-            complexityDropThreshold,
-            initialLeakage,
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
@@ -277,15 +299,11 @@ export function createPrReviewRunner({
       if (!testsPassed(initialCi)) {
         return {
           ...buildGateResult({
-            request,
-            firstAnalysis,
+            ...gateInput,
             finalAnalysis: initial,
-            baseline,
             reviewer: null,
             contextSource: "registered-tests",
             reviewedHeadSha: request.headSha,
-            complexityDropThreshold,
-            initialLeakage,
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
@@ -294,23 +312,6 @@ export function createPrReviewRunner({
           humanQuestion: "Registered tests must pass before automated review.",
         };
       }
-      const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
-      const httpContext = await loadConcordiaContext({
-        baseUrl: concordiaUrl,
-        repository: request.repository,
-        headRef: request.headRef,
-        transport,
-      });
-      const authorContext = httpContext ?? (
-        settings.concordiaContextEnabled
-          ? await loadPersistedConcordiaContext({
-              workspaceRoot,
-              repository: request.repository,
-              headRef: request.headRef,
-              dbPath: env.CONCORDIA_DB_PATH,
-            })
-          : null
-      );
       if (initialLeakage.totalFindings > 0) {
         await notifyConcordia({
           baseUrl: concordiaUrl,
@@ -320,15 +321,11 @@ export function createPrReviewRunner({
         });
         return {
           ...buildGateResult({
-            request,
-            firstAnalysis,
+            ...gateInput,
             finalAnalysis: initial,
-            baseline,
             reviewer: null,
             contextSource: authorContext?.source ?? "leakage-blocked",
             reviewedHeadSha: request.headSha,
-            complexityDropThreshold,
-            initialLeakage,
             leakage: initialLeakage,
             ci: initialCi,
             docsOnly,
@@ -337,7 +334,6 @@ export function createPrReviewRunner({
           humanQuestion: "Potential information leakage must be removed before automated review.",
         };
       }
-      const reviewer = reviewerForProvider(authorContext?.provider, settings.fallbackReviewer);
       if (needsTargetDomain(initial, docsOnly)) {
         await notifyConcordia({
           baseUrl: concordiaUrl,
@@ -353,56 +349,79 @@ export function createPrReviewRunner({
           request,
           analysis: initial,
           authorContext,
-          unifiedDiff: initialUnifiedDiff.slice(0, 120_000),
+          unifiedDiff: submitted.unifiedDiff.slice(0, 120_000),
           leakage: initialLeakage,
           docsOnly,
+          plan,
         }),
         timeoutMs: reviewerTimeoutMs,
       });
       if (!reviewResult.ok) {
         throw new Error("Opposite-model reviewer failed; output was withheld from the Check Run.");
       }
-      const [finalAnalysis, finalUnifiedDiff, finalChangedPaths] = await Promise.all([
+      const [finalAnalysis, reviewed] = await Promise.all([
         analyzePr({
           cliPath: anatomiaCliPath,
           cwd: worktrees.head,
           base: worktrees.mergeBase,
         }),
-        readUnifiedDiff(worktrees.head, worktrees.mergeBase),
-        readChangedPaths(worktrees.head, worktrees.mergeBase),
+        readChangeProfile(worktrees.head, worktrees.mergeBase),
       ]);
-      // The relaxation must follow the reviewed diff, not the submitted one: an
-      // autofix that touches code makes the change no longer docs-only, and the
-      // missing target domain has to block again.
-      const finalDocsOnly = isDocsOnlyChange(finalChangedPaths);
-      const finalLeakage = scanAddedDiffForLeaks(finalUnifiedDiff);
+      // The relaxation and the risk profile must follow the reviewed diff, not the
+      // submitted one: an autofix that touches code makes the change no longer
+      // docs-only, and the missing target domain has to block again.
+      const finalDocsOnly = reviewed.classification.docsOnly;
+      // For the same reason the plan itself has to follow the reviewed diff. A
+      // plan made for a documentation edit switched the registered tests and the
+      // code-analysis gating off; if the autofix introduced executable content,
+      // that plan no longer describes what is about to be merged, so everything
+      // decided from here on re-plans deterministically from the reviewed change.
+      // An advised plan is discarded here on purpose: the advisor answered a
+      // question about a change that no longer exists.
+      const finalPlan = hasExecutableChange(reviewed.classification)
+        && !hasExecutableChange(submitted.classification)
+        ? planReview({
+            classification: reviewed.classification,
+            testCases: request.testCases,
+          })
+        : plan;
+      // The scan still runs at most once per review pass — the pre-merge scan
+      // covers whatever the reviewer added. But once the re-plan asks for the
+      // vulnerability stage, the recorded outcome must stop claiming the plan
+      // never wanted it, or the board reports a reason that is no longer true.
+      const finalSecurity = initialSecurity.status === "skipped"
+        && !stageEnabled(plan, "security_review")
+        && stageEnabled(finalPlan, "security_review")
+        ? skippedSecurityScan(
+            "required only after the reviewer added executable content; covered by the pre-merge scan",
+          )
+        : initialSecurity;
+      const finalLeakage = scanAddedDiffForLeaks(reviewed.unifiedDiff);
       if (finalLeakage.totalFindings > 0) {
         throw new Error(
           "Opposite-model autofix introduced potential information leakage; changes were discarded before commit or push.",
         );
       }
-      const finalCi = await runRegisteredTests({
+      const finalCi = await runPlannedTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
+        plan: finalPlan,
         env,
       });
       if (!testsPassed(finalCi)) {
         return {
           ...buildGateResult({
-            request,
-            firstAnalysis,
+            ...gateInput,
             finalAnalysis: initial,
-            baseline,
             reviewer,
             contextSource: authorContext?.source ?? "pr-only",
             reviewedHeadSha: request.headSha,
             reviewerOutput: reviewResult.stdout,
-            complexityDropThreshold,
-            initialLeakage,
             leakage: initialLeakage,
             ci: finalCi,
             docsOnly,
-            security: initialSecurity,
+            plan: finalPlan,
+            security: finalSecurity,
           }),
           humanQuestion: "Reviewer changes were discarded because registered tests failed.",
         };
@@ -424,20 +443,18 @@ export function createPrReviewRunner({
       });
       return {
         ...buildGateResult({
-          request,
-          firstAnalysis,
+          ...gateInput,
           finalAnalysis,
-          baseline,
           reviewer,
           contextSource: authorContext?.source ?? "pr-only",
           reviewedHeadSha,
           reviewerOutput: reviewResult.stdout,
-          complexityDropThreshold,
-          initialLeakage,
           leakage: finalLeakage,
           ci: finalCi,
           docsOnly: finalDocsOnly,
-          security: initialSecurity,
+          plan: finalPlan,
+          classification: reviewed.classification,
+          security: finalSecurity,
         }),
         humanQuestion: needsHuman
           ? targetDomainQuestion(request.repository, request.number)
@@ -447,4 +464,28 @@ export function createPrReviewRunner({
       await cleanupWorktrees(repoPath, worktrees);
     }
   };
+}
+
+async function resolveAuthorContext({
+  settings,
+  concordiaUrl,
+  request,
+  workspaceRoot,
+  env,
+  transport,
+}) {
+  const httpContext = await loadConcordiaContext({
+    baseUrl: concordiaUrl,
+    repository: request.repository,
+    headRef: request.headRef,
+    transport,
+  });
+  if (httpContext) return httpContext;
+  if (!settings.concordiaContextEnabled) return null;
+  return loadPersistedConcordiaContext({
+    workspaceRoot,
+    repository: request.repository,
+    headRef: request.headRef,
+    dbPath: env.CONCORDIA_DB_PATH,
+  });
 }

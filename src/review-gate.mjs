@@ -1,3 +1,11 @@
+import { isDocsOnlyChange } from "./change-classification.mjs";
+import { codeAnalysisGating } from "./review-plan.mjs";
+
+// Re-exported because the gate, the reviewer prompt and the human question all
+// reach for it through this module; the classification itself lives with the rest
+// of the change profile.
+export { isDocsOnlyChange };
+
 // Spec traceability is reported, never merge-blocking: most repositories have
 // no complete Anatomia spec linkage yet, and blocking on it stops every PR
 // without protecting the goals this workflow exists for (keeping branches off
@@ -10,15 +18,6 @@
 // (Concordia#3). Until that non-determinism is fixed on the Anatomia side
 // (issue filed), an environment-dependent verdict must not block merges.
 const ADVISORY_GATES = new Set(["spec_linkage", "coupling_delta"]);
-
-// Documentation is itself the domain of a docs-only change, so a missing code
-// target domain must not block the merge (neco 2026-07-30). The domain review
-// itself still runs; only the gate is relaxed to an advisory.
-const DOC_FILE = /\.(md|markdown|mdx|txt|adoc|rst)$/i;
-
-export function isDocsOnlyChange(changedPaths) {
-  return changedPaths.length > 0 && changedPaths.every((path) => DOC_FILE.test(path));
-}
 
 // One definition of "this change still owes a code target domain", shared by the
 // merge gate, the reviewer prompt, and the human question, so the relaxation can
@@ -45,13 +44,26 @@ export function gateOutcome({
   leakage,
   ci,
   docsOnly = false,
+  plan = null,
   security,
 }) {
   const reasons = [];
   const advisories = [];
-  const failedTests = ci.filter((test) => test.status !== "passed");
+  // When the deterministic plan drops code analysis there is no baseline and the
+  // quality and architecture findings are not evidence the plan asked for, so
+  // gating on them would block a change on a check that was deliberately not part
+  // of its review. They are recorded as advisories instead. A skip a control
+  // planner asked for does not relax the gate: see `codeAnalysisGating`.
+  const codeAnalysis = codeAnalysisGating(plan);
+  const failedTests = ci.filter((test) => test.status === "failed");
   if (failedTests.length > 0) {
     reasons.push(`${failedTests.length} registered test case(s) failed`);
+  }
+  const skippedTests = ci.filter((test) => test.status === "skipped");
+  if (skippedTests.length > 0) {
+    advisories.push(
+      `${skippedTests.length} registered test case(s) were not required by the review plan`,
+    );
   }
   // needsTargetDomain stays the only place that decides whether the domain is
   // still owed; the gate only chooses where to record it.
@@ -66,8 +78,12 @@ export function gateOutcome({
     );
   }
   const failedGates = failedGateNames(finalAnalysis.architecture.verify);
-  const blockingGates = failedGates.filter((gate) => !ADVISORY_GATES.has(gate));
-  const advisoryGates = failedGates.filter((gate) => ADVISORY_GATES.has(gate));
+  const blockingGates = codeAnalysis
+    ? failedGates.filter((gate) => !ADVISORY_GATES.has(gate))
+    : [];
+  const advisoryGates = codeAnalysis
+    ? failedGates.filter((gate) => ADVISORY_GATES.has(gate))
+    : failedGates;
   if (blockingGates.length > 0) {
     reasons.push(`Anatomia gate(s) did not pass: ${blockingGates.join(", ")}`);
   }
@@ -77,14 +93,17 @@ export function gateOutcome({
   const changedViolations = finalAnalysis.architecture.changedViolations;
   const blockingViolations = changedViolations
     .filter((violation) => violation.severity === "error");
-  if (blockingViolations.length > 0) {
+  if (blockingViolations.length > 0 && codeAnalysis) {
     reasons.push(`${blockingViolations.length} changed architecture rule violation(s) remain`);
   }
-  const advisoryViolations = changedViolations.length - blockingViolations.length;
+  const advisoryViolations = codeAnalysis
+    ? changedViolations.length - blockingViolations.length
+    : changedViolations.length;
   if (advisoryViolations > 0) {
     advisories.push(`${advisoryViolations} non-blocking architecture rule violation(s) remain`);
   }
-  if (complexityScoreDelta <= -threshold) {
+  // A skipped code analysis produces no baseline, so there is no delta to gate on.
+  if (typeof complexityScoreDelta === "number" && complexityScoreDelta <= -threshold) {
     reasons.push(`complexity score dropped by ${Math.abs(complexityScoreDelta)} points`);
   }
   if (reviewerOutput.includes("PR_GATE_NEEDS_HUMAN")) {
@@ -115,4 +134,3 @@ export function gateOutcome({
   }
   return { reasons, advisories };
 }
-

@@ -1,8 +1,11 @@
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { autoMergeDecision, autoMergeRecord } from "./auto-merge.mjs";
+import { readSettings } from "./config.mjs";
 import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
+import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
 import { inspectLocalPullRequest, git } from "./workspace.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
@@ -30,8 +33,9 @@ export class LocalPrService {
     installGuard = installPushGuard,
     merge = squashMergeLocalPullRequest,
     securityScan,
-    env = process.env,
     cliPath = CLI_PATH,
+    env = process.env,
+    loadSettings = () => readSettings(env),
   }) {
     if (!store || !queue) {
       throw new TypeError("Local PR service requires a state store and review queue.");
@@ -43,6 +47,9 @@ export class LocalPrService {
     this.securityScan = securityScan;
     this.env = env;
     this.cliPath = cliPath;
+    // Read on every decision, not cached: moving the accepted risk threshold has
+    // to re-colour and re-sort the dashboard without restarting the service.
+    this.loadSettings = loadSettings;
   }
 
   async registerRepository(registration) {
@@ -154,11 +161,14 @@ export class LocalPrService {
   }
 
   getPullRequest(id) {
-    return this.store.getPullRequest(id);
+    const pullRequest = this.store.getPullRequest(id);
+    return pullRequest ? decidePullRequest(pullRequest, this.loadSettings()) : null;
   }
 
+  // Ordered so the pull requests that need a human decision come first. Everything
+  // else is a queue that hides the one row a person actually has to look at.
   listPullRequests() {
-    return this.store.listPullRequests();
+    return decidePullRequests(this.store.listPullRequests(), this.loadSettings());
   }
 
   testWorkflowProducts() {
@@ -184,5 +194,36 @@ export class LocalPrService {
       mergeCommitSha,
       mergedAt: new Date().toISOString(),
     });
+  }
+
+  // Called once per completed review. The outcome is always recorded, including a
+  // refusal, so the dashboard can say why a PR the human expected to disappear is
+  // still waiting.
+  async autoMergeIfEligible(id) {
+    const pullRequest = this.store.getPullRequest(id);
+    if (!pullRequest) return null;
+    const settings = this.loadSettings();
+    const decision = autoMergeDecision(pullRequest, settings);
+    if (!decision.merge) {
+      if (!settings.autoMergeEnabled) return pullRequest;
+      return this.store.updatePullRequest(id, {
+        autoMerge: autoMergeRecord({ merged: false, reason: decision.reason }),
+      });
+    }
+    try {
+      await this.mergePullRequest(id);
+      return this.store.updatePullRequest(id, {
+        autoMerge: autoMergeRecord({ merged: true, reason: decision.reason }),
+      });
+    } catch (error) {
+      return this.store.updatePullRequest(id, {
+        autoMerge: autoMergeRecord({
+          merged: false,
+          reason: `自動マージに失敗しました: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+      });
+    }
   }
 }

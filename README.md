@@ -20,24 +20,34 @@ leaves the workstation.
 2. Create a local PR from an existing, clean local branch. Revisor records
    title, body, author, base/head refs, and exact SHAs. It never fetches or
    pushes the feature branch.
-3. A disposable detached worktree runs every registered test, leakage scan,
-   temporary Anatomia PR analysis, and — when the leakage scan and tests
-   pass — one Codex Security scan of the committed PR diff.
-4. If the first scan and CI pass, the opposite-provider reviewer may apply
+3. Revisor plans the review from the change profile of the submitted diff: a
+   documentation edit skips the Anatomia code analysis and the Codex Security
+   scan and runs only the test cases that cover documentation, while the leakage
+   scan, the Anatomia domain review, the spec-requirement check and the
+   opposite-provider review always run.
+4. A disposable detached worktree runs the planned tests, the leakage scan, the
+   temporary Anatomia PR analysis, and — when the plan asked for it and neither
+   the leakage scan nor the tests already block — one Codex Security scan of the
+   committed PR diff.
+5. If the first scan and CI pass, the opposite-provider reviewer may apply
    scoped fixes. Revisor scans and tests the result again before advancing the
    local head branch.
-5. The UI exposes PR state, per-test outcomes, Anatomia data and complexity
-   score delta. Only passing open PRs appear in the test workflow as
-   `Open / Test OK`.
-6. Revisor creates one squash commit, runs the final Codex Security scan against
-   the exact squashed diff, and fast-forwards the local base branch. It does not
-   push.
+6. Revisor scores the merge risk and whether a human still has to run the
+   product, both itemised.
+7. The UI leads with the pull requests that need a human decision. Only passing
+   open PRs appear in the test workflow as `Open / Test OK`.
+8. A pull request at or below the risk threshold the operator accepted merges
+   automatically; everything else waits for a person. Revisor creates one squash
+   commit, runs the final Codex Security scan against the exact squashed diff,
+   and fast-forwards the local base branch. It does not push.
 
-The Codex Security scan runs once per review pass and once right before the
-squash merge. It never re-runs after the opposite-provider autofix; the
+The Codex Security scan runs at most once per review pass and once right before
+the squash merge. It never re-runs after the opposite-provider autofix; the
 pre-merge scan covers those edits. Findings at or above the configured severity
 block, and an incomplete or failed scan also blocks instead of reading as a
-pass. Scan report artifacts are deleted after each run.
+pass. A scan the review plan did not ask for is recorded as skipped with its
+reason, which is an advisory and never a pass. Scan report artifacts are deleted
+after each run.
 
 Matched leakage values and test output are not stored. Findings contain only a
 rule, file path, and line number; Codex Security findings additionally keep
@@ -67,17 +77,30 @@ revisor config path
 
 ## Pages
 
-`/` is the dashboard. It lists the open local pull requests first, then the
-registered projects. Selecting a pull request opens its detail: registered test
-outcomes, review state (reviewer, blocking reasons, advisories, leakage
-findings, open question), and the Anatomia diff analysis. A failed review can be
-re-queued against the branch heads as they stand at that moment.
+`/` is the dashboard. Open local pull requests come first as cards, ordered by
+who has to act next: the ones needing a human decision, then failures, then
+reviews in flight, then the ones clear to merge. Each card carries the decision
+badge, the merge-risk score against the configured threshold, whether a human
+still has to run the product, the test summary including skipped cases, and the
+reasons it is waiting. A filter shows only the ones needing a decision. The
+layout is responsive: on a phone the cards stack full width with touch-sized
+controls, so a decision can be made without a desktop.
+
+Selecting a pull request opens its detail: the decision with the itemised risk
+and runtime-verification factors, the review plan with each stage and why it ran
+or did not, registered test outcomes, review state (reviewer, blocking reasons,
+advisories, leakage findings, open question), and the Anatomia diff analysis. A
+failed review can be re-queued against the branch heads as they stand at that
+moment.
 
 Advisories are reported without blocking a merge: a failed Anatomia
-`spec_linkage` or `coupling_delta` gate, changed orphaned functions, and
-non-error architecture violations. Everything else — failed tests, leakage
-findings, error-severity violations, a material complexity drop, a missing
-target domain, any other Anatomia gate — still blocks.
+`spec_linkage` or `coupling_delta` gate, changed orphaned functions, non-error
+architecture violations, and test cases the review plan did not require.
+Everything else — failed tests, leakage findings, error-severity violations, a
+material complexity drop, a missing target domain, any other Anatomia gate —
+still blocks. When the deterministic plan drops code analysis, its gates and
+violations become advisories too, because nobody asked for that evidence on that
+change; a skip a control planner asked for does not relax the gate.
 
 `/settings` holds every configuration form, including project registration.
 
@@ -92,9 +115,24 @@ The loopback UI configures:
   cap;
 - one through eight worker processes;
 - optional Concordia context;
+- who decides the review plan: the deterministic rules alone, a daemon-less
+  Augur CLI, or a control model. A missing or failing planner falls back to the
+  deterministic plan, and an external model is never asked while a leakage match
+  is outstanding;
+- whether to merge automatically, the merge-risk score accepted for it (0–100),
+  and whether a required human run blocks it. Automatic merging is off until the
+  accepted risk is stated;
 - an encrypted local workflow API token.
 - encrypted allowed hostnames for Cloudflare Tunnel or another local reverse
   proxy. Loopback hostnames remain permanently allowed.
+
+A test case may declare which change kinds it covers (`kinds`), that it always
+runs (`always`), and that it is a runtime check (`runtime`). A case that declares
+nothing covers executable change only, so existing registrations behave exactly
+as before on code and stop running on documentation-only changes.
+
+Moving the accepted risk threshold takes effect on the next read: the board
+re-colours, re-orders, and re-qualifies without re-reviewing anything.
 
 Configure a new external hostname from `http://127.0.0.1:<port>/` first. Host
 entries are exact, case-insensitive hostname matches; schemes and paths are not

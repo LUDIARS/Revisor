@@ -24,10 +24,24 @@ function defaults() {
     fallbackReviewer: "codex-sol",
     concordiaContextEnabled: true,
     workerCount: 1,
+    // Automatic merging stays off until a human sets the risk they accept. The
+    // threshold is the human's decision, so there is no safe value to assume.
+    autoMergeEnabled: false,
+    autoMergeRiskThreshold: 15,
+    autoMergeRequiresRuntimeVerificationClear: true,
+    planAdvisor: "none",
+    augurFolder: "",
     securityScanEnabled: true,
     securityFailOnSeverity: "high",
     securityMaxCostUsd: 5,
   };
+}
+
+const PLAN_ADVISOR_VALUES = new Set(["none", "augur", "reviewer"]);
+
+function riskThreshold(value, fallback) {
+  const score = Number(value);
+  return Number.isInteger(score) && score >= 0 && score <= 100 ? score : fallback;
 }
 
 export function resolveConfigPath(
@@ -125,6 +139,17 @@ export function readSettings(env = process.env) {
       && value.workerCount <= 8
       ? value.workerCount
       : base.workerCount,
+    autoMergeEnabled: value.autoMergeEnabled === true,
+    autoMergeRiskThreshold: riskThreshold(
+      value.autoMergeRiskThreshold,
+      base.autoMergeRiskThreshold,
+    ),
+    autoMergeRequiresRuntimeVerificationClear:
+      value.autoMergeRequiresRuntimeVerificationClear !== false,
+    planAdvisor: PLAN_ADVISOR_VALUES.has(value.planAdvisor)
+      ? value.planAdvisor
+      : base.planAdvisor,
+    augurFolder: typeof value.augurFolder === "string" ? value.augurFolder : base.augurFolder,
     securityScanEnabled: value.securityScanEnabled !== false,
     securityFailOnSeverity: SECURITY_SEVERITIES.has(value.securityFailOnSeverity)
       ? value.securityFailOnSeverity
@@ -151,6 +176,29 @@ export function writeSettings(settings, env = process.env) {
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > 8) {
     throw new RevisorError("Worker count must be an integer from 1 to 8.");
   }
+  const current = readSettings(env);
+  const autoMergeRiskThreshold = settings.autoMergeRiskThreshold === undefined
+    ? current.autoMergeRiskThreshold
+    : Number(settings.autoMergeRiskThreshold);
+  if (
+    !Number.isInteger(autoMergeRiskThreshold)
+    || autoMergeRiskThreshold < 0
+    || autoMergeRiskThreshold > 100
+  ) {
+    throw new RevisorError("Auto-merge risk threshold must be an integer from 0 to 100.");
+  }
+  const planAdvisor = settings.planAdvisor === undefined
+    ? current.planAdvisor
+    : settings.planAdvisor;
+  if (!PLAN_ADVISOR_VALUES.has(planAdvisor)) {
+    throw new RevisorError("Plan advisor must be none, augur, or reviewer.");
+  }
+  const augurFolder = settings.augurFolder === undefined
+    ? current.augurFolder
+    : String(settings.augurFolder).trim();
+  if (planAdvisor === "augur" && !augurFolder) {
+    throw new RevisorError("Augur folder is required when Augur plans the review.");
+  }
   const securityFailOnSeverity = settings.securityFailOnSeverity
     ?? defaults().securityFailOnSeverity;
   if (!SECURITY_SEVERITIES.has(securityFailOnSeverity)) {
@@ -170,6 +218,16 @@ export function writeSettings(settings, env = process.env) {
     fallbackReviewer: settings.fallbackReviewer,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,
+    autoMergeEnabled: settings.autoMergeEnabled === undefined
+      ? current.autoMergeEnabled
+      : settings.autoMergeEnabled === true,
+    autoMergeRiskThreshold,
+    autoMergeRequiresRuntimeVerificationClear:
+      settings.autoMergeRequiresRuntimeVerificationClear === undefined
+        ? current.autoMergeRequiresRuntimeVerificationClear
+        : settings.autoMergeRequiresRuntimeVerificationClear !== false,
+    planAdvisor,
+    augurFolder,
     securityScanEnabled: settings.securityScanEnabled !== false,
     securityFailOnSeverity,
     securityMaxCostUsd,

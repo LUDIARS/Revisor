@@ -12,6 +12,8 @@ tags:
 status: implemented
 related:
   - ../architecture.md
+  - ./review-plan.md
+  - ./merge-risk.md
 updated: 2026-07-30
 ---
 
@@ -43,7 +45,35 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 - 孤立関数 (orphan)
 - error 未満のアーキテクチャ違反
 - **docs-only 変更の対象ドメイン欠如**
+- レビュー計画が担当外とした登録テスト (`status: "skipped"`)
+- 決定的ルールが `anatomia_code_analysis` を落としたときの全ゲート・全違反
 - 設定無効 (`disabled by settings`) 以外の理由でスキップされたセキュリティスキャン
+
+## レビュー計画による降格 (neco 決定 2026-07-30)
+
+**決定的ルール**が `anatomia_code_analysis` を落とした審査では、
+quality / architecture のゲートと違反を**ブロックにしない**。ベースラインが
+無いので complexity 差分も `null` になり、複雑度低下でのブロックも起きない。
+計画が「この変更に不要」と判断した検査の所見でブロックすると、誰も依頼して
+いない証拠で変更を止めることになるため。ゲートの他条件 (テスト失敗・leakage・
+対象ドメイン・`PR_GATE_NEEDS_HUMAN`) は不変。
+
+降格の根拠は「その変更はコード解析の証拠を負っていない」であり、これが成り立つ
+のは実行コードを含まない変更だけ。したがって**管制プランナーの省略要求では降格
+しない** (`codeAnalysisGating`)。head 側の `pr-review` 解析はどちらの場合も走って
+おり、所見は実在する。管制 LLM が「このステージは不要」と言うだけで
+severity=error のアーキテクチャ違反をブロックから外せるなら、それはマージゲート
+ではなくなる。省略で節約されるのは高価なベースライン解析であって、ゲートの
+厳しさではない。
+
+登録テストの `skipped` は失敗ではない。ブロック判定は `status === "failed"`
+だけを見る。
+
+セキュリティスキャンも計画で落とせる。`security_review` を落とした審査では
+`codex-security` CLI を起動せず、`skipped` (理由: `not required by the review
+plan`) として記録する。これは advisory であって pass ではない。docs 変更のたびに
+1 回あたりのコスト上限まで払って「攻撃面はありません」と言わせるのが、計画が
+無くそうとしている無駄そのものだから。
 
 ## docs-only 緩和 (neco 決定 2026-07-30)
 

@@ -6,11 +6,21 @@ export function reviewerForProvider(provider, fallbackReviewer) {
   return fallbackReviewer;
 }
 
-export async function runReviewer({ reviewer, cwd, prompt, timeoutMs }) {
+// `readOnly` is for callers that only want an answer, never an edit — the review
+// plan advisor being the one. It asks a question about the diff and consumes a
+// JSON reply, so granting it write access to a worktree whose contents are later
+// committed would be privilege it has no use for, guarded only by the prompt.
+export async function runReviewer({ reviewer, cwd, prompt, timeoutMs, readOnly = false }) {
   if (reviewer === "claude-opus") {
     return runNamedCli({
       name: "claude",
-      args: ["--model", "opus", "--permission-mode", "acceptEdits", "--print"],
+      args: [
+        "--model",
+        "opus",
+        "--permission-mode",
+        readOnly ? "plan" : "acceptEdits",
+        "--print",
+      ],
       cwd,
       stdin: prompt,
       timeoutMs,
@@ -24,7 +34,7 @@ export async function runReviewer({ reviewer, cwd, prompt, timeoutMs }) {
         "--model",
         "gpt-5.6-sol",
         "--sandbox",
-        "workspace-write",
+        readOnly ? "read-only" : "workspace-write",
         "-",
       ],
       cwd,

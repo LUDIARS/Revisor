@@ -33,6 +33,12 @@ test("stores settings and encrypts local workflow secrets", () => {
       fallbackReviewer: "codex-sol",
       concordiaContextEnabled: true,
       workerCount: 1,
+      // Automatic merging is off until a human states the risk they accept.
+      autoMergeEnabled: false,
+      autoMergeRiskThreshold: 15,
+      autoMergeRequiresRuntimeVerificationClear: true,
+      planAdvisor: "none",
+      augurFolder: "",
       securityScanEnabled: true,
       securityFailOnSeverity: "high",
       securityMaxCostUsd: 5,
@@ -128,6 +134,67 @@ test("fails without replacing a missing encryption key", () => {
     unlinkSync(state.env.REVISOR_KEY_PATH);
     assert.throws(() => readWorkflowToken(state.env), /could not be decrypted/);
     assert.equal(hasWorkflowToken(state.env), false);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("persists the human's auto-merge threshold and the plan advisor", () => {
+  const state = fixture();
+  try {
+    writeSettings({
+      anatomiaFolder: "E:/Document/Ars/Anatomia",
+      fallbackReviewer: "codex-sol",
+      concordiaContextEnabled: true,
+      workerCount: 1,
+      autoMergeEnabled: true,
+      autoMergeRiskThreshold: 30,
+      autoMergeRequiresRuntimeVerificationClear: false,
+      planAdvisor: "augur",
+      augurFolder: "E:/Document/Ars/Augur",
+    }, state.env);
+    const settings = readSettings(state.env);
+    assert.equal(settings.autoMergeEnabled, true);
+    assert.equal(settings.autoMergeRiskThreshold, 30);
+    assert.equal(settings.autoMergeRequiresRuntimeVerificationClear, false);
+    assert.equal(settings.planAdvisor, "augur");
+    assert.equal(settings.augurFolder, "E:/Document/Ars/Augur");
+    // An omitted field keeps what the operator already chose instead of silently
+    // resetting the accepted risk to the default.
+    writeSettings({
+      anatomiaFolder: "E:/Document/Ars/Anatomia",
+      fallbackReviewer: "codex-sol",
+      concordiaContextEnabled: true,
+      workerCount: 1,
+    }, state.env);
+    assert.equal(readSettings(state.env).autoMergeRiskThreshold, 30);
+    assert.equal(readSettings(state.env).planAdvisor, "augur");
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects an out-of-range threshold, an unknown advisor and Augur without a folder", () => {
+  const state = fixture();
+  const base = {
+    anatomiaFolder: "E:/Document/Ars/Anatomia",
+    fallbackReviewer: "codex-sol",
+    concordiaContextEnabled: true,
+    workerCount: 1,
+  };
+  try {
+    assert.throws(
+      () => writeSettings({ ...base, autoMergeRiskThreshold: 101 }, state.env),
+      /threshold must be an integer/,
+    );
+    assert.throws(
+      () => writeSettings({ ...base, planAdvisor: "oracle" }, state.env),
+      /Plan advisor must be/,
+    );
+    assert.throws(
+      () => writeSettings({ ...base, planAdvisor: "augur", augurFolder: "" }, state.env),
+      /Augur folder is required/,
+    );
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

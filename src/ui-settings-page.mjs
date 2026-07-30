@@ -27,6 +27,37 @@ const BODY = `
         </label>
       </div>
       <div class="field">
+        <label for="plan-advisor">レビュー計画の決定者</label>
+        <select id="plan-advisor">
+          <option value="none">決定的ルールのみ（変更種別から機械的に決める）</option>
+          <option value="augur">Augur CLI に相談する（テスト計画サービスの CLI）</option>
+          <option value="reviewer">管制 LLM に相談する（レビュアーと同じモデル）</option>
+        </select>
+        <span class="note">相談先が無い・失敗した場合は決定的ルールの計画をそのまま使います。情報流出候補が残る間は外部モデルへ相談しません。</span>
+      </div>
+      <div class="field">
+        <label for="augur-folder">Augur フォルダ（相談先が Augur のとき必須）</label>
+        <input id="augur-folder" placeholder="E:\\\\Document\\\\Ars\\\\Augur">
+        <span class="note">bin/augur.mjs の review-plan サブコマンドを呼びます。</span>
+      </div>
+      <div class="field">
+        <label class="check">
+          <input id="auto-merge-enabled" type="checkbox">
+          マージリスクが閾値以下の PR をオートマージする
+        </label>
+      </div>
+      <div class="field">
+        <label for="auto-merge-threshold">許容するマージリスク（0〜100、これ以下はオートマージ）</label>
+        <input id="auto-merge-threshold" type="number" min="0" max="100" step="1" required>
+        <span class="note">審査済みの PR に対して即時に再判定されます。閾値を下げると判断待ちに戻ります。</span>
+      </div>
+      <div class="field">
+        <label class="check">
+          <input id="auto-merge-runtime-clear" type="checkbox">
+          人間による動作確認が必要な PR はオートマージしない
+        </label>
+      </div>
+      <div class="field">
         <label class="check">
           <input id="security-scan-enabled" type="checkbox">
           Codex Security スキャンを実行する（初回レビュー時とマージ直前のみ）
@@ -68,17 +99,21 @@ const BODY = `
       <div class="field"><label for="repository-path">root path</label><input id="repository-path" required placeholder="E:\\\\Document\\\\Ars\\\\Revisor"></div>
       <div class="field"><label for="repository-base">base branch</label><input id="repository-base" required value="main"></div>
       <div class="field"><label for="repository-tests">test cases (JSON)</label><textarea id="repository-tests" required>[
-  {"name":"unit","command":"npm","args":["test"],"cwd":"."},
-  {"name":"check","command":"npm","args":["run","check"],"cwd":"."}
-]</textarea></div>
+  {"name":"unit","command":"npm","args":["test"],"cwd":".","kinds":["code","test","config"]},
+  {"name":"check","command":"npm","args":["run","check"],"cwd":".","always":true}
+]</textarea>
+        <span class="note">kinds はそのテストが担当する変更種別 (code / docs / test / config / infra / asset / generated)。未指定なら実行コードを含む変更のみを担当します。always: true は常に実行。製品を起動して確かめる種類のテストには runtime: true を付けると「動作テスト」として扱われ、通過が動作確認の必要性を下げます (例 <code>{"name":"smoke","command":"npm","args":["run","smoke"],"kinds":["code","infra"],"runtime":true}</code>)。既定値はこのリポジトリに実在する npm script だけを使うので、そのまま登録しても審査は通ります。</span>
+      </div>
       <button type="submit">登録</button>
       <p id="repository-message" role="status"></p>
     </form>
     <h3>登録済み</h3>
-    <table>
-      <thead><tr><th>repository</th><th>root path</th><th>base</th><th>テストケース</th></tr></thead>
-      <tbody id="repository-rows"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>repository</th><th>root path</th><th>base</th><th>テストケース</th></tr></thead>
+        <tbody id="repository-rows"></tbody>
+      </table>
+    </div>
   </section>
 `;
 
@@ -100,6 +135,12 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
     document.querySelector('#concordia-context').checked = state.settings.concordiaContextEnabled;
+    document.querySelector('#plan-advisor').value = state.settings.planAdvisor;
+    document.querySelector('#augur-folder').value = state.settings.augurFolder;
+    document.querySelector('#auto-merge-enabled').checked = state.settings.autoMergeEnabled;
+    document.querySelector('#auto-merge-threshold').value = String(state.settings.autoMergeRiskThreshold);
+    document.querySelector('#auto-merge-runtime-clear').checked =
+      state.settings.autoMergeRequiresRuntimeVerificationClear;
     document.querySelector('#security-scan-enabled').checked = state.settings.securityScanEnabled;
     document.querySelector('#security-severity').value = state.settings.securityFailOnSeverity;
     document.querySelector('#security-max-cost').value = String(state.settings.securityMaxCostUsd);
@@ -117,7 +158,10 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
         cell(repository.repository),
         cell(repository.rootPath),
         cell(repository.baseRef),
-        cell(repository.testCases.map((entry) => entry.name).join(', ')),
+        cell(repository.testCases.map((entry) => {
+          const scope = entry.always ? 'always' : ((entry.kinds || []).join('/') || '実行コード');
+          return entry.name + ' [' + scope + (entry.runtime ? ' · runtime' : '') + ']';
+        }).join(', ')),
       );
       return row;
     }));
@@ -135,6 +179,12 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
           workerCount: Number(document.querySelector('#worker-count').value),
           concordiaContextEnabled: document.querySelector('#concordia-context').checked,
+          planAdvisor: document.querySelector('#plan-advisor').value,
+          augurFolder: document.querySelector('#augur-folder').value,
+          autoMergeEnabled: document.querySelector('#auto-merge-enabled').checked,
+          autoMergeRiskThreshold: Number(document.querySelector('#auto-merge-threshold').value),
+          autoMergeRequiresRuntimeVerificationClear:
+            document.querySelector('#auto-merge-runtime-clear').checked,
           securityScanEnabled: document.querySelector('#security-scan-enabled').checked,
           securityFailOnSeverity: document.querySelector('#security-severity').value,
           securityMaxCostUsd: Number(document.querySelector('#security-max-cost').value),

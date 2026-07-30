@@ -1,5 +1,6 @@
 import { resolve, relative } from "node:path";
 import { runProcess } from "./process.mjs";
+import { selectedTestCases, skippedTestOutcomes } from "./review-plan.mjs";
 
 function testCwd(worktreePath, configuredCwd) {
   const path = resolve(worktreePath, configuredCwd);
@@ -59,6 +60,33 @@ export async function runRegisteredTests({
   return results;
 }
 
+// Executes only the cases the review plan selected and records the rest as
+// `skipped` with the reason, so the dashboard shows what was not run instead of
+// a shorter list that reads like a smaller suite.
+export async function runPlannedTests({
+  worktreePath,
+  testCases,
+  plan,
+  env = process.env,
+  execute = runProcess,
+  now = () => Date.now(),
+}) {
+  if (!Array.isArray(testCases) || testCases.length === 0) {
+    throw new Error("The repository has no registered test cases.");
+  }
+  const selected = selectedTestCases(plan, testCases);
+  const executed = selected.length > 0
+    ? await runRegisteredTests({ worktreePath, testCases: selected, env, execute, now })
+    : [];
+  return [...executed, ...skippedTestOutcomes(plan)];
+}
+
+// A skipped case is not a failure: the plan decided the change does not need it.
+// Only an actual failing run blocks. An empty result set is still not a pass —
+// a repository always has at least one registered case, so nothing to report
+// means the run did not happen rather than that it succeeded.
 export function testsPassed(results) {
-  return results.length > 0 && results.every((result) => result.status === "passed");
+  return Array.isArray(results)
+    && results.length > 0
+    && results.every((result) => result.status !== "failed");
 }

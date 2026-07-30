@@ -8,24 +8,35 @@ import {
   isLoopbackHost,
 } from "../src/ui-security.mjs";
 
-test("the dashboard lists open PRs before registered projects", () => {
+test("the dashboard leads with the PRs waiting on a human", () => {
   const page = renderDashboardPage("session-nonce");
   assert.match(page, /<h1>Revisor<\/h1>/);
   assert.match(page, /LUDIARS LOCAL PR WORKFLOW/);
-  assert.ok(page.indexOf("<h2>Open PR</h2>") >= 0);
-  assert.ok(page.indexOf("<h2>Open PR</h2>") < page.indexOf("<h2>登録プロジェクト</h2>"));
+  assert.ok(page.indexOf("<h2>PR の判断待ち</h2>") >= 0);
+  assert.ok(page.indexOf("<h2>PR の判断待ち</h2>") < page.indexOf("<h2>登録プロジェクト</h2>"));
+  assert.match(page, /判断が必要なものだけ表示/);
   assert.match(page, /Open \/ Test OK/);
   assert.match(page, /nonce="session-nonce"/);
 });
 
-test("the dashboard exposes per-PR test, review and diff analysis detail", () => {
+test("the dashboard exposes decision, plan, test, review and diff analysis detail", () => {
   const page = renderDashboardPage("session-nonce");
   assert.match(page, /選択した PR の詳細/);
+  assert.match(page, /block\('判断', decisionOf\(pr\)\)/);
+  assert.match(page, /block\('レビュー計画', planOf\(pr\.reviewPlan\)\)/);
   assert.match(page, /block\('テスト', testsOf\(pr\)\)/);
   assert.match(page, /block\('レビュー', reviewOf\(pr\)\)/);
   assert.match(page, /block\('差分解析 \(Anatomia\)', analysisOf\(pr\)\)/);
-  assert.match(page, /selectedPrId = pr\.id/);
+  assert.match(page, /selectedPrId = id/);
   assert.match(page, /runAction\(retry, pr\.id, 'retry'\)/);
+});
+
+test("the dashboard renders PRs as cards and keeps the risk badge in the card head", () => {
+  const page = renderDashboardPage("session-nonce");
+  assert.match(page, /class="cards" id="pr-cards"/);
+  assert.match(page, /badge\(pr\.decision\.label, pr\.decision\.tone\)/);
+  assert.match(page, /decision\.riskScore \+ ' \/ 閾値 ' \+ decision\.riskThreshold/);
+  assert.match(page, /@media \(max-width: 700px\)/);
 });
 
 test("the dashboard keeps configuration on the settings page", () => {
@@ -46,7 +57,17 @@ test("renders a dedicated token-free settings page", () => {
   assert.doesNotMatch(page, /GitHub App ID/);
   assert.match(page, /nonce="session-nonce"/);
   assert.doesNotMatch(page, /origin-secret/);
-  assert.doesNotMatch(page, /<h2>Open PR<\/h2>/);
+  assert.doesNotMatch(page, /<h2>PR の判断待ち<\/h2>/);
+});
+
+test("the settings page owns the auto-merge threshold and the plan advisor", () => {
+  const page = renderSettingsPage("session-nonce");
+  assert.match(page, /許容するマージリスク/);
+  assert.match(page, /オートマージする/);
+  assert.match(page, /人間による動作確認が必要な PR はオートマージしない/);
+  assert.match(page, /レビュー計画の決定者/);
+  assert.match(page, /Augur CLI に相談する/);
+  assert.match(page, /autoMergeRiskThreshold: Number/);
 });
 
 test("limits settings access to loopback and the UI session", () => {

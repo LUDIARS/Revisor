@@ -161,6 +161,72 @@ test("needsTargetDomain follows the docs-only relaxation", () => {
   assert.equal(needsTargetDomain(withDomain, true), false);
 });
 
+test("a plan that drops code analysis downgrades its gates to advisories", () => {
+  const skipped = {
+    stages: [{ id: "anatomia_code_analysis", run: false, reason: "実行コードを含まない変更です" }],
+  };
+  const subject = analysis({
+    gates: [{ gate: "rule_conformance", pass: false }],
+    changedViolations: [{ severity: "error", rule: "layering" }],
+  });
+  const blocked = evaluate(subject);
+  assert.equal(blocked.reasons.length > 0, true);
+  const relaxed = evaluate(subject, { plan: skipped });
+  assert.deepEqual(relaxed.reasons, []);
+  assert.equal(
+    relaxed.advisories.some((entry) => entry.includes("rule_conformance")),
+    true,
+  );
+  assert.equal(
+    relaxed.advisories.some((entry) => entry.includes("architecture rule violation")),
+    true,
+  );
+});
+
+test("a control planner cannot demote a blocking architecture error to an advisory", () => {
+  // The stage is off exactly as above, but this time a control planner asked for
+  // it. The head analysis ran either way, so the findings are real evidence and
+  // the gate must still block — otherwise an LLM's plan silences the merge gate.
+  const advised = {
+    stages: [{ id: "anatomia_code_analysis", run: false, reason: "小さい変更なので不要 (管制プランナー判断)" }],
+    advisedSkips: [{ id: "anatomia_code_analysis", reason: "小さい変更なので不要" }],
+  };
+  const outcome = evaluate(
+    analysis({
+      gates: [{ gate: "rule_conformance", pass: false }],
+      changedViolations: [{ severity: "error", rule: "layering" }],
+    }),
+    { plan: advised },
+  );
+  assert.equal(
+    outcome.reasons.some((entry) => entry.includes("rule_conformance")),
+    true,
+  );
+  assert.equal(
+    outcome.reasons.some((entry) => entry.includes("architecture rule violation")),
+    true,
+  );
+});
+
+test("a complexity delta that was never measured cannot block", () => {
+  const outcome = evaluate(analysis(), { complexityScoreDelta: null });
+  assert.deepEqual(outcome.reasons, []);
+});
+
+test("a test case the plan did not require is an advisory, not a failure", () => {
+  const outcome = evaluate(analysis(), {
+    ci: [
+      { name: "unit", status: "passed" },
+      { name: "smoke", status: "skipped", reason: "変更種別を担当しません" },
+    ],
+  });
+  assert.deepEqual(outcome.reasons, []);
+  assert.equal(
+    outcome.advisories.some((entry) => entry.includes("not required by the review plan")),
+    true,
+  );
+});
+
 test("blocks on security findings and on an incomplete security scan", () => {
   const findings = evaluate(analysis(), {
     security: { status: "findings", totalFindings: 3, failOnSeverity: "high" },

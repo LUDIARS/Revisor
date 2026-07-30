@@ -134,7 +134,12 @@ export async function startRevisor({
   }
   const settings = readSettings(env);
   const store = stateStore ?? new LocalPrStore({ path: resolveStatePath(env) });
-  const reporter = new LocalPrReporter(store);
+  // Late-bound on purpose: the reporter is constructed before the service that
+  // owns merging, and the automatic merge has to run the moment a review lands.
+  let localPrService;
+  const reporter = new LocalPrReporter(store, {
+    afterCompleted: (id) => localPrService?.autoMergeIfEligible(id),
+  });
   const workerPool = runner
     ? null
     : createWorkerPool({ size: settings.workerCount, cwd, env });
@@ -143,10 +148,11 @@ export async function startRevisor({
     concurrency: settings.workerCount,
     reporter,
   });
-  // `env` has to reach the service: the pre-merge security scan resolves its
-  // settings from it, and a service left on process.env would scan under a
-  // different configuration than the one /api/settings reads and writes.
-  const localPrService = createLocalPrService({ store, queue, env });
+  // `env` has to reach the service: the pre-merge security scan and the
+  // auto-merge risk threshold both resolve their settings from it, and a service
+  // left on process.env would decide under a different configuration than the one
+  // /api/settings reads and writes.
+  localPrService = createLocalPrService({ store, queue, env });
   const sessionToken = randomBytes(24).toString("base64url");
   const server = createServer(createRequestHandler({
     env,

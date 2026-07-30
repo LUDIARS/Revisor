@@ -24,15 +24,20 @@ export function pendingReviewProjection() {
     reasons: [],
     advisories: [],
     humanQuestion: null,
+    reviewPlan: null,
+    mergeRisk: null,
+    runtimeVerification: null,
+    autoMerge: null,
   };
 }
 
 export class LocalPrReporter {
-  constructor(store) {
+  constructor(store, { afterCompleted = null } = {}) {
     if (!store || typeof store.updatePullRequest !== "function") {
       throw new TypeError("Local PR reporter requires a state store.");
     }
     this.store = store;
+    this.afterCompleted = afterCompleted;
   }
 
   async queued(job) {
@@ -61,7 +66,22 @@ export class LocalPrReporter {
       reasons: job.result?.reasons ?? [],
       advisories: job.result?.advisories ?? [],
       humanQuestion: job.result?.humanQuestion ?? null,
+      reviewPlan: job.result?.plan ?? null,
+      mergeRisk: job.result?.mergeRisk ?? null,
+      runtimeVerification: job.result?.runtimeVerification ?? null,
     });
+    // Automatic merging is a post-review decision, so it hangs off the completed
+    // projection rather than the runner: the runner executes in a worker process
+    // and owns no local Git ref advancement beyond the reviewed head.
+    // A refused or failed automatic merge must not turn a successful review into
+    // a failed job: the queue treats a throwing reporter as a worker failure.
+    if (this.afterCompleted) {
+      try {
+        await this.afterCompleted(job.request.localPrId);
+      } catch {
+        // The attempt records its own outcome on the pull request.
+      }
+    }
   }
 
   async failed(job) {

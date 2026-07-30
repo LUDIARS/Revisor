@@ -19,7 +19,22 @@ runtime architecture.
 - `runner.mjs` orchestrates one admitted review.
 - `workspace.mjs` owns local-ref validation, disposable worktrees, and
   compare-and-swap branch advancement. It does not fetch or push.
+- `change-classification.mjs` derives the change profile — per-path kind, runtime
+  surfaces, and diff size — from the changed paths and the unified diff.
+- `review-diff.mjs` reads the unified diff and the changed paths out of a
+  worktree and turns them into that profile.
+- `review-plan.mjs` decides which stages and which registered test cases one
+  change needs, and enforces the safety floor an advised plan cannot cross.
+- `plan-advisor.mjs` optionally asks a daemon-less Augur CLI or a control model
+  for a plan and always fails soft back to the deterministic one.
+- `merge-risk.mjs` scores the runtime-verification requirement and the merge
+  risk, itemised.
+- `pr-disposition.mjs` derives, at read time, whether a pull request needs a
+  human and how the board is ordered.
+- `auto-merge.mjs` decides whether a reviewed pull request is below the risk the
+  operator accepted.
 - `ci.mjs` runs registered argv test cases and retains outcome metadata only.
+  Cases the plan did not select are recorded as `skipped` with the reason.
 - `anatomia.mjs` owns direct CLI analysis.
 - `leakage.mjs` detects sensitive additions without retaining matched values.
 - `security-scan.mjs` runs the `codex-security` CLI over a committed diff in a
@@ -35,9 +50,10 @@ runtime architecture.
 - `host-policy.mjs` normalizes exact hostnames and authorizes loopback or
   encrypted configured hosts.
 - `ui-*.mjs` own the workflow surface exposed directly on loopback or through a
-  configured local reverse proxy. `ui-layout.mjs` owns the shared shell, the
-  dashboard page owns open PRs and their review detail, and the settings page
-  owns every configuration form.
+  configured local reverse proxy. `ui-styles.mjs` owns the responsive stylesheet,
+  `ui-layout.mjs` the shared shell, `ui-pr-view-script.mjs` the client-side card
+  and detail rendering, the dashboard page the board and its controller, and the
+  settings page every configuration form.
 
 The queue concurrency and worker-process count use the same validated setting,
 so the queue never admits more runs than the pool can execute.
@@ -47,11 +63,23 @@ so the queue never admits more runs than the pool can execute.
 A repository registration contains its local root, base ref, test cases, and
 managed hook path. At least one test case is required.
 
+A repository test case may additionally declare the change kinds it covers
+(`kinds`), that it always runs (`always`), and that it constitutes a runtime
+check (`runtime`). All three are optional; a case that declares nothing covers
+executable change only.
+
 A local PR records title, body, author, draft, labels, assignees, reviewers,
 sequential repository-local number, base/head refs, exact original SHAs,
-workflow status, CI outcomes, projected Anatomia data, leakage locations,
-the security scan outcome and its finding locations, and the final reviewed SHA.
-The test workflow is a derived view containing only PRs in `Open / Test OK`.
+workflow status, CI outcomes, projected Anatomia data, leakage locations, the
+security scan outcome and its finding locations, the review plan, the merge-risk
+and runtime-verification assessments, the automatic merge outcome, and the final
+reviewed SHA. The test workflow is a derived view containing only PRs in
+`Open / Test OK`.
+
+Whether a pull request needs a human is not stored. It is derived on every read
+from the stored assessments and the current settings, so moving the accepted
+risk threshold re-colours, re-orders, and re-qualifies the board immediately
+without re-reviewing anything.
 
 Re-reviewing an open local PR re-resolves both refs, discards the previous
 run's outcome, and admits a new run even when neither ref moved.
@@ -70,6 +98,28 @@ run's outcome, and admits a new run even when neither ref moved.
   worktrees.
 - The workflow token and configured external hostnames are encrypted locally;
   the token is never returned by the API.
+
+## Review plan
+
+Every review decides its own stage plan before any expensive stage runs, from
+the change profile of the submitted diff. A change with no executable content
+drops the code analysis and the vulnerability pass but never the leakage scan,
+the domain review, the spec-requirement check, or the opposite-provider review.
+An optional control planner — a daemon-less Augur CLI or a control model — may
+adjust the plan inside a safety floor it cannot cross, and any planner failure
+leaves the deterministic plan in force. An external-model planner is not invoked
+while a high-confidence leakage match is outstanding, the same boundary the
+review itself obeys. `spec/feature/review-plan.md` is authoritative.
+
+## Automatic merging
+
+A reviewed pull request carries an itemised merge-risk score and a
+runtime-verification judgement. The operator states the risk they accept; a pull
+request at or below that threshold, with no blocking reason, no open question,
+not a draft, and — unless the operator says otherwise — no outstanding runtime
+verification, merges automatically once, and records the outcome either way.
+Automatic merging is off by default. `spec/feature/merge-risk.md` is
+authoritative.
 
 ## Merge and push boundary
 
@@ -132,6 +182,12 @@ an environment-dependent verdict must not block a merge.
 
 An Anatomia verification that fails while naming no gate blocks the merge; it is
 never treated as a pass.
+
+When the review plan drops code analysis there is no baseline, so the complexity
+delta is absent and cannot block, and the quality and architecture findings are
+recorded as advisories: gating on a check the plan deliberately did not ask for
+would block a change on evidence nobody requested. A registered test the plan did
+not select is `skipped`, which is an advisory and never a failure.
 
 ## Failure policy
 
