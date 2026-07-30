@@ -12,7 +12,7 @@ status: implemented
 related:
   - ./review-gate.md
   - ../architecture.md
-updated: 2026-07-30
+updated: 2026-07-31
 ---
 
 # security-scan — codex-security スキャンの起動と結果の正規化
@@ -67,3 +67,26 @@ severity は比較不能なので除外せず数える (スキャナは既にブ
 - 保持しない: ソース抜粋・再現手順・stderr。`error` の理由は終了コードのみ。
 - `--output-dir` のレポート成果物は成功・失敗・例外のいずれでも `finally` で
   削除する。
+
+## 既知の制約: 日本語コミットでスキャンが完走しない (2026-07-31)
+
+`@openai/codex-security` v0.1.4 の同梱 Python プラグインは、`git show -s
+--format=%s HEAD` の出力を `subprocess.run(..., text=True)` で encoding 指定
+なしに読む。Windows の日本語ロケールでは CP932 デコードになるため、UTF-8 の
+日本語コミット subject が `UnicodeDecodeError` を起こす。デコードスレッドが
+死んで `completed.stdout` が `None` になり、`git_output` が `.strip()` で
+二次クラッシュして exit 2 (incomplete) で終わる。
+
+LUDIARS のコミットメッセージは日本語が常態なので、この状態では**どのリポの
+PR もスキャンを完走できない**。exit 2 は「合格として読ませない」規定どおり
+ブロックになるため、実質すべての local PR がマージ不能になる。
+
+そのため運用環境の設定ファイルでは `securityScanEnabled` を false にしている
+(neco 承認 2026-07-30)。同梱の既定値 (`src/config.mjs` の `defaults()`) は
+true のままなので、この無効化は各インストールの設定に閉じる。
+再有効化の条件は上流の修正 (`git_command` に `encoding="utf-8",
+errors="replace"` が入ること) を確認できること。追跡は Revisor issue #2。
+
+なお `--max-cost` は 1 回のスキャンの費用上限であって、クラッシュ→リトライで
+費やす時間の上限ではない。ウォールクロックの安全弁は Revisor 側の
+`DEFAULT_TIMEOUT_MS` (30 分) が持つ。
