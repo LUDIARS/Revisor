@@ -530,3 +530,127 @@ test("still blocks when the submodule pointer itself moved", async () => {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
+
+// ─── 中断されたレビューの復旧 (プロセス再起動でゾンビ化した job) ──────────────
+//
+// キューは in-memory なので、 起動直後に残っている `queued` / `running` は
+// どのワーカーにも属していない = 中断された job。 これを拾い直さないと
+// queue.submit の再投入ガードに弾かれ続けて永久に動かない。
+
+/** state.json を直接書き換えて「前回のプロセスが落ちた」状態を作る。 */
+function forceCheckStatus(store, id, checkStatus) {
+  const statePath = store.path;
+  const state = JSON.parse(readFileSync(statePath, "utf8"));
+  const record = state.pullRequests.find((candidate) => candidate.id === id);
+  assert.ok(record, `Local PR '${id}' is missing from the state file.`);
+  record.checkStatus = checkStatus;
+  writeFileSync(statePath, JSON.stringify(state, null, 2), "utf8");
+}
+
+async function submittedPullRequest(fixture, store, submissions) {
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request, options) {
+        submissions.push({ request, options });
+        return { id: `job-${submissions.length}` };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    securityScan: passingSecurityScan(),
+  });
+  await service.registerRepository({
+    repository: "LUDIARS/Product",
+    rootPath: fixture.repoPath,
+    baseRef: "main",
+    testCases: [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }],
+  });
+  const pullRequest = await service.submitPullRequest({
+    repository: "LUDIARS/Product",
+    title: "Add product feature",
+    body: "body",
+    author: "neco",
+    headRef: "feat/local",
+  });
+  return { service, pullRequest };
+}
+
+test("re-queues reviews left running by a crashed process", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submissions = [];
+  try {
+    const { service, pullRequest } = await submittedPullRequest(fixture, store, submissions);
+    forceCheckStatus(store, pullRequest.id, "running");
+
+    const recovery = await service.recoverInterruptedReviews();
+
+    assert.equal(recovery.scanned, 1);
+    assert.equal(recovery.recovered.length, 1);
+    assert.equal(recovery.failed.length, 0);
+    assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
+    // 再投入は force 必須 (同一 head の settled job にフォールバックさせない)。
+    assert.equal(submissions.at(-1).options?.force, true);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("re-queues reviews still marked queued after a restart", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submissions = [];
+  try {
+    const { service, pullRequest } = await submittedPullRequest(fixture, store, submissions);
+    forceCheckStatus(store, pullRequest.id, "queued");
+
+    const recovery = await service.recoverInterruptedReviews();
+
+    assert.equal(recovery.recovered.length, 1);
+    assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("leaves settled reviews untouched during recovery", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submissions = [];
+  try {
+    const { service, pullRequest } = await submittedPullRequest(fixture, store, submissions);
+    forceCheckStatus(store, pullRequest.id, "test_ok");
+    const before = submissions.length;
+
+    const recovery = await service.recoverInterruptedReviews();
+
+    assert.equal(recovery.scanned, 0);
+    assert.equal(submissions.length, before);
+    assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "test_ok");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("fails an interrupted review that can no longer be resumed", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submissions = [];
+  try {
+    const { service, pullRequest } = await submittedPullRequest(fixture, store, submissions);
+    forceCheckStatus(store, pullRequest.id, "running");
+    // head ブランチが消えると refs 再解決に失敗する。
+    git(fixture.repoPath, "branch", "-D", "feat/local");
+
+    const recovery = await service.recoverInterruptedReviews();
+
+    assert.equal(recovery.recovered.length, 0);
+    assert.equal(recovery.failed.length, 1);
+    const settled = store.getPullRequest(pullRequest.id);
+    // ゾンビのまま残さず、必ず終端状態へ落とす。
+    assert.equal(settled.checkStatus, "failed");
+    assert.match(settled.error, /Revisor restarted while this review was in flight/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});

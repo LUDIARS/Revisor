@@ -122,6 +122,47 @@ export class LocalPrService {
     if (pullRequest.status !== "open") {
       throw new Error("Only an open local PR can be reviewed again.");
     }
+    return this.#requeue(pullRequest);
+  }
+
+  /**
+   * プロセス再起動で失われたレビューを拾い直す。
+   *
+   * キューは in-memory なので、起動直後に `queued` / `running` が残っている PR は
+   * 定義上どのワーカーにも属していない (= 実行中の job は存在しない)。 時間しきい値は
+   * 不要で、この 2 状態がそのまま「中断された」ことの証明になる。 復旧しないと
+   * `queue.submit` の再投入ガード (`queued` / `running` は force 無しで弾く) により
+   * 永久に動かないゾンビとして残り続ける。
+   *
+   * 1 件の失敗で起動全体を落とさない。 復旧できない PR は理由付きで `failed` にして、
+   * 人間が retry / 取り下げを判断できる状態にする。
+   */
+  async recoverInterruptedReviews() {
+    const interrupted = this.store.listPullRequests().filter((pullRequest) =>
+      pullRequest.status === "open"
+      && (pullRequest.checkStatus === "running" || pullRequest.checkStatus === "queued"));
+
+    const recovered = [];
+    const failed = [];
+    for (const pullRequest of interrupted) {
+      try {
+        await this.#requeue(pullRequest);
+        recovered.push({ id: pullRequest.id, repository: pullRequest.repository, number: pullRequest.number });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        // #requeue が enqueue 前に落ちた場合 (repo 未登録 / ブランチ消失) は
+        // まだ `running` のままなので、ここで必ず終端状態へ落とす。
+        this.store.updatePullRequest(pullRequest.id, {
+          checkStatus: "failed",
+          error: `Revisor restarted while this review was in flight and it could not be resumed: ${reason}`,
+        });
+        failed.push({ id: pullRequest.id, repository: pullRequest.repository, number: pullRequest.number, reason });
+      }
+    }
+    return { scanned: interrupted.length, recovered, failed };
+  }
+
+  async #requeue(pullRequest) {
     const repository = this.store.getRepository(pullRequest.repository);
     if (!repository) {
       throw new Error(`Repository '${pullRequest.repository}' is not registered.`);
@@ -134,7 +175,7 @@ export class LocalPrService {
     );
     return this.#enqueue(
       repository,
-      this.store.updatePullRequest(id, {
+      this.store.updatePullRequest(pullRequest.id, {
         ...pendingReviewProjection(),
         headSha: refs.headSha,
         baseSha: refs.baseSha,

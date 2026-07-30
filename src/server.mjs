@@ -179,11 +179,36 @@ export async function startRevisor({
     server.close();
     throw new Error("Could not resolve the Revisor address.");
   }
+  // 前回のプロセスが job 実行中に落ちていると、その PR は `running` / `queued` のまま
+  // 残る。 キューは in-memory なので誰も拾わず、 再投入ガードにも弾かれて永久に動かない。
+  // listen 後に拾い直す (git 参照解決が遅くてもポートの開通を遅らせない)。
+  // 復旧そのものが落ちたときも、 listen 済みのサーバとワーカーを放置しない
+  // (アドレス解決失敗と同じ後始末をしてから投げ直す)。
+  let recovery;
+  try {
+    recovery = await localPrService.recoverInterruptedReviews();
+  } catch (error) {
+    await workerPool?.close();
+    server.close();
+    throw error;
+  }
+  if (recovery.scanned > 0) {
+    process.stdout.write(
+      `Revisor recovered interrupted reviews: scanned=${recovery.scanned}`
+      + ` requeued=${recovery.recovered.length} failed=${recovery.failed.length}\n`,
+    );
+    for (const entry of recovery.failed) {
+      process.stderr.write(
+        `Revisor could not resume ${entry.repository} #${entry.number}: ${entry.reason}\n`,
+      );
+    }
+  }
   return {
     url: `http://127.0.0.1:${address.port}/`,
     queue,
     store,
     localPrService,
+    recovery,
     workerCount: settings.workerCount,
     close: async () => {
       await new Promise((resolve, reject) => {

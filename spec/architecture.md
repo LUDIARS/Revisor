@@ -11,8 +11,8 @@ runtime architecture.
 - `server.mjs` owns the loopback-bound HTTP server and authenticated local API.
 - `local-contracts.mjs` validates repository, test-case, and PR inputs.
 - `state-store.mjs` atomically persists repository and local PR projections.
-- `local-pr-service.mjs` orchestrates registration, submission, re-review, and
-  merge.
+- `local-pr-service.mjs` orchestrates registration, submission, re-review,
+  startup recovery of interrupted reviews, and merge.
 - `queue.mjs` owns FIFO state, deduplication, and concurrency admission.
 - `local-reporter.mjs` projects queue and review results into local PR state.
 - `worker-pool.mjs` owns child-process lifetime and one-job-per-worker dispatch.
@@ -203,3 +203,11 @@ rejects waiting work and terminates owned processes.
 
 Every disposable worktree is removed on normal and exceptional paths. Unsafe
 reviewer changes are discarded before commit or local branch advancement.
+
+The queue is in-memory while check status is persisted, so a process that dies
+mid-review leaves `queued` / `running` state no worker owns. Startup therefore
+re-queues every open PR still in those states, since an empty queue makes the
+classification unambiguous and no time threshold is needed. Each PR is recovered
+independently: one that can no longer be resumed is failed with the reason
+instead of being left unowned, and recovery runs after the port is listening so
+slow ref resolution does not delay it.
