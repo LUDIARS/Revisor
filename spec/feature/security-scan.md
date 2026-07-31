@@ -33,13 +33,63 @@ updated: 2026-07-31
 
 ## CLI 引数
 
-`codex-security scan <worktree> --diff <base> --json --auth chatgpt
---output-dir <temp> --fail-on-severity <設定値> --max-cost <設定値>`
+`codex-security scan <worktree> --diff <base> --json --effort <設定値>
+[--model <設定値>] --auth chatgpt --output-dir <temp>
+--fail-on-severity <設定値> --max-cost <設定値>`
 
 `--auth chatgpt` は固定 (neco 決定 2026-07-30)。既定の `auto` は環境に
 `OPENAI_API_KEY` / `CODEX_API_KEY` があると従量課金 API へ黙って切り替わるため。
-引数は全て Revisor 所有の値 (temp パス・git SHA・列挙で検証済みの severity・
-`Number.isFinite` で検証済みのコスト) で、外部入力は入らない。
+引数は全て Revisor 所有の値 (temp パス・git SHA・列挙で検証済みの severity /
+effort・`Number.isFinite` で検証済みのコスト・書式検証済みのモデル名) で、
+検証を通っていない外部入力は入らない。
+
+### effort を必ず明示する理由 (2026-07-30)
+
+`codex-security` の `--effort` 既定は **`xhigh`**。 Revisor が渡していなかったため
+PR ごとに最高推論で走り、 `--max-cost` を先に食い潰して
+
+```
+Scan stopped: estimated cost $X exceeded the $Y limit   → exit 2
+```
+
+でスキャンが自己中断していた。 exit 2 は `error` = 「未完了」 に正規化され、
+`assertMergeSecurityScan` がマージをブロックする。
+
+対策として `--effort` を設定 (`securityScanEffort`) から**常に明示**し、 既定を
+`medium` に下げて「完走すること」を優先する。 深く見たいときだけ設定で上げる。
+`securityScanModel` は空なら CLI 既定モデルに任せ、 安いモデルへ寄せたいときだけ指定する。
+
+実測 (2026-07-30、 Revisor 自身の 5 ファイル・+289 行の PR = merge-base 起点の実スコープ):
+`--effort medium` で **$4.15**・60 反復で完走した。 ただしこれは
+`securityMaxCostUsd` を **$10** に上げた環境での計測で、 既定値は $5 のまま
+(このコミットでは変えていない) — つまりこの規模の PR は既定のままだと上限の 8 割強を
+使う。 これより大きい PR や `high` へ上げた場合は既定の $5 では自己中断
+(exit 2 = 未完了 = マージ不可) しうるので、 深く見たいリポは effort と一緒に
+`securityMaxCostUsd` も上げる。 上限額は支出の判断なので既定は人間が決める。
+
+なおスキャン範囲は既に PR 分だけに絞られている (審査時は `worktrees.mergeBase` 起点、
+マージ直前は squash commit を作った上で base 起点 = 着地する差分そのもの)。 CLI の
+`--path` は `--diff` と**排他** (`--path, --diff, and --working-tree are mutually exclusive`)
+なので、 パス指定でさらに絞ることはできない。 コストのレバーは effort / model / 上限額だけ。
+
+不正な effort は `writeSettings` が拒否する (CLI へそのまま渡る値なので、 未知の値で
+スキャン自体を落とすと「未完了」= マージ不可になり、 原因が設定であることも見えなくなる)。
+`readSettings` は手書き設定ファイル対策として未知の値を既定へ落とす。
+
+### モデル名の書式検証
+
+`securityScanModel` は人間が自由入力する唯一のスキャン引数なので、 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`
+(または空) だけを許し、 `writeSettings` が拒否・`readSettings` が既定へ落とす。 Windows では
+`runNamedCli` が `cmd.exe /d /s /c` 経由で起動し、 cmd.exe がコマンドラインを再解釈するため
+`&` / `|` / `>` / `^` を含む値は別コマンドとして走る。 `-` 始まりの値は CLI にフラグとして
+読まれ、 `--auth chatgpt` (従量課金を避ける固定) を押しのけうる。
+
+検査は文字列化前に行う。 文字列化してから書式を見ると `null` が `"null"` として
+書式検査を通り、 `--model null` で毎回スキャンが落ちて「未完了」= マージ不可になる
+(しかも `error` の理由は終了コードだけなので設定が原因だと分からない)。
+
+予算超過そのものは依然 `error` (未完了) として扱う — 部分スキャンを合格として
+読ませないため。 effort を下げても完走しない場合は `securityMaxCostUsd` を上げる。
 
 ## 終了コードの正規化
 

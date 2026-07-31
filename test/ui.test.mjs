@@ -71,6 +71,18 @@ test("the settings page owns the auto-merge threshold and the plan advisor", () 
   assert.match(page, /autoMergeRiskThreshold: Number/);
 });
 
+// The page script reads every control by id, so a missing field throws on
+// `.value` and takes the whole settings page down rather than just its own row.
+test("the settings page owns the security scan effort and model", () => {
+  const page = renderSettingsPage("session-nonce");
+  assert.match(page, /id="security-effort"/);
+  assert.match(page, /id="security-model"/);
+  assert.match(page, /securityScanEffort: document\.querySelector\('#security-effort'\)/);
+  assert.match(page, /securityScanModel: document\.querySelector\('#security-model'\)\.value\.trim\(\)/);
+  // The default is medium; xhigh must stay reachable for repos that want depth.
+  assert.match(page, /<option value="xhigh">xhigh<\/option>/);
+});
+
 test("limits settings access to loopback and the UI session", () => {
   assert.equal(isLoopbackHost("127.0.0.1:4240"), true);
   assert.equal(isLoopbackHost("localhost:4240"), true);

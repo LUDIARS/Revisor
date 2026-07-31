@@ -6,6 +6,8 @@ const SETTINGS = {
   securityScanEnabled: true,
   securityFailOnSeverity: "high",
   securityMaxCostUsd: 5,
+  securityScanEffort: "medium",
+  securityScanModel: "",
 };
 
 // Stateless on purpose: a test that must observe a call records it with its own
@@ -42,7 +44,7 @@ test("skips without invoking the CLI when disabled by settings", async () => {
   assert.equal(executed, false);
 });
 
-test("passes the diff target, severity and cost cap to the CLI", async () => {
+test("passes the diff target, effort, severity and cost cap to the CLI", async () => {
   const invocations = [];
   const removed = [];
   const outcome = await runSecurityScan({
@@ -64,6 +66,8 @@ test("passes the diff target, severity and cost cap to the CLI", async () => {
     "--diff",
     "abc123",
     "--json",
+    "--effort",
+    "medium",
     "--auth",
     "chatgpt",
     "--output-dir",
@@ -74,6 +78,49 @@ test("passes the diff target, severity and cost cap to the CLI", async () => {
     "5",
   ]);
   assert.deepEqual(removed, ["C:/tmp/security-output"]);
+});
+
+// effort を渡し忘れると CLI 既定の xhigh が黙って効き、 予算を先に食い潰して
+// スキャンが未完了 (exit 2) になる。 明示されていることを固定する。
+test("never lets the CLI fall back to its xhigh default effort", async () => {
+  const invocations = [];
+  await runSecurityScan({
+    ...scanOptions({ exitCode: 0 }),
+    settings: { ...SETTINGS, securityScanEffort: "low" },
+    execute: async (invocation) => {
+      invocations.push(invocation);
+      return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+    },
+  });
+  const { args } = invocations[0];
+  const index = args.indexOf("--effort");
+  assert.notEqual(index, -1);
+  assert.equal(args[index + 1], "low");
+});
+
+test("passes a configured model and omits the flag when unset", async () => {
+  const withModel = [];
+  await runSecurityScan({
+    ...scanOptions({ exitCode: 0 }),
+    settings: { ...SETTINGS, securityScanModel: "gpt-5.6-terra" },
+    execute: async (invocation) => {
+      withModel.push(invocation);
+      return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+    },
+  });
+  const modelIndex = withModel[0].args.indexOf("--model");
+  assert.notEqual(modelIndex, -1);
+  assert.equal(withModel[0].args[modelIndex + 1], "gpt-5.6-terra");
+
+  const withoutModel = [];
+  await runSecurityScan({
+    ...scanOptions({ exitCode: 0 }),
+    execute: async (invocation) => {
+      withoutModel.push(invocation);
+      return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+    },
+  });
+  assert.equal(withoutModel[0].args.includes("--model"), false);
 });
 
 test("sanitizes findings to severity, rule, file and line only", async () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -42,6 +42,10 @@ test("stores settings and encrypts local workflow secrets", () => {
       securityScanEnabled: true,
       securityFailOnSeverity: "high",
       securityMaxCostUsd: 5,
+      // CLI 既定の xhigh は予算を先に食い潰してスキャンを未完了にするので、
+      // 完走を優先して medium を既定にする。
+      securityScanEffort: "medium",
+      securityScanModel: "",
     });
     writeSettings({
       anatomiaFolder: "E:/Document/Ars/Anatomia",
@@ -51,10 +55,41 @@ test("stores settings and encrypts local workflow secrets", () => {
       securityScanEnabled: false,
       securityFailOnSeverity: "medium",
       securityMaxCostUsd: 2.5,
+      securityScanEffort: "low",
+      securityScanModel: " gpt-5.6-terra ",
     }, state.env);
     assert.deepEqual(readSettings(state.env).securityScanEnabled, false);
     assert.equal(readSettings(state.env).securityFailOnSeverity, "medium");
     assert.equal(readSettings(state.env).securityMaxCostUsd, 2.5);
+    assert.equal(readSettings(state.env).securityScanEffort, "low");
+    assert.equal(readSettings(state.env).securityScanModel, "gpt-5.6-terra");
+    // 未知の effort は保存させない。 CLI へそのまま渡る値なので、 不正値を通すと
+    // スキャン自体が落ちて「未完了」= マージ不可になり、 原因も見えなくなる。
+    assert.throws(
+      () => writeSettings({
+        anatomiaFolder: "E:/Document/Ars/Anatomia",
+        fallbackReviewer: "claude-opus",
+        workerCount: 1,
+        securityScanEffort: "ultra",
+      }, state.env),
+      /Security scan effort must be one of/,
+    );
+    // モデル名は cmd.exe 経由の argv にそのまま乗るので、 コマンド区切り文字を
+    // 含む値やフラグに見える値は保存させない (`&` の後ろが別コマンドとして走り、
+    // `-` 始まりは --auth chatgpt を押しのけるフラグとして読まれる)。 文字列以外も
+    // 拒否する — 文字列化してから検査すると `null` が "null" として書式検査を通り、
+    // `--model null` でスキャンが毎回落ちて「未完了」= マージ不可になる。
+    for (const model of ["gpt&whoami", "--auth", "gpt 5", "gpt|tee x", null, ["gpt-5.6"]]) {
+      assert.throws(
+        () => writeSettings({
+          anatomiaFolder: "E:/Document/Ars/Anatomia",
+          fallbackReviewer: "claude-opus",
+          workerCount: 1,
+          securityScanModel: model,
+        }, state.env),
+        /Security scan model must be a bare model name/,
+      );
+    }
     writeWorkflowToken("workflow-secret", state.env);
     assert.deepEqual(writeAllowedHosts([
       "Revisor.Example.com",
@@ -122,6 +157,18 @@ test("rejects invalid security scan settings and defaults omitted ones", () => {
     assert.equal(written.securityScanEnabled, true);
     assert.equal(written.securityFailOnSeverity, "high");
     assert.equal(written.securityMaxCostUsd, 5);
+    assert.equal(written.securityScanEffort, "medium");
+    assert.equal(written.securityScanModel, "");
+    // 手書きの設定ファイルは writeSettings を通らないので、 CLI へ渡る前に読み側でも
+    // 落とす。 effort/model は argv に乗る値で、 未知の effort はスキャンを落として
+    // 「未完了」= マージ不可になり、 細工したモデル名は cmd.exe で別コマンドになる。
+    writeFileSync(state.path, `${JSON.stringify({
+      version: 1,
+      settings: { securityScanEffort: "ultra", securityScanModel: "gpt&whoami" },
+      secrets: {},
+    })}\n`, "utf8");
+    assert.equal(readSettings(state.env).securityScanEffort, "medium");
+    assert.equal(readSettings(state.env).securityScanModel, "");
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

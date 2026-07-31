@@ -104,6 +104,14 @@ function scanArgs({ worktreePath, diffBase, settings, outputDir }) {
     "--diff",
     diffBase,
     "--json",
+    // effort は必ず明示する。 codex-security の既定は xhigh で、 PR ごとに走らせると
+    // 推論コストが --max-cost を先に食い潰してスキャンが自己中断し、 exit 2 =
+    // 「未完了」 としてマージをブロックしてしまう。 「完走すること」 を優先し、
+    // 深さが必要なリポだけ設定 (securityScanEffort) で上げる。
+    "--effort",
+    settings.securityScanEffort,
+    // 空なら CLI 既定モデルに任せる (安いモデルへ寄せたいときだけ設定)。
+    ...(settings.securityScanModel ? ["--model", settings.securityScanModel] : []),
     // Pinned to the ChatGPT/Codex subscription sign-in (neco 2026-07-30): the
     // default "auto" would silently switch to metered API billing whenever an
     // OPENAI_API_KEY/CODEX_API_KEY happens to be present in the service env.

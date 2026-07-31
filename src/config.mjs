@@ -17,6 +17,19 @@ const KEY_PATH_ENV = "REVISOR_KEY_PATH";
 const MASTER_KEY_ENV = "REVISOR_MASTER_KEY";
 
 const SECURITY_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
+const SECURITY_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+// The model name is the only security-scan argument a human types freely, and it
+// ends up in a `codex-security` argv that `runNamedCli` launches through
+// `cmd.exe /d /s /c` on Windows. cmd.exe re-parses that command line, so a value
+// carrying `&`, `|`, `>` or `^` would run as a second command, and a value
+// starting with `-` would be read as a CLI flag instead of a model (silently
+// displacing `--auth chatgpt` and its billing guarantee). Only a bare model
+// identifier is accepted; the empty string means "CLI default model".
+const SECURITY_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function isSecurityModel(value) {
+  return value === "" || SECURITY_MODEL_PATTERN.test(value);
+}
 
 function defaults() {
   return {
@@ -34,6 +47,13 @@ function defaults() {
     securityScanEnabled: true,
     securityFailOnSeverity: "high",
     securityMaxCostUsd: 5,
+    // codex-security の既定 effort は xhigh で、 PR ごとに走らせると推論コストが
+    // 予算 (securityMaxCostUsd) を先に食い潰し、 スキャンが自己中断して exit 2 =
+    // 「未完了」 になる。 未完了はマージをブロックするので、 既定を xhigh より下げて
+    // 「完走すること」 を優先する。 深く見たいリポだけ設定で上げる。
+    securityScanEffort: "medium",
+    // 空なら CLI 既定モデル。 より安いモデルへ寄せたいときだけ設定する。
+    securityScanModel: "",
   };
 }
 
@@ -158,6 +178,13 @@ export function readSettings(env = process.env) {
       && value.securityMaxCostUsd > 0
       ? value.securityMaxCostUsd
       : base.securityMaxCostUsd,
+    securityScanEffort: SECURITY_EFFORTS.has(value.securityScanEffort)
+      ? value.securityScanEffort
+      : base.securityScanEffort,
+    securityScanModel: typeof value.securityScanModel === "string"
+      && isSecurityModel(value.securityScanModel.trim())
+      ? value.securityScanModel.trim()
+      : base.securityScanModel,
   };
 }
 
@@ -212,6 +239,31 @@ export function writeSettings(settings, env = process.env) {
   if (!Number.isFinite(securityMaxCostUsd) || securityMaxCostUsd <= 0) {
     throw new RevisorError("Security scan max cost must be a positive USD amount.");
   }
+  // effort は CLI にそのまま渡るので、 不正値を保存させない (未知の値でスキャン自体が
+  // 落ちると「未完了」= マージ不可になり、 原因が設定であることも見えなくなる)。
+  const securityScanEffort = settings.securityScanEffort === undefined
+    ? current.securityScanEffort
+    : settings.securityScanEffort;
+  if (!SECURITY_EFFORTS.has(securityScanEffort)) {
+    throw new RevisorError(
+      "Security scan effort must be one of: minimal, low, medium, high, xhigh.",
+    );
+  }
+  // Only a string is a model name. Coercing first would turn `null` into the
+  // literal "null", which passes the format check and then reaches the CLI as
+  // `--model null`: every scan dies on an unknown model, normalizes to
+  // `error` = 「未完了」 = マージ不可、 and the exit code is all that is reported,
+  // so nothing points back at the setting. `readSettings` already refuses
+  // non-strings on the read side.
+  const modelInput = settings.securityScanModel;
+  const securityScanModel = modelInput === undefined
+    ? current.securityScanModel
+    : (typeof modelInput === "string" ? modelInput.trim() : modelInput);
+  if (typeof securityScanModel !== "string" || !isSecurityModel(securityScanModel)) {
+    throw new RevisorError(
+      "Security scan model must be a bare model name (letters, digits, dot, dash, underscore).",
+    );
+  }
   const config = readConfig(env);
   config.settings = {
     anatomiaFolder,
@@ -231,6 +283,8 @@ export function writeSettings(settings, env = process.env) {
     securityScanEnabled: settings.securityScanEnabled !== false,
     securityFailOnSeverity,
     securityMaxCostUsd,
+    securityScanEffort,
+    securityScanModel,
   };
   writeConfig(config, env);
   return readSettings(env);

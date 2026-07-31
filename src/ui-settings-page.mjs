@@ -74,8 +74,26 @@ const BODY = `
         </select>
       </div>
       <div class="field">
+        <label for="security-effort">スキャンの推論 effort</label>
+        <select id="security-effort">
+          <option value="minimal">minimal</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+          <option value="xhigh">xhigh</option>
+        </select>
+        <span class="note">CLI 既定の xhigh は上限コストを先に使い切ってスキャンを未完了（exit 2）にし、マージをブロックします。既定は medium で、完走を優先します。</span>
+      </div>
+      <div class="field">
+        <label for="security-model">スキャンに使うモデル（空で CLI 既定）</label>
+        <input id="security-model" type="text" placeholder="例: gpt-5.6-terra"
+          pattern="[A-Za-z0-9][A-Za-z0-9._-]*" maxlength="64">
+        <span class="note">モデル名のみ（英数字と . _ -）。CLI 引数としてそのまま渡るため、それ以外の文字は保存時に拒否されます。</span>
+      </div>
+      <div class="field">
         <label for="security-max-cost">スキャン1回あたりの上限コスト（USD）</label>
         <input id="security-max-cost" type="number" min="0.5" step="0.5" required>
+        <span class="note">超過するとスキャンは自己中断し、未完了としてマージがブロックされます。effort を下げても完走しない場合はここを上げてください。</span>
       </div>
       <div class="field">
         <label for="workflow-token">ローカル workflow API token（変更時のみ入力）</label>
@@ -143,6 +161,8 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
       state.settings.autoMergeRequiresRuntimeVerificationClear;
     document.querySelector('#security-scan-enabled').checked = state.settings.securityScanEnabled;
     document.querySelector('#security-severity').value = state.settings.securityFailOnSeverity;
+    document.querySelector('#security-effort').value = state.settings.securityScanEffort;
+    document.querySelector('#security-model').value = state.settings.securityScanModel;
     document.querySelector('#security-max-cost').value = String(state.settings.securityMaxCostUsd);
     document.querySelector('#allowed-hosts').value = state.allowedHosts.join('\\n');
     document.querySelector('#token-status').textContent = state.workflowTokenConfigured
@@ -187,6 +207,8 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
             document.querySelector('#auto-merge-runtime-clear').checked,
           securityScanEnabled: document.querySelector('#security-scan-enabled').checked,
           securityFailOnSeverity: document.querySelector('#security-severity').value,
+          securityScanEffort: document.querySelector('#security-effort').value,
+          securityScanModel: document.querySelector('#security-model').value.trim(),
           securityMaxCostUsd: Number(document.querySelector('#security-max-cost').value),
           workflowToken: document.querySelector('#workflow-token').value,
           allowedHosts: document.querySelector('#allowed-hosts').value
