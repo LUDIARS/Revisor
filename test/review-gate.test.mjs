@@ -73,6 +73,44 @@ test("reports coupling_delta without blocking the merge (environment-dependent g
   assert.deepEqual(outcome.advisories, ["Anatomia gate(s) did not pass: coupling_delta"]);
 });
 
+test("reports convention_drift without blocking the merge (Anatomia declares it warn)", () => {
+  const outcome = evaluate(analysis({
+    gates: [
+      { gate: "rule_conformance", pass: true },
+      { gate: "convention_drift", pass: false },
+    ],
+  }));
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, ["Anatomia gate(s) did not pass: convention_drift"]);
+});
+
+// Anatomia の block 相当ゲートは advisory に落とさない。 warn ゲートを通す変更が
+// block ゲートまで緩めていないことを固定する。
+test("keeps Anatomia block-severity gates blocking alongside the warn ones", () => {
+  const outcome = evaluate(analysis({
+    gates: [
+      { gate: "duplication", pass: false },
+      { gate: "convention_drift", pass: false },
+      { gate: "coupling_delta", pass: false },
+      { gate: "spec_linkage", pass: false },
+    ],
+  }));
+  assert.deepEqual(outcome.reasons, ["Anatomia gate(s) did not pass: duplication"]);
+  assert.deepEqual(outcome.advisories, [
+    "Anatomia gate(s) did not pass: convention_drift, coupling_delta, spec_linkage",
+  ]);
+});
+
+// advisory 集合は名前の再掲なので、 Anatomia 側にゲートが増えたときは
+// 未知の名前としてブロック側に落ちる (fail-closed) ことを固定する。
+test("blocks on a gate name the advisory set does not know", () => {
+  const outcome = evaluate(analysis({
+    gates: [{ gate: "some_new_upstream_gate", pass: false }],
+  }));
+  assert.deepEqual(outcome.reasons, ["Anatomia gate(s) did not pass: some_new_upstream_gate"]);
+  assert.deepEqual(outcome.advisories, []);
+});
+
 test("never turns an unexplained verification failure into a pass", () => {
   const finalAnalysis = analysis();
   finalAnalysis.architecture.verify = { pass: false, gates: [] };

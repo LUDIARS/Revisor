@@ -93,14 +93,16 @@ advisories, leakage findings, open question), and the Anatomia diff analysis. A
 failed review can be re-queued against the branch heads as they stand at that
 moment.
 
-Advisories are reported without blocking a merge: a failed Anatomia
-`spec_linkage` or `coupling_delta` gate, changed orphaned functions, non-error
-architecture violations, and test cases the review plan did not require.
-Everything else — failed tests, leakage findings, error-severity violations, a
-material complexity drop, a missing target domain, any other Anatomia gate —
-still blocks. When the deterministic plan drops code analysis, its gates and
-violations become advisories too, because nobody asked for that evidence on that
-change; a skip a control planner asked for does not relax the gate.
+Advisories are reported without blocking a merge: a failed warn-severity Anatomia
+gate (`spec_linkage`, `coupling_delta`, `convention_drift`), changed orphaned
+functions, non-error architecture violations, and test cases the review plan did
+not require. Everything else — failed tests, leakage findings, error-severity
+violations, a material complexity drop, a missing target domain, a
+block-severity Anatomia gate (`rule_conformance`, `duplication`) or any gate
+outside that advisory set — still blocks. When the deterministic plan drops code
+analysis, its gates and violations become advisories too, because nobody asked
+for that evidence on that change; a skip a control planner asked for does not
+relax the gate.
 
 `/settings` holds every configuration form, including project registration.
 

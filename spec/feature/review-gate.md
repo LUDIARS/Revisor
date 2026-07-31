@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "review-gate — マージ可否判定ポリシー"
-description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。docs/設定ファイルのみの変更は対象ドメイン欠如を advisory に緩和し、ドメインレビュー自体は維持する。環境依存の coupling_delta も advisory 扱い。セキュリティスキャンの所見と未完了はブロックする。"
+description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。docs/設定ファイルのみの変更は対象ドメイン欠如を advisory に緩和し、ドメインレビュー自体は維持する。Anatomia の warn 相当ゲート (spec_linkage / coupling_delta / convention_drift) は advisory 扱い。セキュリティスキャンの所見と未完了はブロックする。"
 service: revisor
 domain: review-gate
 tags:
@@ -28,8 +28,9 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 
 - 登録テストの失敗
 - 対象ドメイン欠如 (**docs / 設定ファイルのみの変更を除く**、下記)
-- `spec_linkage` / `coupling_delta` 以外の Anatomia ゲート不合格
-  (ゲート名なしの検証失敗もブロック)
+- Anatomia の **block 相当ゲート** (`rule_conformance` / `duplication`)、および
+  advisory 集合に載っていないゲートの不合格 (未知のゲートは fail-closed で
+  ブロックする。ゲート名なしの検証失敗もブロック)
 - severity=error の変更行アーキテクチャ違反
 - complexity スコアの閾値超過低下
 - レビュアーの `PR_GATE_NEEDS_HUMAN` 報告
@@ -41,8 +42,8 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 
 ## advisory 条件 (非ブロック)
 
-- `spec_linkage` ゲート不合格
-- `coupling_delta` ゲート不合格 (下記)
+- Anatomia の **warn 相当ゲート** の不合格 (下記):
+  `spec_linkage` / `coupling_delta` / `convention_drift`
 - 孤立関数 (orphan)
 - error 未満のアーキテクチャ違反
 - **docs / 設定ファイルのみの変更の対象ドメイン欠如**
@@ -131,6 +132,27 @@ p95=9 (14 関数が該当) となり、クリーンなローカル worktree で�
 (該当なし) となる実測があった (Concordia#3)。Anatomia 側で非決定性が解消される
 までは、環境依存の判定でマージをブロックしない。結合度の増加は advisory として
 記録・表示は続ける。
+
+## warn 相当ゲートを advisory に揃える (2026-07-30)
+
+Anatomia は各ゲートに severity を宣言している (`src/supply/gates/*.ts`):
+
+| gate | Anatomia severity |
+|---|---|
+| `rule_conformance` | block |
+| `duplication` | block |
+| `spec_linkage` | warn (strict のみ block) |
+| `coupling_delta` | warn |
+| `convention_drift` | warn |
+
+`ADVISORY_GATES` はこの **warn 集合と一致させる**。 `convention_drift` は兄弟コードから
+命名の case style と共通 affix を機械的に採掘して比較するゲートで、 読んで問題ない名前でも
+兄弟と違えば drift として挙がる = 提案であって欠陥ではない。 ここでブロックしていたため、
+**判定を出した解析器より Revisor が厳しい**という逆転が起きていた。
+
+Anatomia の `GateResult` は severity を載せない (Gate 定義側にしか無い) ため、 この対応は
+Revisor 側で名前を再掲して維持する必要がある。 Anatomia にゲートを追加・severity を変更した
+ときは `ADVISORY_GATES` も合わせて見直す。
 
 ## セキュリティスキャン結果の扱い
 

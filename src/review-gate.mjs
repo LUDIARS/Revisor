@@ -17,7 +17,21 @@ export { isDocsOnlyChange, isDocsOrConfigOnlyChange };
 // review worktree but p95=9.9 (none flagged) in clean local worktrees
 // (Concordia#3). Until that non-determinism is fixed on the Anatomia side
 // (issue filed), an environment-dependent verdict must not block merges.
-const ADVISORY_GATES = new Set(["spec_linkage", "coupling_delta"]);
+//
+// convention_drift is advisory because Anatomia itself declares it
+// `severity: "warn"` (src/supply/gates/convention_drift.ts) — it mines naming
+// case style and shared affixes from sibling code, so a name that reads fine
+// but differs from its siblings is a suggestion, not a defect. Blocking on it
+// made Revisor stricter than the analyser that produced the verdict.
+//
+// This set is exactly Anatomia's warn-severity gates; its block-severity gates
+// (rule_conformance, duplication) stay blocking, and so does any gate name not
+// listed here, so a gate added upstream fails closed until it is triaged.
+// Anatomia does not carry severity in GateResult, so the alignment has to be
+// restated here by name. spec_linkage is listed unconditionally: Anatomia
+// promotes it to block under strict mode, but Revisor reports traceability
+// rather than enforcing it (see above).
+const ADVISORY_GATES = new Set(["spec_linkage", "coupling_delta", "convention_drift"]);
 
 // One definition of "this change still owes a code target domain", shared by the
 // merge gate, the reviewer prompt, and the human question, so the relaxation can

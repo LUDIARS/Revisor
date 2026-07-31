@@ -193,9 +193,9 @@ does not overwrite the shared hook.
 A local PR blocks on registered test failures, information leakage findings,
 security findings at or above the configured severity, a security scan that did
 not complete, error-severity changed architecture violations, a material
-complexity-score drop, a missing target domain, an Anatomia gate other than
-`spec_linkage` and `coupling_delta`, and a reviewer that reports
-`PR_GATE_NEEDS_HUMAN`.
+complexity-score drop, a missing target domain, a block-severity Anatomia gate
+(`rule_conformance`, `duplication`) or any gate outside the advisory set below,
+and a reviewer that reports `PR_GATE_NEEDS_HUMAN`.
 
 A security scan skipped because it is disabled in the settings is silent; a scan
 skipped because the leakage gate or the registered tests already block is an
@@ -226,6 +226,14 @@ pr-review derives the gate's percentile threshold and call graph from the
 analysis environment, so the same commit can fail it in the review worktree and
 pass it in a clean local worktree. Until that non-determinism is fixed upstream,
 an environment-dependent verdict must not block a merge.
+
+The advisory set is exactly Anatomia's warn-severity gates — `spec_linkage`,
+`coupling_delta`, and `convention_drift` — so Revisor is never stricter than the
+analyser that produced the verdict. `convention_drift` mines naming case style
+and shared affixes from sibling code, so a name that reads fine but differs from
+its siblings is a suggestion, not a defect. Anatomia does not carry severity in
+its gate results, so the alignment is restated by name in `review-gate.mjs` and
+has to be revisited whenever a gate is added or its severity changes upstream.
 
 An Anatomia verification that fails while naming no gate blocks the merge; it is
 never treated as a pass.
