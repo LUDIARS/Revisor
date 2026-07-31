@@ -8,7 +8,25 @@ runtime architecture.
 
 ## Components
 
-- `server.mjs` owns the loopback-bound HTTP server and authenticated local API.
+- `server.mjs` owns the loopback-bound HTTP server and the local API. Reads (`GET`)
+  are served to loopback without a token; mutations (submit / merge / retry /
+  repository registration) still require the workflow token. A uniform token
+  requirement meant that a same-machine reader such as Concordia's Test Forum sync
+  had to be handed a secret, and the absence of a distribution path for it silently
+  disabled the feature. A token-free read covers every `GET` on the local API, so
+  its disclosure is the whole read projection, not just names and states: PR
+  titles, bodies, authors, branch names and head/base SHAs, the review verdict
+  with its reasons and advisories, the leakage and security findings (rule, file
+  and line only — matched values are never persisted), and, on
+  `GET /v1/repositories`, the absolute working-tree and hook paths. The state file
+  behind those reads is `0600`, so opening them to the loopback port widens the
+  audience from the owning OS account to every account on the machine; Revisor
+  treats the workstation as single-user and accepts that.
+  A token-free read requires both a loopback peer address and a loopback
+  `Host` header: the peer check alone falls to DNS rebinding, where an attacker
+  domain pointed at 127.0.0.1 is same-origin to the browser and reads the body
+  without CORS. Reads through a configured non-loopback host, and every mutation,
+  still require the workflow token — it stays where it actually matters.
 - `local-contracts.mjs` validates repository, test-case, and PR inputs.
 - `state-store.mjs` atomically persists repository and local PR projections.
 - `local-pr-service.mjs` orchestrates registration, submission, re-review,

@@ -6,6 +6,7 @@ import {
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
+import { isLoopbackHost } from "./host-policy.mjs";
 import { notifyConcordia, optionalConcordiaUrl } from "./concordia-context.mjs";
 import { LocalPrReporter } from "./local-reporter.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
@@ -47,18 +48,33 @@ export function createRequestHandler({
       sendJson(response, 403, { error: "Loopback client required." });
       return;
     }
-    let expected;
-    try {
-      expected = readWorkflowToken(env);
-    } catch {
-      sendJson(response, 503, { error: "Revisor is not configured." });
-      return;
-    }
-    const supplied = bearerToken(request.headers.authorization)
-      ?? request.headers["x-pr-gate-token"];
-    if (!tokenMatches(expected, supplied)) {
-      sendJson(response, 401, { error: "unauthorized" });
-      return;
+    // 読み取り (GET) は loopback 限定だけで通す。 変更系 (PR 提出・マージ・retry・
+    // リポ登録) は従来どおり token を要求する。
+    //
+    // 一律 token にすると、 一覧を読むだけの同一マシン上のサービス (Concordia の
+    // Test Forum 同期・PRs ページ) まで秘密の配布が要り、 その配布経路の不在だけで
+    // 機能が止まる。 一方 token が本当に効くのはマージのような破壊的操作なので、
+    // そちらには残す。
+    //
+    // 接続元アドレスに加えて Host も loopback を要求するのは DNS rebinding 対策。
+    // 攻撃者のページが自ドメインを 127.0.0.1 に向ければ、 接続元は loopback かつ
+    // ブラウザから見て same-origin になり、 CORS ヘッダが無くても本文が読める。
+    // Host が 127.0.0.1 / localhost でない読み取りは、 従来どおり token を要求する。
+    const tokenFreeRead = request.method === "GET" && isLoopbackHost(host);
+    if (!tokenFreeRead) {
+      let expected;
+      try {
+        expected = readWorkflowToken(env);
+      } catch {
+        sendJson(response, 503, { error: "Revisor is not configured." });
+        return;
+      }
+      const supplied = bearerToken(request.headers.authorization)
+        ?? request.headers["x-pr-gate-token"];
+      if (!tokenMatches(expected, supplied)) {
+        sendJson(response, 401, { error: "unauthorized" });
+        return;
+      }
     }
     try {
       if (request.method === "POST" && url.pathname === "/v1/repositories") {

@@ -108,6 +108,115 @@ test("rejects unauthenticated local workflow requests", async () => {
   }
 });
 
+test("serves read-only local API requests to loopback without a token", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {
+      listPullRequests: () => [{ id: "pr-1", number: 1 }],
+      testWorkflowProducts: () => [{ repository: "LUDIARS/Revisor", number: 1 }],
+      // 一覧だけでなく詳細・リポジトリ一覧も token 無しで開く。 詳細は本文と
+      // leakage/security の指摘位置を、 リポジトリ一覧は作業ツリーの絶対パスを
+      // 返すので、 開いている読み取り面をテストで明示しておく。
+      getPullRequest: () => ({ id: "pr-1", number: 1, body: "local only" }),
+      listRepositories: () => [{ repository: "LUDIARS/Revisor", rootPath: "E:/Document/Ars/Revisor" }],
+    },
+  });
+  try {
+    // 本文まで見る。 status だけだと、 認証を通ったが投影が空で返る退行を拾えない。
+    const reads = [
+      ["/v1/local-prs", (body) => assert.equal(body.pullRequests[0].id, "pr-1")],
+      ["/v1/local-prs/pr-1", (body) => assert.equal(body.pullRequest.body, "local only")],
+      ["/v1/repositories", (body) => assert.equal(body.repositories[0].rootPath, "E:/Document/Ars/Revisor")],
+      ["/v1/test-workflow", (body) => assert.equal(body.products[0].number, 1)],
+    ];
+    for (const [url, assertBody] of reads) {
+      const output = response();
+      await handler(request({ method: "GET", url }), output);
+      assert.equal(output.status, 200);
+      assertBody(JSON.parse(output.body));
+    }
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+// 読み取りを開けても、 破壊的操作は token を要求し続けることを固定する。
+test("still requires the token for every mutating local API request", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {
+      mergePullRequest: async () => ({ id: "pr-1", status: "merged" }),
+      retryPullRequest: async () => ({ id: "pr-1" }),
+    },
+  });
+  try {
+    for (const url of ["/v1/local-prs/pr-1/merge", "/v1/local-prs/pr-1/retry", "/v1/repositories"]) {
+      const output = response();
+      await handler(request({ method: "POST", url, body: "{}" }), output);
+      assert.equal(output.status, 401);
+    }
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+// DNS rebinding: 接続元は loopback でも Host が別ドメインなら token を要求する。
+test("requires the token for reads sent through a non-loopback host", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: { listPullRequests: () => [{ id: "pr-1", number: 1 }] },
+  });
+  try {
+    const rejected = response();
+    await handler(request({
+      method: "GET",
+      url: "/v1/local-prs",
+      headers: { host: "rebind.example.com:4240" },
+    }), rejected);
+    assert.equal(rejected.status, 401);
+
+    const allowed = response();
+    await handler(request({
+      method: "GET",
+      url: "/v1/local-prs",
+      headers: { host: "rebind.example.com:4240", authorization: "Bearer workflow-token" },
+    }), allowed);
+    assert.equal(allowed.status, 200);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+// token 未設定のマシンでも読み取りは動く (設定不在で一覧まで止めない)。
+test("reads without a configured workflow token", async () => {
+  const state = fixture();
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: { listPullRequests: () => [] },
+  });
+  const output = response();
+  try {
+    await handler(request({ method: "GET", url: "/v1/local-prs" }), output);
+    assert.equal(output.status, 200);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
 test("rejects non-loopback clients before reading credentials", async () => {
   const handler = createRequestHandler({
     env: {},

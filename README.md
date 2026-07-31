@@ -154,18 +154,25 @@ available for intentional overrides.
 
 ## Local API
 
-The API listens on loopback and requires the workflow token:
+The API listens on loopback. Mutations require the workflow token; reads are
+served without one as long as the request arrives from a loopback address *and*
+carries a loopback `Host` (`127.0.0.1`, `localhost`, `[::1]`), so a same-machine
+reader needs no secret while a rebound attacker domain still does:
 
 ```text
-POST /v1/repositories
-GET  /v1/repositories
-POST /v1/local-prs
-GET  /v1/local-prs
-GET  /v1/local-prs/:id
-POST /v1/local-prs/:id/merge
-POST /v1/local-prs/:id/retry
-GET  /v1/test-workflow
+POST /v1/repositories        workflow token
+GET  /v1/repositories        loopback only
+POST /v1/local-prs           workflow token
+GET  /v1/local-prs           loopback only
+GET  /v1/local-prs/:id       loopback only
+POST /v1/local-prs/:id/merge workflow token
+POST /v1/local-prs/:id/retry workflow token
+GET  /v1/test-workflow       loopback only
 ```
+
+A read through a configured external hostname still requires the workflow token.
+Opening the reads widens their audience from the owning OS account to every
+account on the machine; Revisor treats the workstation as single-user.
 
 Repository registration includes test cases as argv, never a shell string:
 
