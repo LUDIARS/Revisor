@@ -9,8 +9,13 @@ const DOC_FILE = /\.(md|markdown|mdx|txt|adoc|rst)$/i;
 // declarative formats and the well-known dotfiles only and contains no code
 // extension — a `.js`/`.mjs`/`.ts`/`.py` file that happens to configure something
 // is still code and still owes a target domain.
+//
+// `.jsonl` sits with `.json` on purpose: JSON Lines is the same declarative family,
+// and anchoring on `\.json$` silently left it out. The gap made an untracking chore
+// unmergeable — deleting a generated `*.jsonl` index classified as code, so the
+// change owed a target domain it could never have (Concordia#12).
 const CONFIG_FILE =
-  /(?:^|\/)(?:\.env\.(?:example|sample|template)|\.editorconfig|\.gitignore|\.gitattributes|\.gitmodules|\.npmrc|\.nvmrc|\.dockerignore|\.eslintignore|\.prettierignore)$|\.(?:ya?ml|json|jsonc|json5|toml|ini|cfg|conf|properties)$/i;
+  /(?:^|\/)(?:\.env\.(?:example|sample|template)|\.editorconfig|\.gitignore|\.gitattributes|\.gitmodules|\.npmrc|\.nvmrc|\.dockerignore|\.eslintignore|\.prettierignore)$|\.(?:ya?ml|json|jsonl|jsonc|json5|toml|ini|cfg|conf|properties)$/i;
 
 // Dependency manifests match CONFIG_FILE by extension but are not settings text:
 // editing them pulls third-party code into the build, which is the change class
@@ -58,7 +63,7 @@ const KIND_RULES = [
   {
     kind: "config",
     pattern:
-      /(?:^|\/)\.[^/]+$|(?:^|\/)(?:package\.json|tsconfig[^/]*\.json|jsconfig\.json)$|\.(?:json|ya?ml|toml|ini|cfg|properties|lock)$/i,
+      /(?:^|\/)\.[^/]+$|(?:^|\/)(?:package\.json|tsconfig[^/]*\.json|jsconfig\.json)$|\.(?:json|jsonl|ya?ml|toml|ini|cfg|properties|lock)$/i,
   },
 ];
 

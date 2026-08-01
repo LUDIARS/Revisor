@@ -18,6 +18,7 @@ test("classifies a path by the cost decision it drives, not by extension alone",
   assert.equal(classifyPath("migrations/030_add_column.sql"), "infra");
   assert.equal(classifyPath("package.json"), "config");
   assert.equal(classifyPath("tsconfig.build.json"), "config");
+  assert.equal(classifyPath("spec-index.jsonl"), "config");
   assert.equal(classifyPath("assets/logo.png"), "asset");
   assert.equal(classifyPath("src/runner.mjs"), "code");
 });
@@ -61,6 +62,10 @@ test("treats a change as docs/config-only when no path is code", () => {
   assert.equal(isDocsOrConfigOnlyChange(["README.md", "excubitor.catalog.yaml"]), true);
   assert.equal(isDocsOrConfigOnlyChange([".env.example", ".gitignore", ".npmrc"]), true);
   assert.equal(isDocsOrConfigOnlyChange(["README.md"]), true);
+  // JSON Lines は JSON と同じ宣言的データ。 .json$ 固定で漏れており、 生成物 *.jsonl の
+  // 追跡をやめる変更が「コード」と分類されてドメインを要求され、 通せなくなっていた。
+  assert.equal(isDocsOrConfigOnlyChange([".gitignore", "spec-index.jsonl"]), true);
+  assert.equal(isDocsOrConfigOnlyChange(["README.md", "data/index.jsonl"]), true);
   assert.equal(isDocsOrConfigOnlyChange(["app.yaml", "src/runner.mjs"]), false);
   assert.equal(isDocsOrConfigOnlyChange(["scripts/deploy.ps1"]), false);
   assert.equal(isDocsOrConfigOnlyChange([]), false);

@@ -93,12 +93,16 @@ plan`) として記録する。これは advisory であって pass ではない
   新規ファイルを取りこぼさないよう同じ除外規則で併せて列挙する。
 - 判定: `isDocsOrConfigOnlyChange` — 変更ファイルが 1 件以上あり、全てが
   上記ドキュメント拡張子または設定ファイル
-  (`.yaml/.yml/.json/.jsonc/.json5/.toml/.ini/.cfg/.conf/.properties` と
+  (`.yaml/.yml/.json/.jsonl/.jsonc/.json5/.toml/.ini/.cfg/.conf/.properties` と
   `.env.example/.env.sample/.env.template/.editorconfig/.gitignore/
   .gitattributes/.gitmodules/.npmrc/.nvmrc/.dockerignore/.eslintignore/
   .prettierignore`) のとき docs/config-only。コード拡張子は 1 つも含めない
   (設定を書いた `.mjs` はコードであり、対象ドメインを負う)。docs と設定が
   混在した変更も緩和対象で、コードが 1 件でも入れば緩和は消える。
+  `.jsonl` (JSON Lines) は `.json` と同じ宣言的データなので同列に置く。拡張子を
+  `.json` 固定で書いていたため漏れており、生成物 `*.jsonl` の追跡をやめる変更が
+  code と分類されて、持ちようのない対象ドメインを要求されていた (Concordia#12)。
+  変更種別分類でも同じ理由で `.jsonl` は `config`。
 - 例外: **依存マニフェスト** (`package.json`・`package-lock.json`・
   `npm-shrinkwrap.json`・`yarn.lock`・`pnpm-lock.yaml`・`Cargo.toml`・`Cargo.lock`・
   `pyproject.toml`・`requirements*.txt`・`poetry.lock`・`Gemfile`・`Gemfile.lock`・
