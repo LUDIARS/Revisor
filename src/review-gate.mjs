@@ -33,13 +33,41 @@ export { isDocsOnlyChange, isDocsOrConfigOnlyChange };
 // rather than enforcing it (see above).
 const ADVISORY_GATES = new Set(["spec_linkage", "coupling_delta", "convention_drift"]);
 
+// Anatomia derives domain membership from parsed functions, so a change to a
+// surface it cannot parse (a .bat entrypoint, say) reports no target domain not
+// because one is missing but because there is nothing to attribute. Demanding a
+// domain there blocks the change forever, exactly like the docs/config case.
+//
+// Both available signals are consulted and either one claiming an anchor wins:
+// the payload has to say, unambiguously and everywhere, that nothing was
+// analysed before the requirement is relaxed. A payload that carries neither
+// signal is older or malformed and stays fail-closed.
+export function hasAnalyzableChangedAnchors(analysis) {
+  const unassigned = analysis?.domain?.unassignedAnchors;
+  const targetDomains = analysis?.domain?.targetDomains;
+  const changedFunctions = analysis?.quality?.changedFunctions;
+  const domainKnown = Array.isArray(unassigned) && Array.isArray(targetDomains);
+  const qualityKnown = Array.isArray(changedFunctions);
+  if (!domainKnown && !qualityKnown) return true;
+  if (
+    domainKnown
+    && (unassigned.length > 0
+      || targetDomains.some((domain) => domain.changedAnchors?.length > 0))
+  ) {
+    return true;
+  }
+  return qualityKnown && changedFunctions.length > 0;
+}
+
 // One definition of "this change still owes a code target domain", shared by the
 // merge gate, the reviewer prompt, and the human question, so the relaxation can
 // never apply to one of them and not the others. The flag is the docs/config-only
 // judgement: documentation and settings files carry no code domain of their own,
 // so demanding one of them blocks the change forever instead of improving it.
 export function needsTargetDomain(analysis, docsOrConfigOnly = false) {
-  return !analysis.domain.hasTargetDomain && !docsOrConfigOnly;
+  return !analysis.domain.hasTargetDomain
+    && !docsOrConfigOnly
+    && hasAnalyzableChangedAnchors(analysis);
 }
 
 function failedGateNames(verify) {
@@ -89,8 +117,13 @@ export function gateOutcome({
   if (needsTargetDomain(finalAnalysis, docsOrConfigOnly)) {
     reasons.push("target domain is still missing");
   } else if (!finalAnalysis.domain.hasTargetDomain) {
+    // A docs/config-only change also has no analyzable anchors, so its own
+    // relaxation is reported first; the unanalyzable-surface note is for a code
+    // change Anatomia could not parse, which is the narrower case.
     advisories.push(
-      `target domain is still missing (${docsOnly ? "docs-only" : "docs/config-only"} change)`,
+      docsOrConfigOnly
+        ? `target domain is still missing (${docsOnly ? "docs-only" : "docs/config-only"} change)`
+        : "target domain is not applicable (no analyzable changed functions)",
     );
   }
   if (finalAnalysis.quality.changedOrphans.length > 0) {

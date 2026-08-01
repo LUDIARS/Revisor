@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   gateOutcome,
+  hasAnalyzableChangedAnchors,
   isDocsOnlyChange,
   isDocsOrConfigOnlyChange,
   needsTargetDomain,
@@ -9,8 +10,16 @@ import {
 
 function analysis({ gates = [], changedOrphans = [], changedViolations = [] } = {}) {
   return {
-    domain: { hasTargetDomain: true },
-    quality: { changedOrphans, complexity: { score: 70 } },
+    domain: {
+      hasTargetDomain: true,
+      targetDomains: [{ name: "review-gate", changedAnchors: ["fn:changed"] }],
+      unassignedAnchors: [],
+    },
+    quality: {
+      changedFunctions: [{ anchor: "fn:changed" }],
+      changedOrphans,
+      complexity: { score: 70 },
+    },
     architecture: {
       verify: gates.length === 0
         ? { pass: true, gates: [] }
@@ -152,9 +161,64 @@ test("passes a clean analysis with no advisories", () => {
 test("blocks a code change whose target domain is missing", () => {
   const finalAnalysis = analysis();
   finalAnalysis.domain.hasTargetDomain = false;
+  finalAnalysis.domain.targetDomains = [];
+  finalAnalysis.domain.unassignedAnchors = ["fn:changed"];
   const outcome = evaluate(finalAnalysis);
   assert.deepEqual(outcome.reasons, ["target domain is still missing"]);
   assert.deepEqual(outcome.advisories, []);
+});
+
+test("does not demand a function domain when Anatomia reports no changed anchors", () => {
+  const finalAnalysis = analysis();
+  finalAnalysis.domain = {
+    hasTargetDomain: false,
+    targetDomains: [],
+    unassignedAnchors: [],
+  };
+  finalAnalysis.quality.changedFunctions = [];
+  const outcome = evaluate(finalAnalysis);
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, [
+    "target domain is not applicable (no analyzable changed functions)",
+  ]);
+  assert.equal(needsTargetDomain(finalAnalysis), false);
+});
+
+test("only an explicit zero-anchor analysis relaxes the requirement", () => {
+  // A docs-only diff carries no changed functions either, so a payload that
+  // still claims an anchor anywhere has to keep the gate closed.
+  const bothEmpty = analysis();
+  bothEmpty.domain = { hasTargetDomain: false, targetDomains: [], unassignedAnchors: [] };
+  bothEmpty.quality.changedFunctions = [];
+  assert.equal(hasAnalyzableChangedAnchors(bothEmpty), false);
+
+  const qualityOnly = structuredClone(bothEmpty);
+  qualityOnly.quality.changedFunctions = [{ anchor: "fn:changed" }];
+  assert.equal(hasAnalyzableChangedAnchors(qualityOnly), true);
+
+  const domainOnly = structuredClone(bothEmpty);
+  domainOnly.domain.unassignedAnchors = ["fn:changed"];
+  assert.equal(hasAnalyzableChangedAnchors(domainOnly), true);
+
+  const assignedOnly = structuredClone(bothEmpty);
+  assignedOnly.domain.targetDomains = [{ name: "review-gate", changedAnchors: ["fn:changed"] }];
+  assert.equal(hasAnalyzableChangedAnchors(assignedOnly), true);
+
+  // Neither signal present: an older or malformed payload stays fail-closed.
+  assert.equal(hasAnalyzableChangedAnchors({ domain: { hasTargetDomain: false } }), true);
+  assert.equal(hasAnalyzableChangedAnchors({}), true);
+});
+
+test("the docs-only relaxation is reported ahead of the unanalyzable-surface one", () => {
+  // A docs-only change has no analyzable anchors, so both relaxations apply; the
+  // advisory must still name the reason the reader can act on.
+  const finalAnalysis = analysis();
+  finalAnalysis.domain = { hasTargetDomain: false, targetDomains: [], unassignedAnchors: [] };
+  finalAnalysis.quality.changedFunctions = [];
+  const outcome = evaluate(finalAnalysis, { docsOnly: true });
+  assert.deepEqual(outcome.advisories, [
+    "target domain is still missing (docs-only change)",
+  ]);
 });
 
 test("relaxes a missing target domain to an advisory for a docs-only change", () => {
@@ -243,6 +307,8 @@ test("needsTargetDomain follows the docs/config-only relaxation", () => {
   const withDomain = analysis();
   const withoutDomain = structuredClone(withDomain);
   withoutDomain.domain.hasTargetDomain = false;
+  withoutDomain.domain.targetDomains = [];
+  withoutDomain.domain.unassignedAnchors = ["fn:changed"];
   assert.equal(needsTargetDomain(withoutDomain), true);
   assert.equal(needsTargetDomain(withoutDomain, true), false);
   assert.equal(needsTargetDomain(withDomain), false);

@@ -1,5 +1,8 @@
 import { RUNTIME_CHECK_MARKER } from "./merge-risk.mjs";
-import { needsTargetDomain } from "./review-gate.mjs";
+import {
+  hasAnalyzableChangedAnchors,
+  needsTargetDomain,
+} from "./review-gate.mjs";
 import { stageEnabled } from "./review-plan.mjs";
 
 // A docs-only or configuration-only change must not be asked for a code domain:
@@ -23,6 +26,15 @@ export function domainInstruction({ analysis, docsOnly, docsOrConfigOnly = docsO
       docsOnly
         ? "Do check that the documentation stays consistent with the specs and behaviour it describes."
         : "Do check that the changed values stay consistent with the specs, schemas and behaviour that read them.",
+    ].join(" ");
+  }
+  // Checked after the docs/config relaxation: a docs-only change has no
+  // analyzable anchors either, and its own instruction is the accurate one.
+  if (!analysis.domain.hasTargetDomain && !hasAnalyzableChangedAnchors(analysis)) {
+    return [
+      "Anatomia found no analyzable changed functions, so its function-level domain membership cannot identify a target domain for this change.",
+      "Review the executable script or other unsupported surface normally, including its spec boundary and runtime risk.",
+      "Do not invent a code anchor or report PR_GATE_NEEDS_HUMAN merely because a target domain is absent.",
     ].join(" ");
   }
   return "Ensure the existing target-domain and spec traceability remains accurate.";

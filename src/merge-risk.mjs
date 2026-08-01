@@ -5,6 +5,8 @@
 // Both are deterministic and fully itemised, so a human can disagree with the
 // number by reading the factors instead of guessing at a black box.
 
+import { hasAnalyzableChangedAnchors } from "./review-gate.mjs";
+
 // The reviewer is asked to emit this marker when the registered tests cannot
 // establish that the change works.
 export const RUNTIME_CHECK_MARKER = "REVISOR_NEEDS_RUNTIME_CHECK";
@@ -153,7 +155,12 @@ export function assessMergeRisk({
     Math.min(12, (changedViolations.length - errorViolations.length) * 4),
     `error 未満のアーキテクチャ違反 ${changedViolations.length - errorViolations.length} 件`,
   );
-  if (analysis?.domain && analysis.domain.hasTargetDomain === false && !docsOnly) {
+  if (
+    analysis?.domain
+    && analysis.domain.hasTargetDomain === false
+    && !docsOnly
+    && hasAnalyzableChangedAnchors(analysis)
+  ) {
     add("missing_domain", 20, "対象ドメインが未定義です");
   }
   if (typeof complexityScoreDelta === "number" && complexityScoreDelta < 0) {

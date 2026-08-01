@@ -15,7 +15,7 @@ related:
   - ../architecture.md
   - ./review-plan.md
   - ./merge-risk.md
-updated: 2026-07-30
+updated: 2026-08-01
 ---
 
 # review-gate — マージ可否判定ポリシー
@@ -27,7 +27,8 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 ## ブロック条件 (reasons)
 
 - 登録テストの失敗
-- 対象ドメイン欠如 (**docs / 設定ファイルのみの変更を除く**、下記)
+- 対象ドメイン欠如 (**docs / 設定ファイルのみの変更**と**解析可能な変更関数が
+  1 件も無い変更**を除く、下記)
 - Anatomia の **block 相当ゲート** (`rule_conformance` / `duplication`)、および
   advisory 集合に載っていないゲートの不合格 (未知のゲートは fail-closed で
   ブロックする。ゲート名なしの検証失敗もブロック)
@@ -47,6 +48,7 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 - 孤立関数 (orphan)
 - error 未満のアーキテクチャ違反
 - **docs / 設定ファイルのみの変更の対象ドメイン欠如**
+- **解析可能な変更関数が無い変更の対象ドメイン欠如**
 - レビュー計画が担当外とした登録テスト (`status: "skipped"`)
 - 決定的ルールが `anatomia_code_analysis` を落としたときの全ゲート・全違反
 - 設定無効 (`disabled by settings`) 以外の理由でスキップされたセキュリティスキャン
@@ -125,8 +127,33 @@ plan`) として記録する。これは advisory であって pass ではない
   (仕様と記述・設定値の整合性チェック)。`PR_GATE_NEEDS_HUMAN`・登録テスト・
   leakage・複雑度・severity=error のアーキ違反・セキュリティスキャンの
   ブロックは不変。緩和されるのは対象ドメイン欠如だけ。
-- 緩和しないもの: マージリスクの `missing_domain` 加点は据え置き
-  (ブロックではなく人間の判断要否の重み付けであり、ゲートとは別軸)。
+- 緩和しないもの: docs / 設定のみを理由とするマージリスクの `missing_domain`
+  加点は据え置き (ブロックではなく人間の判断要否の重み付けであり、ゲートとは
+  別軸)。解析可能な変更関数が無い場合は加点自体を止める (下記)。
+
+## 解析対象の無い変更の緩和 (2026-08-01)
+
+Anatomia のドメイン所属は**解析できた関数**から導出される。Anatomia が解釈しない
+実行面 (`.bat` エントリポイントなど) だけを変更した PR は、対象ドメインが
+「欠けている」のではなく**帰属させる対象が存在しない**。docs / 設定と同じ理由で、
+ここでブロックすると変更は永久にマージできない。
+
+- 判定: `hasAnalyzableChangedAnchors` — 解析結果が変更アンカーを 1 件でも
+  主張していれば `true`。
+- 参照する signal は 2 系統: `domain.unassignedAnchors` +
+  `domain.targetDomains[].changedAnchors` と `quality.changedFunctions`。
+  **どちらか一方でもアンカーを主張すれば `true`** とし、両方が明示的に空の
+  ときだけ緩和する。片方だけを見て緩和すると、解析が部分的に欠けた payload で
+  ゲートが黙って開く。
+- 両 signal とも欠落した payload (旧版・壊れた payload) は fail-closed で
+  `true`。緩和は「解析したが 0 件だった」という明示的な結果でだけ効く。
+- 適用先: ゲート (`needsTargetDomain`)・レビュアープロンプト
+  (`domainInstruction`)・`humanQuestion`・マージリスクの `missing_domain` 加点。
+  加点まで止めるのは、docs / 設定の場合と違って**負いようのない証拠**であり、
+  人間の判断要否を上げる材料にもならないため。
+- docs / 設定のみの変更も解析可能な関数を持たないので、**その緩和を先に判定する**。
+  ゲートの advisory 文言もレビュアーへの指示も、docs / 設定であればそちら側を
+  返す (より具体的で正確なため)。
 
 ## coupling_delta の advisory 化 (neco 決定 2026-07-30)
 
