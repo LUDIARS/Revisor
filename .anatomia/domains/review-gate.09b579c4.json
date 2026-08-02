@@ -17,6 +17,22 @@
         "by": "name",
         "maxFanOut": 9007199254740991
       }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/security-scan",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "runSecurityScan|scanArgs|scanEnv|extractFindings|sanitizeFinding|severityRank|skippedSecurityScan",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
     }
   ],
   "templateRules": [],
@@ -25,15 +41,17 @@
   "mechanics": [
     "merge-gate-policy",
     "docs-only-relaxation",
-    "security-scan-outcome"
+    "security-scan-outcome",
+    "security-scan-state-isolation"
   ],
   "specRefs": [
     "review-gate — マージ可否判定ポリシー / ブロックと advisory の振り分け",
     "review-gate — docs-only 変更の対象ドメイン緩和 (neco 2026-07-30)",
     "review-gate — セキュリティスキャン結果の扱い (findings/error はブロック、skipped は advisory)",
     "review-gate — 解釈できないスキャン結果の fail-closed (既知 status 以外はブロック)",
-    "security-scan — codex-security スキャンの起動と結果の正規化 (終了コード→status、保持は severity/rule/file/line のみ)"
+    "security-scan — codex-security スキャンの起動と結果の正規化 (終了コード→status、保持は severity/rule/file/line のみ)",
+    "security-scan — 環境変数 CODEX_SECURITY_STATE_DIR (スキャンごとの専用 state ディレクトリ / 綴り違いの除去 / 削除失敗を握り潰す)"
   ],
-  "rationale": "マージ可否の判定基準は runner (審査オーケストレーション) から独立した単一のポリシー責務。gateOutcome / needsTargetDomain を正本とし、レビュアープロンプト・humanQuestion も同じ判定を共有する。スキャナの起動は security-scan が担い、ゲートは status のみを解釈する。",
-  "updatedAt": "2026-07-30T07:20:00.000Z"
+  "rationale": "マージ可否の判定基準は runner (審査オーケストレーション) から独立した単一のポリシー責務。gateOutcome / needsTargetDomain を正本とし、レビュアープロンプト・humanQuestion も同じ判定を共有する。スキャナの起動は security-scan が担い、ゲートは status のみを解釈する。スキャナ起動時の環境 (state ディレクトリの隔離) も security-scan の責務で、process.mjs は環境を受け取るだけの汎用プリミティブとして domain 外に置く。",
+  "updatedAt": "2026-08-02T00:00:00.000Z"
 }

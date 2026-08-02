@@ -62,7 +62,10 @@ their severity, but never source excerpts or reproduction steps.
   to a ChatGPT/Codex subscription, unless the security scan is disabled in the
   settings. Revisor pins the scan to `--auth chatgpt`, so an `OPENAI_API_KEY` or
   `CODEX_API_KEY` in the environment never silently switches it to metered API
-  billing — and never substitutes for the sign-in.
+  billing — and never substitutes for the sign-in. Each scan runs against a
+  private, throwaway `CODEX_SECURITY_STATE_DIR`, so parallel reviews do not
+  queue behind the scanner's machine-wide state database (scan history and
+  resume are given up; Revisor deletes the report artifacts anyway).
 - an existing Anatomia checkout
 - an Excubitor catalog registration when using `revisor serve`
 

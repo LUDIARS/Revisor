@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "security-scan — codex-security スキャンの起動と結果の正規化"
-description: "codex-security CLI をレビュー用の使い捨て worktree 上で 1 回だけ起動し、終了コードを status に正規化し、保持する finding を severity/rule/file/line だけに削り、レポート成果物を必ず削除する。"
+description: "codex-security CLI をレビュー用の使い捨て worktree 上で 1 回だけ起動し、終了コードを status に正規化し、保持する finding を severity/rule/file/line だけに削り、レポート成果物を必ず削除する。スキャンごとに専用の state ディレクトリを渡し、並列 worker が共有 SQLite ロックで直列化されないようにする。"
 service: revisor
 domain: review-gate
 tags:
@@ -12,7 +12,7 @@ status: implemented
 related:
   - ./review-gate.md
   - ../architecture.md
-updated: 2026-07-31
+updated: 2026-08-02
 ---
 
 # security-scan — codex-security スキャンの起動と結果の正規化
@@ -90,6 +90,33 @@ Scan stopped: estimated cost $X exceeded the $Y limit   → exit 2
 
 予算超過そのものは依然 `error` (未完了) として扱う — 部分スキャンを合格として
 読ませないため。 effort を下げても完走しない場合は `securityMaxCostUsd` を上げる。
+
+## 環境変数 `CODEX_SECURITY_STATE_DIR`
+
+`scanEnv` がスキャンごとに専用の一時ディレクトリを指す環境を組み立て、
+`runSecurityScan` が `execute` (既定は `process.mjs` の `runNamedCli`) の `env`
+として渡す。`runNamedCli` の `env` は省略可で、省略時はサービスの環境をそのまま使う
+(呼び出し側が 1 変数足すために PATH や ComSpec を組み直さずに済む)。値はサービスの
+環境に `CODEX_SECURITY_STATE_DIR` を足したもので、置き換えではない — PATH が無いと
+CLI 自体が見つからない。スキャナは既定で全プロセス共通の state ディレクトリ配下の
+SQLite にスキャンを登録するため、worker が複数走る Revisor では 2 本目以降が
+書き込みロックで `Preparing scan` のまま待たされ、自分のタイムアウトで非ゼロ終了して
+PR をブロックする (実測 200 秒超)。
+
+失うのはスキャン履歴とレジューム。どちらも Revisor では参照経路が無い
+(レポート成果物は毎回削除し、保持は severity/rule/file/line のみ)。副産物として
+共有 state 配下に空の scan ディレクトリが溜まる問題も解消する。
+
+環境に既に別綴りの同名変数 (`Codex_Security_State_Dir` など) があれば取り除いてから
+足す。Windows の環境変数は大文字小文字を区別しないため、綴り違いを残すと子プロセスが
+どちらを見るか決まらず、共有 state ディレクトリへ黙って戻りうる。
+
+state ディレクトリの作成・削除は `makeStateDir` / `removeStateDir` で差し替えられる
+(既定は `mkdtemp` / `rm`)。削除も `finally` で行うが、削除の失敗はスキャン結果を
+覆さない (捨てて良い記録しか入っておらず、ここで失敗させると合格した PR が
+ブロックされる)。state ディレクトリの作成は `try` の中で行う。出力ディレクトリを
+先に作るので、作成に失敗した場合もレポート成果物の削除 (「毎回削除」) を
+外さないため。
 
 ## 終了コードの正規化
 

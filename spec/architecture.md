@@ -51,6 +51,12 @@ runtime architecture.
   human and how the board is ordered.
 - `auto-merge.mjs` decides whether a reviewed pull request is below the risk the
   operator accepted.
+- `process.mjs` owns child-process invocation: captured stdout/stderr, a killing
+  timeout, the Windows shim launch for npm-installed CLIs, and the optional
+  per-call environment a caller adds a variable to. It belongs to the
+  `runtime-execution` domain and carries no caller policy — what a variable means
+  is decided by the adapter that adds it (`security-scan.mjs` for the scanner
+  state directory).
 - `ci.mjs` runs registered argv test cases and retains outcome metadata, plus the
   captured output of the cases that failed. Cases the plan did not select are
   recorded as `skipped` with the reason.
@@ -60,7 +66,9 @@ runtime architecture.
 - `leakage.mjs` detects sensitive additions without retaining matched values.
 - `security-scan.mjs` runs the `codex-security` CLI over a committed diff in a
   disposable worktree, retains finding locations only, and deletes the scan
-  report artifacts.
+  report artifacts. Each scan gets a private `CODEX_SECURITY_STATE_DIR`, because
+  the scanner's default state directory is shared machine-wide and its SQLite
+  write lock would serialise the workers.
 - `local-merge.mjs` creates a squash commit in a disposable worktree, scans that
   exact squashed diff, and advances the local base branch.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe

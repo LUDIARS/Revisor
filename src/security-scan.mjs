@@ -14,6 +14,7 @@ const SEVERITY_RANK = new Map([
   ["medium", 2],
   ["low", 1],
 ]);
+const STATE_DIR_VAR = "CODEX_SECURITY_STATE_DIR";
 const UNREAD_REPORT = "the scan report could not be read";
 const UNRANKED_REPORT = "the scan report listed no finding at or above the threshold";
 
@@ -126,6 +127,36 @@ function scanArgs({ worktreePath, diffBase, settings, outputDir }) {
   ];
 }
 
+// The scanner registers every scan in a SQLite database under its state
+// directory, which defaults to a single path shared by every process on the
+// machine. Revisor reviews with several workers at once, so two concurrent scans
+// contend for that write lock and the later one sits at "Preparing scan" until
+// its own timeout, then exits non-zero and blocks the PR (measured at over 200
+// seconds). Giving each scan a private state directory serialises nothing.
+//
+// What that gives up is the scan history and the ability to resume an
+// interrupted scan. Neither is reachable here: Revisor already deletes the
+// report artifacts after every scan and keeps only severity/rule/file/line, so
+// there is no history to consult and nothing to resume into. It also stops the
+// shared state directory from collecting an empty scan folder per review.
+//
+// The variable is added to the service environment rather than replacing it: the
+// CLI still has to be found on PATH, and `--auth chatgpt` (not the env) is what
+// keeps the run on the subscription sign-in.
+function scanEnv(stateDir) {
+  const env = { ...process.env };
+  // Windows environment variables are case-insensitive, but a spread of
+  // `process.env` is a plain object: an operator-set `Codex_Security_State_Dir`
+  // would survive next to the key added below, and the child would then see two
+  // spellings of one variable with no defined winner — silently putting the scan
+  // back on a shared state directory, which is the failure this exists to avoid.
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() === STATE_DIR_VAR) delete env[key];
+  }
+  env[STATE_DIR_VAR] = stateDir;
+  return env;
+}
+
 // Runs `codex-security scan` on the committed diff of a disposable review
 // worktree. Exit code 0 is a pass, 1 means findings at or above the configured
 // severity, and anything else (including a missing or unauthenticated CLI, an
@@ -137,21 +168,38 @@ export async function runSecurityScan({
   execute = runNamedCli,
   makeOutputDir = () => mkdtemp(join(tmpdir(), "revisor-security-scan-")),
   removeOutputDir = (path) => rm(path, { recursive: true, force: true }),
+  makeStateDir = () => mkdtemp(join(tmpdir(), "revisor-security-state-")),
+  removeStateDir = (path) => rm(path, { recursive: true, force: true }),
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
   if (!settings.securityScanEnabled) {
     return skippedSecurityScan("disabled by settings");
   }
   const outputDir = await makeOutputDir();
+  let stateDir;
   let result;
   try {
+    // Created inside the try so that a failure here still deletes `outputDir`:
+    // the report directory has to go on every path, including the ones that
+    // never reach the scanner.
+    stateDir = await makeStateDir();
     result = await execute({
       name: "codex-security",
       args: scanArgs({ worktreePath, diffBase, settings, outputDir }),
       cwd: worktreePath,
       timeoutMs,
+      env: scanEnv(stateDir),
     });
   } finally {
+    // The state directory is throwaway scan bookkeeping, so a failed cleanup
+    // must not turn a completed scan into an error — a leaked temp directory is
+    // the smaller problem, and it holds nothing Revisor is obliged to delete.
+    try {
+      // `stateDir` is undefined only when its own creation failed.
+      if (stateDir !== undefined) await removeStateDir(stateDir);
+    } catch {
+      // The scan result stands; the directory is left for the OS to reclaim.
+    }
     // Report artifacts keep source excerpts on disk; Revisor must not.
     await removeOutputDir(outputDir);
   }

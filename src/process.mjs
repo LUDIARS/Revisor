@@ -53,7 +53,10 @@ export async function runProcess({
   });
 }
 
-export async function runNamedCli({ name, args, cwd, stdin, timeoutMs }) {
+// `env` is optional and defaults to the service environment: a caller that only
+// needs to add one variable must not have to reconstruct PATH (and ComSpec on
+// Windows), because a CLI launched without them cannot be found at all.
+export async function runNamedCli({ name, args, cwd, stdin, timeoutMs, env = process.env }) {
   if (process.platform === "win32") {
     // npm-installed CLIs are .cmd shims on Windows. cmd.exe is required to
     // launch them; the command name and arguments are Revisor-owned constants.
@@ -63,6 +66,7 @@ export async function runNamedCli({ name, args, cwd, stdin, timeoutMs }) {
       cwd,
       stdin,
       timeoutMs,
+      env,
     });
   }
   return runProcess({
@@ -71,5 +75,6 @@ export async function runNamedCli({ name, args, cwd, stdin, timeoutMs }) {
     cwd,
     stdin,
     timeoutMs,
+    env,
   });
 }

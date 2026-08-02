@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import test from "node:test";
 import { runSecurityScan, skippedSecurityScan } from "../src/security-scan.mjs";
 
@@ -20,6 +21,8 @@ function scanOptions(result) {
     execute: async () => ({ ok: result.exitCode === 0, stdout: "", stderr: "", ...result }),
     makeOutputDir: async () => "C:/tmp/security-output",
     removeOutputDir: async () => {},
+    makeStateDir: async () => "C:/tmp/security-state",
+    removeStateDir: async () => {},
   };
 }
 
@@ -121,6 +124,123 @@ test("passes a configured model and omits the flag when unset", async () => {
     },
   });
   assert.equal(withoutModel[0].args.includes("--model"), false);
+});
+
+// The real temp-directory helpers are exercised here on purpose: uniqueness per
+// scan and removal after it are properties of the defaults, not of a stub.
+function liveStateDirScan(execute) {
+  const options = scanOptions({ exitCode: 0 });
+  delete options.makeStateDir;
+  delete options.removeStateDir;
+  return runSecurityScan({ ...options, execute });
+}
+
+test("points the scanner at a private state directory", async () => {
+  const invocations = [];
+  const outcome = await runSecurityScan({
+    ...scanOptions({ exitCode: 0 }),
+    execute: async (invocation) => {
+      invocations.push(invocation);
+      return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+    },
+  });
+  assert.equal(outcome.status, "passed");
+  assert.equal(invocations[0].env.CODEX_SECURITY_STATE_DIR, "C:/tmp/security-state");
+  // The variable is added to the environment, not substituted for it: without
+  // PATH the CLI is not even found. `process.env` is case-insensitive on
+  // Windows but a spread of it is a plain object, so the key survives with
+  // whatever case the parent process used (`Path` under npm, `PATH` under a
+  // shell). Compare the value, not one spelling of the key.
+  assert.equal(pathOf(invocations[0].env), pathOf(process.env));
+});
+
+function pathOf(environment) {
+  const key = Object.keys(environment).find((name) => name.toUpperCase() === "PATH");
+  return key === undefined ? undefined : environment[key];
+}
+
+test("gives concurrent scans different state directories", async () => {
+  const stateDirs = [];
+  let bothStarted;
+  const started = new Promise((resolve) => {
+    bothStarted = resolve;
+  });
+  // Both scans are held inside `execute` until the other has started, so the
+  // directories are compared while the two runs genuinely overlap — which is the
+  // situation the shared SQLite write lock used to serialise.
+  const execute = async (invocation) => {
+    stateDirs.push(invocation.env.CODEX_SECURITY_STATE_DIR);
+    if (stateDirs.length === 2) bothStarted();
+    await started;
+    return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+  };
+  await Promise.all([liveStateDirScan(execute), liveStateDirScan(execute)]);
+  assert.equal(stateDirs.length, 2);
+  assert.notEqual(stateDirs[0], stateDirs[1]);
+});
+
+test("removes the state directory once the scan is done", async () => {
+  let stateDir;
+  await liveStateDirScan(async (invocation) => {
+    stateDir = invocation.env.CODEX_SECURITY_STATE_DIR;
+    assert.equal(existsSync(stateDir), true);
+    return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+  });
+  assert.equal(existsSync(stateDir), false);
+});
+
+test("keeps the scan result when the state directory cannot be removed", async () => {
+  const outcome = await runSecurityScan({
+    ...scanOptions({ exitCode: 0 }),
+    removeStateDir: async () => {
+      throw new Error("EBUSY");
+    },
+  });
+  // A leaked temp directory is the lesser problem: it holds only scan
+  // bookkeeping, and failing here would block a PR that actually passed.
+  assert.equal(outcome.status, "passed");
+});
+
+test("deletes the report directory when the state directory cannot be created", async () => {
+  const removed = [];
+  // The report directory is created first, so a failure between the two must
+  // still delete it: "deleted on every path" includes the paths that never
+  // reach the scanner.
+  await assert.rejects(runSecurityScan({
+    ...scanOptions({ exitCode: 0 }),
+    makeStateDir: async () => {
+      throw new Error("ENOSPC");
+    },
+    removeOutputDir: async (path) => {
+      removed.push(path);
+    },
+  }), /ENOSPC/);
+  assert.deepEqual(removed, ["C:/tmp/security-output"]);
+});
+
+test("replaces an operator's differently-cased state-dir variable", async () => {
+  // Windows resolves environment variables case-insensitively, so leaving a
+  // second spelling in the child environment would make which state directory
+  // the scanner uses undefined — and the shared one is what serialises scans.
+  const original = process.env.Codex_Security_State_Dir;
+  process.env.Codex_Security_State_Dir = "C:/tmp/shared-state";
+  try {
+    const invocations = [];
+    await runSecurityScan({
+      ...scanOptions({ exitCode: 0 }),
+      execute: async (invocation) => {
+        invocations.push(invocation);
+        return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+      },
+    });
+    const spellings = Object.keys(invocations[0].env)
+      .filter((name) => name.toUpperCase() === "CODEX_SECURITY_STATE_DIR");
+    assert.deepEqual(spellings, ["CODEX_SECURITY_STATE_DIR"]);
+    assert.equal(invocations[0].env.CODEX_SECURITY_STATE_DIR, "C:/tmp/security-state");
+  } finally {
+    if (original === undefined) delete process.env.Codex_Security_State_Dir;
+    else process.env.Codex_Security_State_Dir = original;
+  }
 });
 
 test("sanitizes findings to severity, rule, file and line only", async () => {
