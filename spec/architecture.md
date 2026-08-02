@@ -309,8 +309,11 @@ same commit; a moved submodule pointer is a tracked change and still blocks.
 Worker crashes fail their active job and cause pool replacement. Shutdown
 rejects waiting work and terminates owned processes.
 
-Every disposable worktree is removed on normal and exceptional paths. Unsafe
-reviewer changes are discarded before commit or local branch advancement.
+Every disposable worktree is removed on normal and exceptional paths. Deleting
+the temporary directory that held them is best-effort: a filesystem that keeps
+the directory locked leaves a harmless out-of-Git copy behind rather than failing
+an otherwise complete review. `spec/feature/local-workspace.md` is authoritative.
+Unsafe reviewer changes are discarded before commit or local branch advancement.
 
 The queue is in-memory while check status is persisted, so a process that dies
 mid-review leaves `queued` / `running` state no worker owns. Startup therefore

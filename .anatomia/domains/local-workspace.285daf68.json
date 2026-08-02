@@ -1,0 +1,39 @@
+{
+  "name": "local-workspace",
+  "description": "ローカル repository 上の使い捨て detached worktree とローカル ref を所有する境界。ref 文字列の安全性検証、固定 SHA の worktree 生成、tracked change だけを見る清潔さ判定、compare-and-swap による branch 前進、および best-effort な cleanup を含む。fetch も push も行わず、審査や merge の可否判定も持たない。",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/workspace\\.mjs$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "assertSafeRef|parseWorktreeList|trackedChanges|branchWorktree|inspectLocalPullRequest|prepareLocalWorktrees|advanceLocalBranch|cleanupWorktrees",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"local-workspace\" domain: ローカル ref の安全性検証、固定 SHA の使い捨て detached worktree 生成、tracked change のみの清潔さ判定、compare-and-swap の branch 前進、best-effort cleanup。",
+  "source": "spec-draft",
+  "mechanics": [
+    "disposable-worktree-lifecycle",
+    "ref-validation",
+    "compare-and-swap-branch-advance",
+    "best-effort-cleanup"
+  ],
+  "specRefs": [
+    "local-workspace — ref の安全性",
+    "local-workspace — 使い捨て worktree の生成",
+    "local-workspace — cleanup の best-effort 範囲",
+    "local-workspace — worktree の清潔さと branch 前進"
+  ],
+  "rationale": "使い捨て worktree の生成と破棄は、審査の可否判定 (review-gate) や外部 CLI 実行 (runtime-execution) とは別の資源 lifecycle 責務。特に cleanup の失敗許容度はここでしか決められない: temp dir が消せないことと審査が失敗することは重みが違い、判定 domain 側にこの非対称性を持ち込むと OS 由来の一時的な I/O 失敗がレビュー結果へ波及する。",
+  "updatedAt": "2026-08-03T00:00:00.000Z"
+}

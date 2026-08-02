@@ -140,7 +140,13 @@ export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha) {
   return nextSha;
 }
 
-export async function cleanupWorktrees(repoPath, worktrees) {
+// Windows では Defender の on-access スキャンや消えかけの子プロセスが一時的に
+// ハンドルを掴み、rmdir が EBUSY/EPERM になる。maxRetries で待つ。
+function removeTempRoot(root) {
+  return rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
+
+export async function cleanupWorktrees(repoPath, worktrees, { removeRoot = removeTempRoot } = {}) {
   for (const path of [worktrees.head, worktrees.base]) {
     try {
       await git(repoPath, ["worktree", "remove", "--force", path]);
@@ -153,5 +159,12 @@ export async function cleanupWorktrees(repoPath, worktrees) {
   } catch {
     // Cleanup is best-effort after individual worktree removal attempts.
   }
-  await rm(worktrees.root, { recursive: true, force: true });
+  try {
+    await removeRoot(worktrees.root);
+  } catch {
+    // それでも消せない場合に review job を落とさない。失敗扱いのレビューは有害
+    // (2026-08-02 に EBUSY が同一 PR の審査を 2 回落とした) 一方、残る temp dir は
+    // worktree を外した後の Git 管理外コピーなので無害。Revisor は残骸を再掃除しない。
+    // OS の temp 掃除か手動削除に委ねる。
+  }
 }
