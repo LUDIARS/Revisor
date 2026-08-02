@@ -32,18 +32,26 @@ export function pendingReviewProjection() {
 }
 
 export class LocalPrReporter {
-  constructor(store, { afterCompleted = null, notifyCompletion = null } = {}) {
+  constructor(store, {
+    afterCompleted = null,
+    notifyCompletion = null,
+    notifyReviewStatus = null,
+  } = {}) {
     if (!store || typeof store.updatePullRequest !== "function") {
       throw new TypeError("Local PR reporter requires a state store.");
     }
+    if (notifyReviewStatus !== null && typeof notifyReviewStatus !== "function") {
+      throw new TypeError("Review status notifier must be a function.");
+    }
     // 通知は終局状態の PR レコードを読んで組み立てる。読めない store を黙って
     // 受け取ると、送信側の catch に飲まれて「通知が一度も来ない」だけになる。
-    if (notifyCompletion && typeof store.getPullRequest !== "function") {
-      throw new TypeError("Completion notices require a state store that can read pull requests.");
+    if ((notifyCompletion || notifyReviewStatus) && typeof store.getPullRequest !== "function") {
+      throw new TypeError("PR notices require a state store that can read pull requests.");
     }
     this.store = store;
     this.afterCompleted = afterCompleted;
     this.notifyCompletion = notifyCompletion;
+    this.notifyReviewStatus = notifyReviewStatus;
   }
 
   // 終局状態に着いたときだけ、投稿元セッションへ 1 回知らせる。通知は best-effort:
@@ -56,6 +64,16 @@ export class LocalPrReporter {
       if (pullRequest) await this.notifyCompletion(pullRequest);
     } catch {
       // 通知は落としてよい。
+    }
+  }
+
+  async #announceReviewStatus(event, localPrId) {
+    if (!this.notifyReviewStatus) return;
+    try {
+      const pullRequest = this.store.getPullRequest(localPrId);
+      if (pullRequest) await this.notifyReviewStatus(event, pullRequest);
+    } catch {
+      // Discord status is best-effort and must not change the review verdict.
     }
   }
 
@@ -89,6 +107,11 @@ export class LocalPrReporter {
       mergeRisk: job.result?.mergeRisk ?? null,
       runtimeVerification: job.result?.runtimeVerification ?? null,
     });
+    // 審査結果とマージは別イベント。自動マージより先に Test OK / 失敗を知らせる。
+    await this.#announceReviewStatus(
+      passed ? "review_passed" : "review_failed",
+      job.request.localPrId,
+    );
     // Automatic merging is a post-review decision, so it hangs off the completed
     // projection rather than the runner: the runner executes in a worker process
     // and owns no local Git ref advancement beyond the reviewed head.
@@ -110,6 +133,7 @@ export class LocalPrReporter {
       checkStatus: "failed",
       error: job.error || "The local review worker failed.",
     });
+    await this.#announceReviewStatus("review_failed", job.request.localPrId);
     // 失敗も終局状態。ここで黙ると投稿側は running のまま待ち続ける。
     await this.#announce(job.request.localPrId);
   }

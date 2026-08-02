@@ -41,6 +41,13 @@ leaves the workstation.
    commit, runs the final Codex Security scan against the exact squashed diff,
    and fast-forwards the local base branch. It does not push.
 
+For local PRs submitted by a Concordia session, creation, review pass/failure,
+and merge are published best-effort through Concordia's `報告` channel to
+Discord. Revisor reuses the submitting session binding; sessionless CLI/script
+submissions stay local. Concordia owns the Discord credentials, so Revisor only
+resolves Concordia from the Excubitor catalog and never stores a Discord webhook
+or token.
+
 The Codex Security scan runs at most once per review pass and once right before
 the squash merge. It never re-runs after the opposite-provider autofix; the
 pre-merge scan covers those edits. Findings at or above the configured severity

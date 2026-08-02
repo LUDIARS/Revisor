@@ -74,9 +74,12 @@ runtime architecture.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe
   outgoing `main` updates as `amend_required`.
 - `concordia-context.mjs` owns optional live and persisted author context, the
-  optional Concordia loopback location, and session injection.
+  optional Concordia loopback location, session injection, and shared chat
+  publishing.
 - `review-completion-notice.mjs` composes the terminal-verdict message and sends
   it to the submitting session, if there is one.
+- `pr-lifecycle-notice.mjs` composes bounded PR creation, review-result, and
+  merge messages for Concordia's Discord-backed report channel.
 - `config.mjs` owns local settings plus encrypted workflow-token and
   allowed-host persistence.
 - `host-policy.mjs` normalizes exact hostnames and authorizes loopback or
@@ -140,6 +143,30 @@ one would wait on a review no worker will ever own.
 The notice is best-effort: a submission without a session, an unreachable
 Concordia, or a failed send never changes the verdict, fails the job, or blocks
 startup.
+
+## Discord PR lifecycle notice
+
+Every session-bound local PR lifecycle transition that changes what an operator
+needs to know is also published to Concordia's shared `報告` chat channel: PR
+creation, review pass or failure, and merge. Revisor propagates the submitting
+Concordia session ID because Discord egress rejects unbound chat rows; CLI and
+script submissions without a session stay silent instead of claiming a Discord
+delivery that cannot occur. Concordia owns Discord credentials and delivers that
+channel to the Discord `houkoku` surface, so Revisor never stores a Discord token
+or webhook URL. Review completion and merge remain separate events, including
+when automatic merge follows a passing review immediately.
+
+Lifecycle messages contain only PR metadata and bounded failure reasons. They do
+not include diffs, test output, leakage values, or credentials. Titles, branch
+names, and failure reasons are author-controlled, so they are flattened to a
+single line and their `@everyone` / `@here` / `<@id>` mention syntax is
+neutralized before it reaches a Discord-backed channel. Delivery is best-effort:
+a missing Excubitor catalog entry, unavailable Concordia, disabled Discord
+egress, or rejected post never changes PR admission, review, or merge. A single
+transition never produces two notices: an unresumable interrupted review is
+announced once, by the recovery pass, with its final reason.
+
+See `spec/feature/pr-lifecycle-notice.md` for the `pr-notification` domain.
 
 ## Data boundaries
 

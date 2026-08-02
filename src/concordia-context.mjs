@@ -143,6 +143,45 @@ export async function notifyConcordia({
   }
 }
 
+/**
+ * Concordia の共有 chat channel へ投稿する。`報告` channel は Concordia の
+ * Discord egress により #houkoku へ配送される。通知は任意機能なので、到達不能や
+ * Discord 無効時の失敗を Revisor の PR 状態へ波及させない。
+ */
+export async function notifyConcordiaChat({
+  baseUrl,
+  sessionId,
+  channel = "報告",
+  authorLabel = "Revisor",
+  text,
+  transport = fetch,
+}) {
+  // Concordia egress intentionally rejects chat rows without an active session
+  // binding. Returning false here avoids reporting an accepted database write as
+  // a Discord delivery when a CLI-only PR has no submitting session.
+  if (!baseUrl || !sessionId || !text) return false;
+  try {
+    const response = await transport(
+      `${baseUrl.replace(/\/$/, "")}/v1/chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel,
+          session_id: sessionId,
+          author_label: authorLabel,
+          text,
+        }),
+        signal: AbortSignal.timeout(3_000),
+      },
+    );
+    return response.ok;
+  } catch {
+    // Discord/Concordia notifications are best-effort lifecycle observability.
+    return false;
+  }
+}
+
 export function targetDomainQuestion(repository, number) {
   return [
     `PRレビュー: ${repository}#${number} の差分から対象ドメインを自動生成できませんでした。`,

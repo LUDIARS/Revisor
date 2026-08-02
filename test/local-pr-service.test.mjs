@@ -88,6 +88,7 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
   let queued;
+  const lifecycle = [];
   const service = new LocalPrService({
     store,
     queue: {
@@ -98,6 +99,9 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     },
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
     securityScan: passingSecurityScan(),
+    notifyLifecycle: async (event, pullRequest) => {
+      lifecycle.push([event, pullRequest.status]);
+    },
   });
   try {
     await service.registerRepository({
@@ -137,6 +141,10 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
     assert.equal(git(fixture.repoPath, "log", "-1", "--format=%P"), fixture.baseSha);
     assert.match(git(fixture.repoPath, "log", "-1", "--format=%B"), /Revisor-Local-PR/);
+    assert.deepEqual(lifecycle, [
+      ["created", "open"],
+      ["merged", "merged"],
+    ]);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -573,17 +581,21 @@ function forceCheckStatus(store, id, checkStatus) {
   writeFileSync(statePath, JSON.stringify(state, null, 2), "utf8");
 }
 
-async function submittedPullRequest(fixture, store, submissions) {
+async function submittedPullRequest(fixture, store, submissions, options = {}) {
   const service = new LocalPrService({
     store,
     queue: {
-      async submit(request, options) {
-        submissions.push({ request, options });
+      async submit(request, submitOptions) {
+        submissions.push({ request, options: submitOptions });
+        if (options.failSubmitAfter !== undefined && submissions.length > options.failSubmitAfter) {
+          throw new Error("queue is closed");
+        }
         return { id: `job-${submissions.length}` };
       },
     },
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
     securityScan: passingSecurityScan(),
+    ...(options.notifyLifecycle ? { notifyLifecycle: options.notifyLifecycle } : {}),
   });
   await service.registerRepository({
     repository: "LUDIARS/Product",
@@ -653,6 +665,32 @@ test("leaves settled reviews untouched during recovery", async () => {
     assert.equal(recovery.scanned, 0);
     assert.equal(submissions.length, before);
     assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "test_ok");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("announces an unresumable review once, with the restart reason", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submissions = [];
+  const lifecycle = [];
+  try {
+    // 最初の投稿は通し、復旧時の再投入だけ落とす: #enqueue と復旧処理の両方が
+    // 通知を出すと、同じ PR について理由の違う 2 通が報告 channel に並ぶ。
+    const { service, pullRequest } = await submittedPullRequest(fixture, store, submissions, {
+      failSubmitAfter: 1,
+      notifyLifecycle: (event, record) => {
+        lifecycle.push([event, record.error]);
+      },
+    });
+    forceCheckStatus(store, pullRequest.id, "running");
+
+    const recovery = await service.recoverInterruptedReviews();
+
+    assert.equal(recovery.failed.length, 1);
+    assert.deepEqual(lifecycle.map(([event]) => event), ["created", "review_failed"]);
+    assert.match(lifecycle.at(-1)[1], /Revisor restarted while this review was in flight/);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

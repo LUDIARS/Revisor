@@ -1,0 +1,39 @@
+{
+  "name": "pr-notification",
+  "description": "local PR の状態変化を Revisor の外へ出す通知経路。投稿元 Concordia セッションへの終局通知と、共有『報告』channel (Concordia の Discord egress 経由) への発行 / 審査通過 / 審査失敗 / マージ通知を組み立てて送る。判定は持たず、state store の公開メタデータと打ち切った失敗理由だけを本文にする。session 紐付きの無い PR には送らず、送信失敗は PR の受理・審査・マージを変えない。",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/pr-lifecycle-notice|src/review-completion-notice",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "pullRequestLabel|titleLine|summarizeReasons|pullRequestLifecycleMessage|notifyPullRequestLifecycle|notifyConcordiaChat|notifyConcordia|notifyReviewCompletion",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"pr-notification\" domain: local PR ライフサイクルの外向き通知 (報告 channel への発行/審査/マージ通知・投稿元セッションへの終局通知・best-effort 境界)。",
+  "source": "spec-draft",
+  "mechanics": [
+    "lifecycle-event-composition",
+    "session-bound-delivery",
+    "best-effort-notification"
+  ],
+  "specRefs": [
+    "pr-lifecycle-notice — PR ライフサイクルの外向き通知 / イベントと発火元",
+    "pr-lifecycle-notice — session 束縛 (紐付きの無い PR には送らない)",
+    "pr-lifecycle-notice — 内容の境界 (差分・テスト出力・leakage 値・資格情報を含めない)",
+    "pr-lifecycle-notice — 投稿者由来文字列の無害化 (メンション・改行)",
+    "pr-lifecycle-notice — best-effort (送信失敗が PR 受理・審査・マージを変えない)"
+  ],
+  "rationale": "通知は判定でも状態遷移でもない独立した出力責務。review-gate (可否判定) や state-machine (遷移) から切り離しておかないと、送信障害が審査結果へ波及する経路が生まれる。Discord の資格情報は Concordia が所有し、Revisor は Excubitor catalog から場所を引くだけに留める。",
+  "updatedAt": "2026-08-02T00:00:00.000Z"
+}

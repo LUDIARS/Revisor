@@ -7,8 +7,13 @@ import {
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
 import { isLoopbackHost } from "./host-policy.mjs";
-import { notifyConcordia, optionalConcordiaUrl } from "./concordia-context.mjs";
+import {
+  notifyConcordia,
+  notifyConcordiaChat,
+  optionalConcordiaUrl,
+} from "./concordia-context.mjs";
 import { LocalPrReporter } from "./local-reporter.mjs";
+import { notifyPullRequestLifecycle } from "./pr-lifecycle-notice.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
 import { LocalPrService } from "./local-pr-service.mjs";
 import { PrReviewQueue } from "./queue.mjs";
@@ -162,9 +167,20 @@ export async function startRevisor({
     baseUrl: optionalConcordiaUrl(cwd, readSettings(env).concordiaContextEnabled),
     notify: notifyConcordia,
   });
+  // PR lifecycle は投稿元セッションの binding を使い、Concordia の共有「報告」
+  // channel へ出す。Discord egress が有効なら #houkoku へ届く。レビュー文脈の
+  // 設定とは独立した best-effort 観測経路で、session/catalog/Concordia 不在時は
+  // no-op になる。
+  const announceLifecycle = (event, pullRequest) => notifyPullRequestLifecycle({
+    event,
+    pullRequest,
+    baseUrl: optionalConcordiaUrl(cwd, true),
+    notify: notifyConcordiaChat,
+  });
   const reporter = new LocalPrReporter(store, {
     afterCompleted: (id) => localPrService?.autoMergeIfEligible(id),
     notifyCompletion: announceCompletion,
+    notifyReviewStatus: announceLifecycle,
   });
   const workerPool = runner
     ? null
@@ -178,7 +194,12 @@ export async function startRevisor({
   // auto-merge risk threshold both resolve their settings from it, and a service
   // left on process.env would decide under a different configuration than the one
   // /api/settings reads and writes.
-  localPrService = createLocalPrService({ store, queue, env });
+  localPrService = createLocalPrService({
+    store,
+    queue,
+    env,
+    notifyLifecycle: announceLifecycle,
+  });
   const sessionToken = randomBytes(24).toString("base64url");
   const server = createServer(createRequestHandler({
     env,
@@ -229,6 +250,7 @@ export async function startRevisor({
       );
       // 復旧できなかった PR は reporter を通らずに `failed` になる。 ここで黙ると
       // 投稿元セッションは running のまま待ち続けるので、終局状態として 1 通送る。
+      // 報告 channel 側の 1 通は recoverInterruptedReviews が既に出している。
       // 通知は best-effort: 失敗しても起動を止めない。
       try {
         const pullRequest = store.getPullRequest(entry.id);

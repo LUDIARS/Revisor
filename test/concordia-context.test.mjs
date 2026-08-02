@@ -6,7 +6,44 @@ import test from "node:test";
 import {
   loadConcordiaContext,
   loadPersistedConcordiaContext,
+  notifyConcordiaChat,
 } from "../src/concordia-context.mjs";
+
+test("publishes lifecycle status to Concordia chat for Discord egress", async () => {
+  let request;
+  const sent = await notifyConcordiaChat({
+    baseUrl: "http://127.0.0.1:11111/",
+    sessionId: "lictor-review",
+    text: "PR status",
+    transport: async (url, options) => {
+      request = { url, options };
+      return { ok: true };
+    },
+  });
+  assert.equal(sent, true);
+  assert.equal(request.url, "http://127.0.0.1:11111/v1/chat");
+  assert.deepEqual(JSON.parse(request.options.body), {
+    channel: "報告",
+    session_id: "lictor-review",
+    author_label: "Revisor",
+    text: "PR status",
+  });
+});
+
+test("does not claim Discord delivery without a Concordia session binding", async () => {
+  let called = false;
+  const sent = await notifyConcordiaChat({
+    baseUrl: "http://127.0.0.1:11111/",
+    sessionId: null,
+    text: "PR status",
+    transport: async () => {
+      called = true;
+      return { ok: true };
+    },
+  });
+  assert.equal(sent, false);
+  assert.equal(called, false);
+});
 
 test("reads live Concordia context", async () => {
   const context = await loadConcordiaContext({

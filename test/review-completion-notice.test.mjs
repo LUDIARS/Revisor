@@ -141,7 +141,22 @@ test("announces after the automatic merge so the state is final", async () => {
   const reporter = new LocalPrReporter(makeStore(record), {
     afterCompleted: async () => { order.push("auto-merge"); },
     notifyCompletion: () => { order.push("notify"); },
+    notifyReviewStatus: (event) => { order.push(event); },
   });
   await reporter.completed({ request: { localPrId: "pr-1", headSha: "abc" }, result: { conclusion: "success" } });
-  assert.deepEqual(order, ["auto-merge", "notify"]);
+  assert.deepEqual(order, ["review_passed", "auto-merge", "notify"]);
+});
+
+test("announces blocked and worker-failed reviews to the status channel", async () => {
+  const record = pr({ checkStatus: "queued" });
+  const statuses = [];
+  const reporter = new LocalPrReporter(makeStore(record), {
+    notifyReviewStatus: (event) => { statuses.push(event); },
+  });
+  await reporter.completed({
+    request: { localPrId: "pr-1", headSha: "abc" },
+    result: { conclusion: "action_required", reasons: ["unit failed"] },
+  });
+  await reporter.failed({ request: { localPrId: "pr-1" }, error: "worker died" });
+  assert.deepEqual(statuses, ["review_failed", "review_failed"]);
 });

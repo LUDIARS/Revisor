@@ -36,9 +36,13 @@ export class LocalPrService {
     cliPath = CLI_PATH,
     env = process.env,
     loadSettings = () => readSettings(env),
+    notifyLifecycle = null,
   }) {
     if (!store || !queue) {
       throw new TypeError("Local PR service requires a state store and review queue.");
+    }
+    if (notifyLifecycle !== null && typeof notifyLifecycle !== "function") {
+      throw new TypeError("Local PR lifecycle notifier must be a function.");
     }
     this.store = store;
     this.queue = queue;
@@ -47,6 +51,7 @@ export class LocalPrService {
     this.securityScan = securityScan;
     this.env = env;
     this.cliPath = cliPath;
+    this.notifyLifecycle = notifyLifecycle;
     // Read on every decision, not cached: moving the accepted risk threshold has
     // to re-colour and re-sort the dashboard without restarting the service.
     this.loadSettings = loadSettings;
@@ -126,6 +131,7 @@ export class LocalPrService {
       baseSha: refs.baseSha,
       sessionId: submission.sessionId ?? null,
     });
+    await this.#announceLifecycle("created", pullRequest);
     return this.#enqueue(repository, pullRequest);
   }
 
@@ -159,23 +165,26 @@ export class LocalPrService {
     const failed = [];
     for (const pullRequest of interrupted) {
       try {
-        await this.#requeue(pullRequest);
+        // 復旧失敗の通知はここが唯一の担当。 #enqueue に送らせると、直後に上書き
+        // する enqueue 側の理由で 1 通出てから復旧理由でもう 1 通出てしまう。
+        await this.#requeue(pullRequest, { announceFailure: false });
         recovered.push({ id: pullRequest.id, repository: pullRequest.repository, number: pullRequest.number });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         // #requeue が enqueue 前に落ちた場合 (repo 未登録 / ブランチ消失) は
         // まだ `running` のままなので、ここで必ず終端状態へ落とす。
-        this.store.updatePullRequest(pullRequest.id, {
+        const record = this.store.updatePullRequest(pullRequest.id, {
           checkStatus: "failed",
           error: `Revisor restarted while this review was in flight and it could not be resumed: ${reason}`,
         });
+        await this.#announceLifecycle("review_failed", record);
         failed.push({ id: pullRequest.id, repository: pullRequest.repository, number: pullRequest.number, reason });
       }
     }
     return { scanned: interrupted.length, recovered, failed };
   }
 
-  async #requeue(pullRequest) {
+  async #requeue(pullRequest, { announceFailure = true } = {}) {
     const repository = this.store.getRepository(pullRequest.repository);
     if (!repository) {
       throw new Error(`Repository '${pullRequest.repository}' is not registered.`);
@@ -198,20 +207,31 @@ export class LocalPrService {
       // The refs may be unchanged, and the queue caches settled jobs by exact
       // head, so an unforced re-review would resolve to the run being retried.
       { force: true },
+      { announceFailure },
     );
   }
 
-  async #enqueue(repository, pullRequest, options) {
+  async #enqueue(repository, pullRequest, options, { announceFailure = true } = {}) {
     try {
       await this.queue.submit(reviewRequest(repository, pullRequest), options);
     } catch (error) {
-      this.store.updatePullRequest(pullRequest.id, {
+      const failed = this.store.updatePullRequest(pullRequest.id, {
         checkStatus: "failed",
         error: error instanceof Error ? error.message : String(error),
       });
+      if (announceFailure) await this.#announceLifecycle("review_failed", failed);
       throw error;
     }
     return this.store.getPullRequest(pullRequest.id);
+  }
+
+  async #announceLifecycle(event, pullRequest) {
+    if (!this.notifyLifecycle) return;
+    try {
+      await this.notifyLifecycle(event, pullRequest);
+    } catch {
+      // Discord status is observability only; it must not change PR admission.
+    }
   }
 
   getPullRequest(id) {
@@ -242,12 +262,14 @@ export class LocalPrService {
       env: this.env,
       ...(this.securityScan ? { scan: this.securityScan } : {}),
     });
-    return this.store.updatePullRequest(id, {
+    const merged = this.store.updatePullRequest(id, {
       status: "merged",
       checkStatus: "test_ok",
       mergeCommitSha,
       mergedAt: new Date().toISOString(),
     });
+    await this.#announceLifecycle("merged", merged);
+    return merged;
   }
 
   // Called once per completed review. The outcome is always recorded, including a
