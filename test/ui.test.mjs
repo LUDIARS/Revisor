@@ -34,8 +34,10 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /block\('テスト', testsOf\(pr\)\)/);
   assert.match(page, /block\('レビュー', reviewOf\(pr\)\)/);
   assert.match(page, /block\('差分解析 \(Anatomia\)', analysisOf\(pr\)\)/);
+  assert.match(page, /Genius の判断カード/);
   assert.match(page, /selectedPrId = id/);
   assert.match(page, /runAction\(retry, pr\.id, 'retry'\)/);
+  assert.match(page, /Genius を確認して squash merge/);
   // 審査が終わっている open な PR は、 マージせずに取り下げられる。
   assert.match(page, /runAction\(close, pr\.id, 'close'\)/);
   assert.match(page, /close\.textContent = '取り下げ'/);

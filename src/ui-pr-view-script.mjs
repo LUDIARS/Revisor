@@ -131,6 +131,7 @@ export const PR_VIEW_SOURCE = `
     definition(list, '変更種別', (plan.changeProfile.kinds || []).join(', ') || '—');
     definition(list, '変更規模', plan.changeProfile.changedFiles + ' ファイル / ' + plan.changeProfile.changedLines + ' 行');
     definition(list, '動作面', (plan.changeProfile.runtimeSurfaces || []).join(', ') || '—');
+    if (plan.review) definition(list, 'レビュー方式', plan.review.label || plan.review.tier || '—');
     wrapper.append(list);
     const stages = element('ul', 'stage-list');
     for (const stage of plan.stages || []) {
@@ -243,6 +244,13 @@ export const PR_VIEW_SOURCE = `
     wrapper.append(list);
     wrapper.append(block('ブロック理由', listOf(pr.reasons, 'ブロック理由はありません。')));
     wrapper.append(block('所見 (マージは止めない)', listOf(pr.advisories, '所見はありません。')));
+    const geniusCards = pr.geniusGuidance?.cards || [];
+    wrapper.append(block(
+      'Genius の判断カード',
+      listOf(geniusCards.map((card) =>
+        card.judgment + ' — ' + card.rationale + ' [' + card.situation + ']'),
+      'Genius の判断カードはありません。'),
+    ));
     const findings = (pr.leakage && pr.leakage.findings || [])
       .map((finding) => finding.rule + '  ' + finding.path + ':' + finding.line);
     wrapper.append(block('流出候補', listOf(findings, '流出候補はありません。')));

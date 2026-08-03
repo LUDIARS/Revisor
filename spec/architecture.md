@@ -201,12 +201,14 @@ See `spec/feature/pr-lifecycle-notice.md` for the `pr-notification` domain.
 Every review decides its own stage plan before any expensive stage runs, from
 the change profile of the submitted diff. A change with no executable content
 drops the code analysis and the vulnerability pass but never the leakage scan,
-the domain review, the spec-requirement check, or the opposite-provider review.
-An optional control planner — a daemon-less Augur CLI or a control model — may
-adjust the plan inside a safety floor it cannot cross, and any planner failure
-leaves the deterministic plan in force. An external-model planner is not invoked
-while a high-confidence leakage match is outstanding, the same boundary the
-review itself obeys. `spec/feature/review-plan.md` is authoritative.
+the domain review, or the spec-requirement check. The review strategy is also
+deterministic: a change that touches `spec/` receives the opposite-provider
+autofix, while every other change receives public Genius judgment cards and is
+held for a human decision. Genius is resolved from the Excubitor catalog and a
+missing or invalid response fails explicitly rather than silently spending on an
+external reviewer. An optional control planner — a daemon-less Augur CLI or a
+control model — may adjust only the `spec_autofix` plan inside a safety floor it
+cannot cross. `spec/feature/review-plan.md` is authoritative.
 
 ## Automatic merging
 

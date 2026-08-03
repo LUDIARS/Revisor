@@ -27,6 +27,7 @@ export function pendingReviewProjection() {
     reviewPlan: null,
     mergeRisk: null,
     runtimeVerification: null,
+    geniusGuidance: null,
     autoMerge: null,
   };
 }
@@ -106,6 +107,7 @@ export class LocalPrReporter {
       reviewPlan: job.result?.plan ?? null,
       mergeRisk: job.result?.mergeRisk ?? null,
       runtimeVerification: job.result?.runtimeVerification ?? null,
+      geniusGuidance: job.result?.geniusGuidance ?? null,
     });
     // 審査結果とマージは別イベント。自動マージより先に Test OK / 失敗を知らせる。
     await this.#announceReviewStatus(

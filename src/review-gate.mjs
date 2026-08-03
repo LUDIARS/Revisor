@@ -93,6 +93,7 @@ export function gateOutcome({
   docsOrConfigOnly = docsOnly,
   plan = null,
   security,
+  humanReviewRequired = false,
 }) {
   const reasons = [];
   const advisories = [];
@@ -160,7 +161,9 @@ export function gateOutcome({
   if (typeof complexityScoreDelta === "number" && complexityScoreDelta <= -threshold) {
     reasons.push(`complexity score dropped by ${Math.abs(complexityScoreDelta)} points`);
   }
-  if (reviewerOutput.includes("PR_GATE_NEEDS_HUMAN")) {
+  if (humanReviewRequired) {
+    reasons.push("Genius judgment cards require a human decision");
+  } else if (reviewerOutput.includes("PR_GATE_NEEDS_HUMAN")) {
     reasons.push("reviewer reported insufficient information for a safe domain/spec definition");
   }
   if (leakage.totalFindings > 0) {

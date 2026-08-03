@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "review-plan — 変更種別ごとの審査ステージ設計"
-description: "レビュー開始時に変更種別からステージと登録テストを選び、毎回すべてを走らせない。決定的ルールが正本で、Augur CLI または管制 LLM は安全下限の内側でのみ計画を調整できる。"
+description: "レビュー開始時に変更種別からステージ、登録テスト、レビューコスト段階を選ぶ。spec 自動対応だけ外部モデルを使い、それ以外は Genius の判断カードを人間が判断する。"
 service: revisor
 domain: review-plan
 tags:
@@ -13,14 +13,15 @@ related:
   - ../architecture.md
   - ./review-gate.md
   - ./merge-risk.md
-updated: 2026-07-30
+updated: 2026-08-03
 ---
 
 # review-plan — 変更種別ごとの審査ステージ設計
 
 `src/review-plan.mjs` が正本。審査の最初に**変更プロファイル**を作り、
-どのステージと登録テストを走らせるかを決める。ドキュメント修正のたびに
-脆弱性診断とコード解析を回すのをやめるための仕組み (neco 2026-07-30)。
+どのステージ、登録テスト、レビューコスト段階を使うかを決める。ドキュメント修正のたびに
+脆弱性診断とコード解析を回すのをやめ、UI を含む軽量変更に外部モデルの autofix
+コストを払わないための仕組み。
 
 ## 変更プロファイル
 
@@ -51,6 +52,23 @@ updated: 2026-07-30
 (作業ブランチと秘匿情報をリモートへ出さない) だから。`anatomia_domain_review` と
 `spec_requirements` を必須にしているのは、doc レビューでも「ドメイン整合」と
 「spec 要件充足」は見たいという neco の明示指示による。
+
+## レビューコスト段階
+
+計画は必須ステージ `reviewer_autofix` を省略しない。ただしその実行方式を変更
+プロファイルから決め、PR のレビュー計画に記録する。
+
+| tier | 条件 | 実行 | 結果 |
+|---|---|---|---|
+| `genius` | `spec/` を変更しない | Excubitor catalog から解決した Genius に、差分ではなく変更種別・規模・runtime surface だけを問い合わせる | 公開判断カードを板に表示し、必ず人間判断へ回す。autofix はしない。 |
+| `spec_autofix` | `spec/` を 1 ファイルでも変更する | 既存の相互モデルレビューを実行する | scoped autofix を許可する。必要な外部モデルコストとして扱う。 |
+
+`verification` モードは従来どおり tier に関わらずモデルも Genius も呼ばない。
+Genius のサービスが未登録・停止・応答不正の場合、相互モデルへ黙ってフォールバック
+しない。人間判断に必要なカードを出せないため、そのレビューは明示的に失敗する。
+Genius へ送るのは導出済みメタデータだけで、PR の diff、タイトル、本文、Cc 文脈は送らない。
+Genius tier は `action_required` のまま自動マージ対象外とし、板には判断カードを確認した
+人だけが押す `Genius を確認して squash merge` を表示する。
 
 ### code_analysis 省略の実効
 
@@ -104,6 +122,9 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 - `augur`: `<augurFolder>/bin/augur.mjs review-plan --json` を実行し、
   stdin に計画依頼 JSON を渡す。ローカル・オフラインの CLI。
 - `reviewer`: レビュアーと同じモデル CLI に JSON で答えさせる。
+
+`planAdvisor` は `spec_autofix` tier だけで使える。`genius` tier は人間判断を
+Genius に集約するため、設定が `reviewer` でも外部モデルの管制プランナーを呼ばない。
 
 **Augur をデーモン無しの CLI とする前提**の契約がこれ。Augur は目的駆動の
 テスト計画をすでに責務として持つため、同じ判断を Revisor 側で再実装しない。

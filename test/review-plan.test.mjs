@@ -31,6 +31,14 @@ test("a docs-only change drops code analysis and the vulnerability pass", () => 
   assert.equal(stageEnabled(plan, "spec_requirements"), true);
   assert.equal(stageEnabled(plan, "leakage_scan"), true);
   assert.equal(stageEnabled(plan, "reviewer_autofix"), true);
+  assert.equal(plan.review.tier, "genius");
+  assert.match(plan.review.label, /Genius/);
+});
+
+test("a spec change pays for the external autofix tier", () => {
+  const plan = planFor(["spec/feature/review-plan.md"]);
+  assert.equal(plan.review.tier, "spec_autofix");
+  assert.match(plan.review.reason, /spec/);
 });
 
 test("a docs-only change runs only the test cases that declare docs coverage", () => {

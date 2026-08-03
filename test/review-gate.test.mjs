@@ -381,6 +381,11 @@ test("a test case the plan did not require is an advisory, not a failure", () =>
   );
 });
 
+test("Genius review guidance always leaves the final decision to a human", () => {
+  const outcome = evaluate(analysis(), { humanReviewRequired: true });
+  assert.ok(outcome.reasons.includes("Genius judgment cards require a human decision"));
+});
+
 test("blocks on security findings and on an incomplete security scan", () => {
   const findings = evaluate(analysis(), {
     security: { status: "findings", totalFindings: 3, failOnSeverity: "high" },

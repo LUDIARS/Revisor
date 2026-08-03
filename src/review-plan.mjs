@@ -16,7 +16,7 @@ export const REVIEW_STAGES = [
   { id: "anatomia_domain_review", label: "Anatomia ドメインレビュー", mandatory: true },
   { id: "spec_requirements", label: "spec 要件充足確認", mandatory: true },
   { id: "security_review", label: "脆弱性診断", mandatory: false },
-  { id: "reviewer_autofix", label: "相互モデルレビュー", mandatory: true },
+  { id: "reviewer_autofix", label: "レビュー判断", mandatory: true },
 ];
 
 export const STAGE_IDS = REVIEW_STAGES.map((stage) => stage.id);
@@ -32,6 +32,26 @@ const INERT_KINDS = new Set(["docs", "asset", "generated"]);
 // Kinds whose test coverage may never be dropped by an advisor: skipping tests
 // on executable change is exactly the failure this plan must not enable.
 const EXECUTABLE_KINDS = new Set(["code", "infra", "config", "test"]);
+const REVIEW_COST_TIERS = new Set(["genius", "spec_autofix"]);
+
+// Changes to specifications may need an automated, scoped correction so they
+// retain the external reviewer. Every other change is deliberately handed to
+// Genius' local judgment cards and a human decision; treating a UI-only change
+// as an opportunity for an expensive autofix has no useful return.
+function reviewStrategy(classification) {
+  if (classification.touchesSpec) {
+    return {
+      tier: "spec_autofix",
+      label: "spec 自動対応（相互モデル）",
+      reason: "spec を含む変更は自動対応が必要なため、相互モデルでレビューします",
+    };
+  }
+  return {
+    tier: "genius",
+    label: "Genius 判断カード（人間判断）",
+    reason: "spec を含まない変更は Genius の判断カードを提示し、人間が判断します",
+  };
+}
 
 export function isMandatoryStage(id) {
   return MANDATORY_STAGE_IDS.has(id);
@@ -70,7 +90,7 @@ function selectTestCases(testCases, classification) {
   return { selected, skipped };
 }
 
-function stageDecisions(classification) {
+function stageDecisions(classification, review) {
   const executable = hasExecutableChange(classification);
   return {
     leakage_scan: { run: true, reason: "情報流出検査は変更種別に関係なく必須です" },
@@ -91,12 +111,13 @@ function stageDecisions(classification) {
           run: false,
           reason: `実行コードを含まない変更 (${classification.kinds.join("/")}) には脆弱性診断は不要です`,
         },
-    reviewer_autofix: { run: true, reason: "相互モデルレビューは常に行います" },
+    reviewer_autofix: { run: true, reason: review.reason },
   };
 }
 
 export function planReview({ classification, testCases = [] }) {
-  const decisions = stageDecisions(classification);
+  const review = reviewStrategy(classification);
+  const decisions = stageDecisions(classification, review);
   const tests = selectTestCases(testCases, classification);
   const stages = STAGE_IDS.map((id) => {
     if (id === "registered_tests") {
@@ -120,12 +141,24 @@ export function planReview({ classification, testCases = [] }) {
       touchesSpec: classification.touchesSpec,
       runtimeSurfaces: classification.runtimeSurfaces,
     },
+    review,
     stages,
     testSelection: tests,
     // Stages an advisor turned off. Kept separate from the deterministic skips
     // because reduced confidence from an advised skip is itself a risk factor.
     advisedSkips: [],
   };
+}
+
+// `review` is persisted as part of every plan shown on the PR board. Refusing
+// an unknown tier is intentional: a malformed plan must not silently turn a
+// required human decision into an external autofix (or the reverse).
+export function reviewTier(plan) {
+  const tier = plan?.review?.tier;
+  if (!REVIEW_COST_TIERS.has(tier)) {
+    throw new Error("Review plan has no valid review cost tier.");
+  }
+  return tier;
 }
 
 export function stageEnabled(plan, id) {

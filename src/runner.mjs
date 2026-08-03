@@ -17,10 +17,12 @@ import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
 import { buildReviewerPrompt } from "./reviewer-prompt.mjs";
 import { gateOutcome, needsTargetDomain } from "./review-gate.mjs";
 import { readChangeProfile } from "./review-diff.mjs";
+import { queryGeniusReview } from "./genius-review.mjs";
 import {
   codeAnalysisGating,
   hasExecutableChange,
   planReview,
+  reviewTier,
   stageEnabled,
 } from "./review-plan.mjs";
 import {
@@ -89,6 +91,8 @@ function buildGateResult({
   plan,
   classification,
   security,
+  humanReviewRequired = false,
+  geniusGuidance = null,
 }) {
   const complexityScoreDelta = baseline
     ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
@@ -104,6 +108,7 @@ function buildGateResult({
     docsOrConfigOnly,
     plan,
     security,
+    humanReviewRequired,
   });
   const runtimeVerification = assessRuntimeVerification({
     classification,
@@ -155,6 +160,7 @@ function buildGateResult({
     advisories,
     runtimeVerification,
     mergeRisk,
+    geniusGuidance,
   };
 }
 
@@ -188,6 +194,7 @@ export function createPrReviewRunner({
   complexityDropThreshold = 10,
   runReview = runReviewer,
   runSecurity = runSecurityScan,
+  queryGenius = queryGeniusReview,
   transport = fetch,
 } = {}) {
   return async (request) => {
@@ -217,20 +224,27 @@ export function createPrReviewRunner({
             env,
             transport,
           });
-      const reviewer = reviewerForProvider(authorContext?.provider, settings.fallbackReviewer);
+      const externalReviewer = reviewerForProvider(
+        authorContext?.provider,
+        settings.fallbackReviewer,
+      );
+      const deterministicPlan = planReview({
+        classification: submitted.classification,
+        testCases: request.testCases,
+      });
       const plan = await advisePlan({
         // Verification-only runs invoke no model at all, so they stay on the
-        // deterministic plan.
-        advisor: request.reviewMode === "verification" ? "none" : settings.planAdvisor,
-        plan: planReview({
-          classification: submitted.classification,
-          testCases: request.testCases,
-        }),
+        // deterministic plan. Genius-tier reviews also do not ask a control
+        // model: only spec autofix may pay for an external planning call.
+        advisor: request.reviewMode === "verification" || reviewTier(deterministicPlan) === "genius"
+          ? "none"
+          : settings.planAdvisor,
+        plan: deterministicPlan,
         request,
         testCases: request.testCases,
         cwd: worktrees.head,
         augurFolder: settings.augurFolder,
-        reviewer,
+        reviewer: externalReviewer,
         runReview,
         leakageClear: initialLeakage.totalFindings === 0,
       });
@@ -340,6 +354,41 @@ export function createPrReviewRunner({
           transport,
         });
       }
+      const tier = reviewTier(plan);
+      if (tier === "genius") {
+        const geniusGuidance = await queryGenius({
+          cwd,
+          classification: submitted.classification,
+        });
+        const geniusQuestion = "Genius の判断カードを確認し、この変更を承認または差し戻してください。";
+        const humanQuestion = needsTargetDomain(initial, docsOrConfigOnly)
+          ? `${targetDomainQuestion(request.repository, request.number)} ${geniusQuestion}`
+          : geniusQuestion;
+        await notifyConcordia({
+          baseUrl: concordiaUrl,
+          sessionId: authorContext?.sessionId,
+          text: `PRレビュー: ${request.repository}#${request.number} の決定的検査と Genius 判断カードの取得が完了しました。人間の判断を待ちます。`,
+          transport,
+        });
+        return {
+          ...buildGateResult({
+            ...gateInput,
+            finalAnalysis: initial,
+            reviewer: "genius",
+            contextSource: authorContext?.source ?? "genius",
+            reviewedHeadSha: request.headSha,
+            leakage: initialLeakage,
+            ci: initialCi,
+            docsOnly,
+            docsOrConfigOnly,
+            security: initialSecurity,
+            humanReviewRequired: true,
+            geniusGuidance,
+          }),
+          humanQuestion,
+        };
+      }
+      const reviewer = externalReviewer;
       const reviewResult = await runReview({
         reviewer,
         cwd: worktrees.head,
