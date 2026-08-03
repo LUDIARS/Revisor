@@ -1,0 +1,7 @@
+{
+  "name": "transition-guard-example",
+  "role": "policy",
+  "description": "builtin の transition-guard-example を無効化するオーバーライド。builtin は関数名の State$ を状態ノードとみなすが、このリポジトリの readState/writeState/emptyState は JSON 永続化の入出力であり状態機械ではない。同名 plugin 定義は builtin を上書きする仕様を使い、ルール無しで置き換える。",
+  "presetRules": [],
+  "templateRules": []
+}

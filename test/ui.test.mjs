@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderDashboardPage } from "../src/ui-dashboard-page.mjs";
+import { renderPrBoardPage } from "../src/ui-pr-board-page.mjs";
 import { renderSettingsPage } from "../src/ui-settings-page.mjs";
 import { PR_VIEW_SOURCE } from "../src/ui-pr-view-script.mjs";
 import {
@@ -9,19 +10,22 @@ import {
   isLoopbackHost,
 } from "../src/ui-security.mjs";
 
-test("the dashboard leads with the PRs waiting on a human", () => {
-  const page = renderDashboardPage("session-nonce");
+test("the top page is a two-pane PR board: list left, detail right", () => {
+  const page = renderPrBoardPage("session-nonce");
   assert.match(page, /<h1>Revisor<\/h1>/);
   assert.match(page, /LUDIARS LOCAL PR WORKFLOW/);
-  assert.ok(page.indexOf("<h2>PR の判断待ち</h2>") >= 0);
-  assert.ok(page.indexOf("<h2>PR の判断待ち</h2>") < page.indexOf("<h2>登録プロジェクト</h2>"));
+  assert.match(page, /class="pr-board"/);
+  assert.match(page, /class="pr-list-pane"/);
+  assert.match(page, /class="pr-detail-pane"/);
+  assert.ok(page.indexOf('class="pr-list-pane"') < page.indexOf('class="pr-detail-pane"'));
   assert.match(page, /判断が必要なものだけ表示/);
-  assert.match(page, /Open \/ Test OK/);
   assert.match(page, /nonce="session-nonce"/);
+  // 狭幅では 1 カラムへ畳む。
+  assert.match(page, /@media \(max-width: 960px\)/);
 });
 
-test("the dashboard exposes decision, plan, test, review and diff analysis detail", () => {
-  const page = renderDashboardPage("session-nonce");
+test("the PR board exposes decision, plan, test, review and diff analysis detail", () => {
+  const page = renderPrBoardPage("session-nonce");
   assert.match(page, /選択した PR の詳細/);
   assert.match(page, /block\('判断', decisionOf\(pr\)\)/);
   assert.match(page, /block\('レビュー計画', planOf\(pr\.reviewPlan\)\)/);
@@ -32,12 +36,27 @@ test("the dashboard exposes decision, plan, test, review and diff analysis detai
   assert.match(page, /runAction\(retry, pr\.id, 'retry'\)/);
 });
 
-test("the dashboard renders PRs as cards and keeps the risk badge in the card head", () => {
-  const page = renderDashboardPage("session-nonce");
+test("the PR board renders PRs as cards and keeps the risk badge in the card head", () => {
+  const page = renderPrBoardPage("session-nonce");
   assert.match(page, /class="cards" id="pr-cards"/);
   assert.match(page, /badge\(pr\.decision\.label, pr\.decision\.tone\)/);
   assert.match(page, /decision\.riskScore \+ ' \/ 閾値 ' \+ decision\.riskThreshold/);
   assert.match(page, /@media \(max-width: 700px\)/);
+});
+
+test("the detail view no longer dumps the raw Anatomia payload", () => {
+  const page = renderPrBoardPage("session-nonce");
+  assert.doesNotMatch(page, /生データ/);
+  assert.doesNotMatch(page, /JSON\.stringify\(pr\.anatomia/);
+});
+
+test("the dashboard keeps the operational panels and hands PR triage to the top page", () => {
+  const page = renderDashboardPage("session-nonce");
+  assert.match(page, /<h2>登録プロジェクト<\/h2>/);
+  assert.match(page, /<h2>ローカル PR 作成<\/h2>/);
+  assert.match(page, /Open \/ Test OK/);
+  assert.doesNotMatch(page, /class="cards" id="pr-cards"/);
+  assert.match(page, /href="\/dashboard" class="active"/);
 });
 
 test("the dashboard keeps configuration on the settings page", () => {

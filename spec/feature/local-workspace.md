@@ -1,18 +1,20 @@
 ---
 type: feature
 title: "local-workspace — 使い捨て worktree とローカル ref の境界"
-description: "ローカル repository 上で review / squash merge が読む使い捨て detached worktree を作り、使い終えたら外す境界。ref 文字列の安全性検証、worktree の清潔さ判定、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。fetch も push もしない。"
+description: "ローカル repository 上で review / squash merge が読む使い捨て detached worktree を作り、使い終えたら外す境界。ref / SHA 文字列の安全性検証、差分内容の指紋、worktree の清潔さ判定、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。fetch も push もしない。"
 service: revisor
 domain: local-workspace
 tags:
   - git-worktree
   - ref-validation
+  - patch-id
   - cleanup
 status: implemented
 related:
   - ./security-scan.md
+  - ./merge-risk.md
   - ../architecture.md
-updated: 2026-08-02
+updated: 2026-08-03
 ---
 
 # local-workspace — 使い捨て worktree とローカル ref の境界
@@ -23,6 +25,7 @@ updated: 2026-08-02
 - 呼出側から来た ref 文字列を Git ref として安全な形だけに絞る
 - 固定 SHA を detached で checkout した使い捨て worktree を temp dir 配下に作る
 - worktree が tracked change を抱えていないかを判定する
+- 2 つのコミットの差分内容が同一かを判定できる指紋を返す
 - 期待 SHA との compare-and-swap でローカル branch を fast-forward する
 - 使い終えた worktree と temp dir を外す
 
@@ -32,6 +35,21 @@ updated: 2026-08-02
 限定文字集合だけを通す。Revisor は ref を `refs/heads/<ref>` に組み立てて argv として
 渡すため、ここを抜けた文字列は Git の revision 構文や option として再解釈されうる。
 検証は文字列を受け取った入口 (`inspectLocalPullRequest` / `advanceLocalBranch`) で行う。
+
+SHA も同じ扱いをする (`assertSafeSha`)。出所は Git 自身の出力か state に記録済みの Git の
+出力に限られるが、`a..b` の revision range へ組み立てて argv に渡す境界では 16 進の object
+name であることを確かめる。`-` 始まりの値が option として解釈される経路を残さない。
+
+## 差分内容の指紋
+
+`diffPatchId` は `merge-base(sha, baseSha)` から `sha` までの差分を `git patch-id --stable` にかけ、その
+identifier を返す。rebase で SHA だけが変わったヘッドは指紋が一致するので、「審査した内容
+そのものか」を SHA の同一性より広く判定できる (`spec/feature/merge-risk.md` の
+`StaleReviewError`)。
+
+差分が空なら空文字を返す。**非空の差分から identifier が取れない場合は例外にする。** 空文字を
+返すと、内容の違う 2 つのヘッドが「同じ指紋」として一致してしまい、未審査の内容が審査済みと
+して通る。比較不能は不一致ではなく失敗として呼出側へ渡し、判断は呼出側に委ねる。
 
 ## 使い捨て worktree の生成
 

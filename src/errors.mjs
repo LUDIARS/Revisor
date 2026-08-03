@@ -4,3 +4,19 @@ export class RevisorError extends Error {
     this.name = "RevisorError";
   }
 }
+
+// マージ時にベースと競合した。再審査では直らず、ブランチ側の rebase / 修正が必要。
+export class MergeConflictError extends RevisorError {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "MergeConflictError";
+  }
+}
+
+// 審査後にヘッドの差分内容が変わった。新しい内容での再審査で解消できる。
+export class StaleReviewError extends RevisorError {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "StaleReviewError";
+  }
+}

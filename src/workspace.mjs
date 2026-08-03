@@ -4,9 +4,19 @@ import { join } from "node:path";
 import { runProcess } from "./process.mjs";
 
 const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
+const SAFE_SHA = /^[0-9a-fA-F]{7,64}$/;
 
 function assertSafeRef(value, label) {
   if (!SAFE_REF.test(value)) throw new Error(`${label} is not a safe Git ref`);
+}
+
+// SHA は常に Git 自身の出力か state に記録された Git の出力だが、 それを argv や
+// `a..b` の revision range に組み立てる境界では形を確かめてから渡す (`-` 始まりの
+// 値が option として解釈される経路を残さない)。
+function assertSafeSha(value, label) {
+  if (typeof value !== "string" || !SAFE_SHA.test(value)) {
+    throw new Error(`${label} is not a Git object name`);
+  }
 }
 
 export async function git(cwd, args, timeoutMs = 120_000) {
@@ -113,6 +123,41 @@ export async function prepareLocalWorktrees(repoPath, request) {
     await cleanupWorktrees(repoPath, worktrees);
     throw error;
   }
+}
+
+// merge-base からの差分の安定指紋。rebase で SHA が変わっても差分内容が同じなら
+// 一致する (git patch-id --stable)。差分が空なら空文字。
+export async function diffPatchId(repoPath, sha, baseSha) {
+  assertSafeSha(sha, "sha");
+  assertSafeSha(baseSha, "base sha");
+  const mergeBase = await git(repoPath, ["merge-base", sha, baseSha]);
+  const diff = await runProcess({
+    command: "git",
+    args: ["diff", `${mergeBase}..${sha}`],
+    cwd: repoPath,
+    timeoutMs: 120_000,
+  });
+  if (!diff.ok) {
+    throw new Error(`git diff failed: ${diff.stderr.trim() || diff.stdout.trim()}`);
+  }
+  if (!diff.stdout.trim()) return "";
+  const result = await runProcess({
+    command: "git",
+    args: ["patch-id", "--stable"],
+    cwd: repoPath,
+    stdin: diff.stdout,
+    timeoutMs: 120_000,
+  });
+  if (!result.ok) {
+    throw new Error(`git patch-id failed: ${result.stderr.trim() || result.stdout.trim()}`);
+  }
+  const patchId = result.stdout.trim().split(/\s+/)[0] ?? "";
+  if (!patchId) {
+    // 非空の差分なのに指紋が取れない (binary だけの差分など)。 ここで空文字を返すと
+    // 内容の違う 2 つのヘッドが「同じ指紋」に見えてしまうので、比較不能として投げる。
+    throw new Error("git patch-id produced no identifier for a non-empty diff.");
+  }
+  return patchId;
 }
 
 export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha) {

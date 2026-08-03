@@ -13,11 +13,13 @@ import {
 } from "./local-contracts.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { renderDashboardPage } from "./ui-dashboard-page.mjs";
+import { renderPrBoardPage } from "./ui-pr-board-page.mjs";
 import { renderSettingsPage } from "./ui-settings-page.mjs";
 import { isAllowedHost, isAuthorizedSession } from "./ui-security.mjs";
 
 const PAGES = new Map([
-  ["/", renderDashboardPage],
+  ["/", renderPrBoardPage],
+  ["/dashboard", renderDashboardPage],
   ["/settings", renderSettingsPage],
 ]);
 

@@ -260,6 +260,25 @@ export async function startRevisor({
       }
     }
   }
+  // レビュー完了時の 1 回きりだと「その瞬間 base が古かった」PR を二度と拾えない。
+  // base が進んで squash が通るようになった Test OK を定期的に拾い直す。
+  const autoMergeSweepTimer = setInterval(() => {
+    localPrService.sweepAutoMerge()
+      .then((summary) => {
+        if (summary.merged > 0 || summary.failed > 0) {
+          process.stdout.write(
+            `Revisor auto-merge sweep: attempted=${summary.attempted}`
+            + ` merged=${summary.merged} failed=${summary.failed}\n`,
+          );
+        }
+      })
+      .catch((error) => {
+        process.stderr.write(`Revisor auto-merge sweep failed: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`);
+      });
+  }, 60_000);
+  autoMergeSweepTimer.unref?.();
   return {
     url: `http://127.0.0.1:${address.port}/`,
     queue,
@@ -268,6 +287,7 @@ export async function startRevisor({
     recovery,
     workerCount: settings.workerCount,
     close: async () => {
+      clearInterval(autoMergeSweepTimer);
       await new Promise((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });

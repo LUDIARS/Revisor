@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { cleanupWorktrees, prepareLocalWorktrees } from "../src/workspace.mjs";
+import { cleanupWorktrees, diffPatchId, prepareLocalWorktrees } from "../src/workspace.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
@@ -90,6 +90,58 @@ test("cleanup survives a temp root that cannot be removed", async () => {
   } finally {
     // The stub kept the real deletion from running, so drop the root here.
     if (worktrees) rmSync(worktrees.root, { recursive: true, force: true });
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// 指紋は「審査した内容そのものか」の判定に使われる。 rebase で SHA だけが変わった
+// ヘッドでは一致し、内容が変われば変わることがこの関数の全てなので、そこを直接押さえる。
+test("the diff fingerprint survives a rebase and changes with the content", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const baseSha = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+    const before = await diffPatchId(fixture.repoPath, fixture.headSha, baseSha);
+    assert.match(before, /^[0-9a-f]{40,}$/);
+
+    // base が別ファイルで前進し、ヘッドはその上へ rebase される (SHA だけが変わる)。
+    writeFileSync(join(fixture.repoPath, "other.txt"), "other\n", "utf8");
+    git(fixture.repoPath, "add", "other.txt");
+    git(fixture.repoPath, "commit", "-m", "base moves");
+    git(fixture.repoPath, "checkout", "feat/local");
+    git(fixture.repoPath, "rebase", "main");
+    const rebasedSha = git(fixture.repoPath, "rev-parse", "refs/heads/feat/local");
+    const movedBase = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+    assert.notEqual(rebasedSha, fixture.headSha);
+
+    assert.equal(await diffPatchId(fixture.repoPath, rebasedSha, movedBase), before);
+
+    writeFileSync(join(fixture.repoPath, "product.txt"), "base\nfeature\nmore\n", "utf8");
+    git(fixture.repoPath, "add", "product.txt");
+    git(fixture.repoPath, "commit", "-m", "more");
+    const changedSha = git(fixture.repoPath, "rev-parse", "refs/heads/feat/local");
+    git(fixture.repoPath, "checkout", "main");
+
+    assert.notEqual(await diffPatchId(fixture.repoPath, changedSha, movedBase), before);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// SHA は Git 由来の値しか渡らない想定だが、argv と `a..b` を組み立てる境界なので
+// 形の検証はここで完結させる (`-` 始まりが option として解釈される経路を残さない)。
+test("the diff fingerprint refuses an argument that is not an object name", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const baseSha = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+    await assert.rejects(
+      diffPatchId(fixture.repoPath, "--output=/tmp/pwned", baseSha),
+      /not a Git object name/,
+    );
+    await assert.rejects(
+      diffPatchId(fixture.repoPath, fixture.headSha, "HEAD"),
+      /not a Git object name/,
+    );
+  } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });

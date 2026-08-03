@@ -2,10 +2,12 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSettings } from "./config.mjs";
+import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
 import {
   advanceLocalBranch,
   cleanupWorktrees,
+  diffPatchId,
   git,
 } from "./workspace.mjs";
 
@@ -50,6 +52,45 @@ async function assertMergeSecurityScan({ worktreePath, baseSha, env, scan }) {
   }
 }
 
+// 審査済みヘッドと現在ヘッドの「merge-base からの差分内容」を patch-id で比較する。
+// 一致すれば審査結果は現在ヘッドにそのまま適用できる。 審査済み SHA が既に GC
+// されている等で比較できない場合も、未知の内容をマージしない側に倒す。
+async function assertReviewedContentUnchanged(rootPath, reviewedHeadSha, headSha, baseSha) {
+  let unchanged = false;
+  try {
+    const [reviewedPatchId, currentPatchId] = await Promise.all([
+      diffPatchId(rootPath, reviewedHeadSha, baseSha),
+      diffPatchId(rootPath, headSha, baseSha),
+    ]);
+    unchanged = reviewedPatchId === currentPatchId;
+  } catch (error) {
+    throw new StaleReviewError(
+      "The reviewed head is gone and the current head cannot be compared to it; a new review is required.",
+      { cause: error },
+    );
+  }
+  if (!unchanged) {
+    throw new StaleReviewError(
+      "The head content changed after the review; a new review is required.",
+    );
+  }
+}
+
+// コンフリクト判定をエラーメッセージだけに頼らない。 `git()` のメッセージは stderr を
+// 優先するので、 Windows の autocrlf 警告のような無関係な stderr が 1 行でも出ると
+// "CONFLICT" が message から消え、 コンフリクトが「不明な失敗」に化ける (PR は Test OK
+// のまま残り、 スイープが 60 秒ごとに同じ失敗を繰り返す)。 `merge --squash --no-commit`
+// のコンフリクトは index に unmerged entry を残すので、それを一次情報として見る。
+async function isMergeConflict(worktreePath, message) {
+  if (/CONFLICT|Automatic merge failed|not something we can merge/i.test(message)) return true;
+  try {
+    return Boolean(await git(worktreePath, ["ls-files", "--unmerged"]));
+  } catch {
+    // index を読めないなら判定材料が無い。 コンフリクト扱いにはしない。
+    return false;
+  }
+}
+
 export async function squashMergeLocalPullRequest({
   repository,
   pullRequest,
@@ -60,21 +101,28 @@ export async function squashMergeLocalPullRequest({
     throw new Error("Only an Open / Test OK local PR can be squash merged.");
   }
   if (pullRequest.draft) throw new Error("A draft local PR cannot be merged.");
+  // ベースは審査時の SHA に固定しない。 他 PR のマージで base は常に前進するので、
+  // 固定すると 1 本マージするたびに残り全部がマージ不能になる。 進んだ base とは
+  // squash 適用時のコンフリクトだけを判定に使う。
   const baseSha = await git(repository.rootPath, [
     "rev-parse",
     "--verify",
     `refs/heads/${pullRequest.baseRef}`,
   ]);
-  if (baseSha.toLowerCase() !== pullRequest.baseSha.toLowerCase()) {
-    throw new Error("The base branch changed; submit a new review before merging.");
-  }
   const headSha = await git(repository.rootPath, [
     "rev-parse",
     "--verify",
     `refs/heads/${pullRequest.headRef}`,
   ]);
   if (headSha.toLowerCase() !== pullRequest.reviewedHeadSha.toLowerCase()) {
-    throw new Error("The reviewed head changed; submit a new review before merging.");
+    // rebase で SHA だけ変わったヘッドは審査結果を引き継ぐ。差分内容が審査時と
+    // 変わっていたら、それは未審査のコードなので再審査へ。
+    await assertReviewedContentUnchanged(
+      repository.rootPath,
+      pullRequest.reviewedHeadSha,
+      headSha,
+      baseSha,
+    );
   }
   const root = await mkdtemp(join(tmpdir(), "revisor-squash-merge-"));
   const worktrees = {
@@ -84,7 +132,18 @@ export async function squashMergeLocalPullRequest({
   };
   try {
     await git(repository.rootPath, ["worktree", "add", "--detach", worktrees.head, baseSha]);
-    await git(worktrees.head, ["merge", "--squash", "--no-commit", headSha]);
+    try {
+      await git(worktrees.head, ["merge", "--squash", "--no-commit", headSha]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (await isMergeConflict(worktrees.head, message)) {
+        throw new MergeConflictError(
+          `The head conflicts with the current '${pullRequest.baseRef}'; rebase the branch and submit a new review.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
     await git(worktrees.head, [
       "-c",
       "user.name=LUDIARS Revisor",

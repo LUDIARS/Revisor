@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { MergeConflictError, StaleReviewError } from "../src/errors.mjs";
 import { LocalPrReporter } from "../src/local-reporter.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
 import { PrReviewQueue } from "../src/queue.mjs";
@@ -714,6 +715,301 @@ test("fails an interrupted review that can no longer be resumed", async () => {
     // ゾンビのまま残さず、必ず終端状態へ落とす。
     assert.equal(settled.checkStatus, "failed");
     assert.match(settled.error, /Revisor restarted while this review was in flight/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("a merge conflict drops the PR to action_required instead of leaving it Test OK", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async () => {
+      throw new MergeConflictError("The head conflicts with the current 'main'.");
+    },
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "conflicting", body: "", author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: pullRequest.headSha,
+    });
+
+    await assert.rejects(service.mergePullRequest(pullRequest.id), MergeConflictError);
+
+    const after = store.getPullRequest(pullRequest.id);
+    assert.equal(after.status, "open");
+    assert.equal(after.checkStatus, "action_required");
+    assert.match(after.reasons.join(" "), /conflicts/);
+    // Test OK から外れたので Test Forum の候補にも載らない。
+    assert.deepEqual(store.testWorkflowProducts(), []);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("a stale review is re-queued automatically on merge", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submissions = [];
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request, options) {
+        submissions.push({ request, options });
+        return { id: `job-${submissions.length}` };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async () => {
+      throw new StaleReviewError("The head content changed after the review.");
+    },
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "stale", body: "", author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: pullRequest.headSha,
+    });
+
+    await assert.rejects(service.mergePullRequest(pullRequest.id), StaleReviewError);
+
+    const after = store.getPullRequest(pullRequest.id);
+    assert.equal(after.status, "open");
+    assert.equal(after.checkStatus, "queued");
+    // 再審査は同一 head でも走るよう force 付きで投入される。
+    assert.equal(submissions.length, 2);
+    assert.deepEqual(submissions[1].options, { force: true });
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("the auto-merge sweep merges eligible Test OK PRs and skips drafts", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const mergedIds = [];
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async ({ pullRequest }) => {
+      mergedIds.push(pullRequest.id);
+      return "f".repeat(40);
+    },
+    loadSettings: () => ({
+      autoMergeEnabled: true,
+      autoMergeRiskThreshold: 15,
+      autoMergeRequiresRuntimeVerificationClear: true,
+    }),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const eligible = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "eligible", body: "", author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(eligible.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: eligible.headSha,
+      mergeRisk: { score: 5, factors: [] },
+      reasons: [],
+    });
+    // 同一 head の再投稿は既存 PR に相乗りするので、draft には別ブランチを使う。
+    git(fixture.repoPath, "checkout", "-b", "feat/draft", "feat/local");
+    writeFileSync(join(fixture.repoPath, "draft.txt"), "draft\n", "utf8");
+    git(fixture.repoPath, "add", "draft.txt");
+    git(fixture.repoPath, "commit", "-m", "draft work");
+    git(fixture.repoPath, "checkout", "main");
+    const draft = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "draft", body: "", author: "neco",
+      headRef: "feat/draft",
+      draft: true,
+    });
+
+    const summary = await service.sweepAutoMerge();
+
+    assert.deepEqual(summary, { attempted: 1, merged: 1, failed: 0 });
+    assert.deepEqual(mergedIds, [eligible.id]);
+    const after = store.getPullRequest(eligible.id);
+    assert.equal(after.status, "merged");
+    assert.equal(after.autoMerge.merged, true);
+    assert.equal(store.getPullRequest(draft.id).status, "open");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// スイープは 60 秒間隔のタイマーで回る一方、1 周はマージ前セキュリティスキャン次第で
+// それより長くなる。 重なった周回とレビュー完了時の自動マージが同じ PR を二度
+// マージしにいくと、2 本目は必ず「base が動いた」で落ちて、マージ可能な PR が失敗
+// 記録付きで残る。 squash は起点が何であれ 1 本ずつしか走らない。
+test("a sweep and a review-completion auto-merge never squash the same PR at once", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const mergedIds = [];
+  let inFlight = 0;
+  let concurrent = 0;
+  let releaseMerge;
+  const mergeStarted = new Promise((resolve) => {
+    releaseMerge = resolve;
+  });
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async ({ pullRequest }) => {
+      // 本物の squash と同じ前提条件。 直列化されていれば、2 本目が回るころには
+      // PR は merged になっていて、ここで弾かれる。
+      if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
+        throw new Error("Only an Open / Test OK local PR can be squash merged.");
+      }
+      inFlight += 1;
+      concurrent = Math.max(concurrent, inFlight);
+      releaseMerge();
+      await new Promise((settle) => setTimeout(settle, 20));
+      inFlight -= 1;
+      mergedIds.push(pullRequest.id);
+      return "f".repeat(40);
+    },
+    loadSettings: () => ({
+      autoMergeEnabled: true,
+      autoMergeRiskThreshold: 15,
+      autoMergeRequiresRuntimeVerificationClear: true,
+    }),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const eligible = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "eligible", body: "", author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(eligible.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: eligible.headSha,
+      mergeRisk: { score: 5, factors: [] },
+      reasons: [],
+    });
+
+    const sweep = service.sweepAutoMerge();
+    // 1 周目がマージの最中にいるあいだに、2 周目のタイマーとレビュー完了時の
+    // 自動マージが同じ PR に重なる。
+    await mergeStarted;
+    const overlappingSweep = await service.sweepAutoMerge();
+    const overlappingCompletion = service.autoMergeIfEligible(eligible.id);
+    const summary = await sweep;
+    await overlappingCompletion;
+
+    assert.deepEqual(summary, { attempted: 1, merged: 1, failed: 0 });
+    // 周回は重ならない。
+    assert.deepEqual(overlappingSweep, { attempted: 0, merged: 0, failed: 0 });
+    // 起点が違っても squash が同時に 2 本走ることはなく、実際に走ったのは 1 本だけ。
+    assert.equal(concurrent, 1);
+    assert.deepEqual(mergedIds, [eligible.id]);
+    assert.equal(store.getPullRequest(eligible.id).status, "merged");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// 候補一覧は周回開始時のスナップショット。 その間に手動マージやレビュー完了時の
+// 自動マージが同じ PR を終わらせていたら、スイープは触らずに見送る。
+test("the sweep re-reads each candidate and skips one merged mid-sweep", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const mergedIds = [];
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async ({ pullRequest }) => {
+      mergedIds.push(pullRequest.id);
+      // 1 件目のマージ中に、残りの候補が別経路でマージ済みになる。
+      for (const candidate of store.listPullRequests()) {
+        if (candidate.id !== pullRequest.id && candidate.status === "open") {
+          store.updatePullRequest(candidate.id, {
+            status: "merged",
+            mergeCommitSha: "e".repeat(40),
+          });
+        }
+      }
+      return "f".repeat(40);
+    },
+    loadSettings: () => ({
+      autoMergeEnabled: true,
+      autoMergeRiskThreshold: 15,
+      autoMergeRequiresRuntimeVerificationClear: true,
+    }),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    git(fixture.repoPath, "checkout", "-b", "feat/second", "feat/local");
+    writeFileSync(join(fixture.repoPath, "second.txt"), "second\n", "utf8");
+    git(fixture.repoPath, "add", "second.txt");
+    git(fixture.repoPath, "commit", "-m", "second work");
+    git(fixture.repoPath, "checkout", "main");
+    const ids = [];
+    for (const headRef of ["feat/local", "feat/second"]) {
+      const pullRequest = await service.submitPullRequest({
+        repository: "LUDIARS/Product",
+        title: headRef, body: "", author: "neco",
+        headRef,
+      });
+      store.updatePullRequest(pullRequest.id, {
+        checkStatus: "test_ok",
+        reviewedHeadSha: pullRequest.headSha,
+        mergeRisk: { score: 5, factors: [] },
+        reasons: [],
+      });
+      ids.push(pullRequest.id);
+    }
+
+    const summary = await service.sweepAutoMerge();
+
+    assert.deepEqual(summary, { attempted: 1, merged: 1, failed: 0 });
+    assert.equal(mergedIds.length, 1);
+    assert.ok(ids.includes(mergedIds[0]));
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

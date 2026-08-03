@@ -104,12 +104,20 @@ check (`runtime`). All three are optional; a case that declares nothing covers
 executable change only.
 
 A local PR records title, body, author, draft, labels, assignees, reviewers,
-the submitting Concordia session (optional), sequential repository-local number,
-base/head refs, exact original SHAs, workflow status, CI outcomes, projected
+the submitting Concordia session (optional), a sequential number drawn from one
+sequence shared by every registered repository, base/head refs, exact original SHAs, workflow status, CI outcomes, projected
 Anatomia data, leakage locations, the security scan outcome and its finding
 locations, the review plan, the merge-risk and runtime-verification assessments,
 the automatic merge outcome, and the final reviewed SHA. The test workflow is a
 derived view containing only PRs in `Open / Test OK`.
+
+The number is global rather than per-repository because it is used on its own to
+identify a pull request across the workflow (`Rv#xxx`), which a number that
+repeats in every repository cannot do. A state file written by the earlier
+per-repository scheme (`version: 1`) is renumbered on read, ordered by creation
+time and broken by id, so the same stored state always yields the same numbers —
+a read performs no write, and a non-deterministic migration would renumber the
+board on every read.
 
 Whether a pull request needs a human is not stored. It is derived on every read
 from the stored assessments and the current settings, so moving the accepted

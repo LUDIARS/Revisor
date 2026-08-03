@@ -15,9 +15,27 @@ const STATE_PATH_ENV = "REVISOR_STATE_PATH";
 
 function emptyState() {
   return {
-    version: 1,
+    version: 2,
+    nextPullRequestNumber: 1,
     repositories: [],
     pullRequests: [],
+  };
+}
+
+// v1 はリポジトリごとの連番だった。 番号は横断利用 (Rv#xxx だけで PR を特定して
+// ワークフローを回す) が前提になったので、 全リポジトリ共通の 1 本へ振り直す。
+// createdAt 昇順 (同時刻は id で安定化) なので、 同じ v1 状態からは常に同じ番号に
+// 落ちる — 読み取りは write を伴わないため、 決定的でないと読むたびに番号が揺れる。
+function migrateToGlobalNumbering(state) {
+  const ordered = [...state.pullRequests].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+  ordered.forEach((pullRequest, index) => {
+    pullRequest.number = index + 1;
+  });
+  return {
+    ...state,
+    version: 2,
+    nextPullRequestNumber: ordered.length + 1,
   };
 }
 
@@ -32,10 +50,14 @@ function readState(path) {
     const value = JSON.parse(readFileSync(path, "utf8"));
     if (
       !value
-      || value.version !== 1
+      || (value.version !== 1 && value.version !== 2)
       || !Array.isArray(value.repositories)
       || !Array.isArray(value.pullRequests)
     ) {
+      throw new Error("invalid schema");
+    }
+    if (value.version === 1) return migrateToGlobalNumbering(value);
+    if (!Number.isInteger(value.nextPullRequestNumber) || value.nextPullRequestNumber < 1) {
       throw new Error("invalid schema");
     }
     return value;
@@ -118,10 +140,8 @@ export class LocalPrStore {
   createPullRequest(pullRequest) {
     const state = readState(this.path);
     const timestamp = this.now();
-    const number = state.pullRequests
-      .filter((candidate) =>
-        candidate.repository.toLowerCase() === pullRequest.repository.toLowerCase())
-      .reduce((maximum, candidate) => Math.max(maximum, candidate.number), 0) + 1;
+    const number = state.nextPullRequestNumber;
+    state.nextPullRequestNumber = number + 1;
     const record = {
       id: this.createId(),
       number,

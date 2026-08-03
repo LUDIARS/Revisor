@@ -2,6 +2,7 @@ import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { autoMergeDecision, autoMergeRecord } from "./auto-merge.mjs";
 import { readSettings } from "./config.mjs";
+import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
@@ -56,6 +57,16 @@ export class LocalPrService {
     // to re-colour and re-sort the dashboard without restarting the service.
     this.loadSettings = loadSettings;
   }
+
+  // squash マージは base ref を前進させる。 定期スイープ・レビュー完了時の自動マージ
+  // ・UI からの手動マージは互いを知らないので、 直列化しないと同じ baseSha から 2 本
+  // 作って後の 1 本が必ず「base が動いた」で落ちる (実際にはマージ可能な PR が失敗
+  // 扱いになる)。 マージは常に 1 本ずつ通す。
+  #mergeChain = Promise.resolve();
+
+  // 1 周の所要時間はマージ前セキュリティスキャン次第で interval を超える。 前周が
+  // まだ走っているうちに次を重ねると、同じ候補を二重に処理しにいく。
+  #sweeping = false;
 
   async registerRepository(registration) {
     await access(registration.rootPath);
@@ -250,18 +261,47 @@ export class LocalPrService {
   }
 
   async mergePullRequest(id) {
+    const merge = this.#mergeChain.then(
+      () => this.#mergeOnce(id),
+      () => this.#mergeOnce(id),
+    );
+    // 失敗した 1 件で後続を止めない。 チェーンは順番だけを保証する。
+    this.#mergeChain = merge.then(() => undefined, () => undefined);
+    return merge;
+  }
+
+  async #mergeOnce(id) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
     const repository = this.store.getRepository(pullRequest.repository);
     if (!repository) {
       throw new Error(`Repository '${pullRequest.repository}' is not registered.`);
     }
-    const mergeCommitSha = await this.merge({
-      repository,
-      pullRequest,
-      env: this.env,
-      ...(this.securityScan ? { scan: this.securityScan } : {}),
-    });
+    let mergeCommitSha;
+    try {
+      mergeCommitSha = await this.merge({
+        repository,
+        pullRequest,
+        env: this.env,
+        ...(this.securityScan ? { scan: this.securityScan } : {}),
+      });
+    } catch (error) {
+      // コンフリクトは再審査では直らない: ブランチ側の rebase が要るので、 Test OK
+      // から外して人間の判断待ちに落とす (Test Forum からも消える)。
+      if (error instanceof MergeConflictError) {
+        this.store.updatePullRequest(id, {
+          checkStatus: "action_required",
+          reasons: [error.message],
+        });
+        throw error;
+      }
+      // 審査後に差分内容が変わったヘッドは、新しい内容をそのまま再審査に回す。
+      if (error instanceof StaleReviewError) {
+        await this.#requeue(pullRequest);
+        throw error;
+      }
+      throw error;
+    }
     const merged = this.store.updatePullRequest(id, {
       status: "merged",
       checkStatus: "test_ok",
@@ -270,6 +310,62 @@ export class LocalPrService {
     });
     await this.#announceLifecycle("merged", merged);
     return merged;
+  }
+
+  // レビュー完了直後の 1 回だけでは「その時点で base が古かった」PR が永久に残る。
+  // base が進んでも squash が通るようになった PR を拾う定期スイープ。 見送りは
+  // 記録しない (毎周期 autoMerge 記録を書き換えると updatedAt が無意味に churn する)。
+  async sweepAutoMerge() {
+    const summary = { attempted: 0, merged: 0, failed: 0 };
+    if (this.#sweeping) return summary;
+    this.#sweeping = true;
+    try {
+      const settings = this.loadSettings();
+      if (!settings.autoMergeEnabled) return summary;
+      const candidates = this.store.listPullRequests().filter((pullRequest) =>
+        pullRequest.status === "open"
+        && pullRequest.checkStatus === "test_ok"
+        && pullRequest.draft !== true);
+      for (const candidate of candidates) {
+        // 1 件マージするたびに base は進み、レビュー完了や手動マージも並行して状態を
+        // 動かす。 候補一覧は周回の開始時点のスナップショットなので、判定は必ず最新の
+        // 記録で取り直す (でないと既にマージ済みの PR を再度マージしにいく)。
+        const pullRequest = this.store.getPullRequest(candidate.id);
+        if (
+          !pullRequest
+          || pullRequest.status !== "open"
+          || pullRequest.checkStatus !== "test_ok"
+          || pullRequest.draft === true
+        ) continue;
+        const decision = autoMergeDecision(pullRequest, settings);
+        if (!decision.merge) continue;
+        summary.attempted += 1;
+        try {
+          await this.mergePullRequest(pullRequest.id);
+          this.store.updatePullRequest(pullRequest.id, {
+            autoMerge: autoMergeRecord({ merged: true, reason: decision.reason }),
+          });
+          summary.merged += 1;
+        } catch (error) {
+          summary.failed += 1;
+          // mergePullRequest 側で action_required / 再審査へ落ちた PR はその状態が
+          // 既に理由を語っている。 それ以外の失敗だけ autoMerge 記録に残す。
+          if (!(error instanceof MergeConflictError) && !(error instanceof StaleReviewError)) {
+            this.store.updatePullRequest(pullRequest.id, {
+              autoMerge: autoMergeRecord({
+                merged: false,
+                reason: `自動マージに失敗しました: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              }),
+            });
+          }
+        }
+      }
+      return summary;
+    } finally {
+      this.#sweeping = false;
+    }
   }
 
   // Called once per completed review. The outcome is always recorded, including a
@@ -292,6 +388,12 @@ export class LocalPrService {
         autoMerge: autoMergeRecord({ merged: true, reason: decision.reason }),
       });
     } catch (error) {
+      // スイープと同じ扱い: コンフリクト (action_required) と再審査行き (queued) は
+      // mergePullRequest が既に状態で理由を語っている。 ここで記録を重ねると、
+      // 再審査待ちの PR に古い失敗理由が貼りつく。
+      if (error instanceof MergeConflictError || error instanceof StaleReviewError) {
+        return this.store.getPullRequest(id);
+      }
       return this.store.updatePullRequest(id, {
         autoMerge: autoMergeRecord({
           merged: false,

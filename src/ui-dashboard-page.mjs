@@ -2,27 +2,9 @@ import { CLIENT_REQUEST_SOURCE } from "./ui-client-request.mjs";
 import { renderPage } from "./ui-layout.mjs";
 import { PR_VIEW_SOURCE } from "./ui-pr-view-script.mjs";
 
-// The board is ordered by who has to act next, so the first thing on the page —
-// on a phone, the only thing above the fold — is the set of pull requests waiting
-// on a human. Cards rather than a table: the same markup reads on a 360px screen
-// and on a desktop grid, and the state badge stays legible without horizontal
-// scrolling.
+// PR のトリアージはトップページ (2 ペイン) が担う。 ここは運用の俯瞰 —
+// 登録リポジトリ・PR 作成・テストワークフロー・キュー — だけを持つ。
 const BODY = `
-  <section>
-    <h2>PR の判断待ち</h2>
-    <p class="note">人間の判断が必要な PR を先頭に並べます。カードを選ぶと下に詳細が出ます。</p>
-    <div class="filter-bar">
-      <label class="check"><input id="filter-human" type="checkbox">判断が必要なものだけ表示</label>
-      <span id="pr-counts" class="note"></span>
-    </div>
-    <div class="cards" id="pr-cards"></div>
-    <p id="pr-empty" class="empty">Open な PR はありません。</p>
-
-    <h3>選択した PR の詳細</h3>
-    <div id="pr-detail"><p class="empty">PR を選択してください。</p></div>
-    <p id="pr-action-message" role="status"></p>
-  </section>
-
   <section>
     <h2>登録プロジェクト</h2>
     <p class="note">登録済みのローカルリポジトリです。追加は<a href="/settings">設定</a>から行います。</p>
@@ -60,90 +42,10 @@ const BODY = `
 `;
 
 const CONTROLLER_SOURCE = `
-  const prCards = document.querySelector('#pr-cards');
-  const prCounts = document.querySelector('#pr-counts');
-  const prEmpty = document.querySelector('#pr-empty');
-  const prDetail = document.querySelector('#pr-detail');
-  const prActionMessage = document.querySelector('#pr-action-message');
-  const filterHuman = document.querySelector('#filter-human');
   const repositoryRows = document.querySelector('#repository-rows');
   const repositoryEmpty = document.querySelector('#repository-empty');
   const queue = document.querySelector('#queue');
   const prMessage = document.querySelector('#pr-message');
-  let selectedPrId = null;
-  let openPullRequests = [];
-
-  function actionsOf(pr) {
-    const wrapper = element('div', 'actions');
-    if (pr.status === 'open' && pr.checkStatus === 'test_ok' && !pr.draft) {
-      const merge = document.createElement('button');
-      merge.textContent = 'squash merge';
-      merge.addEventListener('click', () => runAction(merge, pr.id, 'merge'));
-      wrapper.append(merge);
-    }
-    if (pr.status === 'open' && pr.checkStatus !== 'running' && pr.checkStatus !== 'queued') {
-      const retry = document.createElement('button');
-      retry.className = 'secondary';
-      retry.textContent = '審査を再実行';
-      retry.addEventListener('click', () => runAction(retry, pr.id, 'retry'));
-      wrapper.append(retry);
-    }
-    return wrapper;
-  }
-
-  async function runAction(button, id, action) {
-    button.disabled = true;
-    prActionMessage.textContent = '';
-    try {
-      await request('/api/local-prs/' + encodeURIComponent(id) + '/' + action, { method: 'POST' });
-      await refresh();
-    } catch (error) {
-      prActionMessage.textContent = error.message;
-      button.disabled = false;
-    }
-  }
-
-  function renderDetail(pr) {
-    if (!pr) {
-      prDetail.replaceChildren(paragraph('PR を選択してください。'));
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    fragment.append(overviewOf(pr));
-    fragment.append(block('判断', decisionOf(pr)));
-    fragment.append(block('レビュー計画', planOf(pr.reviewPlan)));
-    fragment.append(block('テスト', testsOf(pr)));
-    fragment.append(block('レビュー', reviewOf(pr)));
-    fragment.append(block('差分解析 (Anatomia)', analysisOf(pr)));
-    fragment.append(block('操作', actionsOf(pr)));
-    prDetail.replaceChildren(fragment);
-  }
-
-  function selectPullRequest(id) {
-    selectedPrId = id;
-    prActionMessage.textContent = '';
-    renderBoard();
-  }
-
-  function renderBoard() {
-    const needsHuman = openPullRequests.filter((pr) => pr.decision.state === 'needs_human');
-    const visible = filterHuman.checked ? needsHuman : openPullRequests;
-    prCounts.textContent = '判断待ち ' + needsHuman.length + ' 件 / Open ' + openPullRequests.length + ' 件';
-    prEmpty.hidden = visible.length > 0;
-    prEmpty.textContent = openPullRequests.length === 0
-      ? 'Open な PR はありません。'
-      : '判断が必要な PR はありません。';
-    prCards.replaceChildren(...visible.map((pr) => prCard(pr, selectedPrId, selectPullRequest)));
-    renderDetail(openPullRequests.find((pr) => pr.id === selectedPrId) ?? null);
-  }
-
-  function renderPullRequests(pullRequests) {
-    // The service already ordered them by who has to act next; preserving that
-    // order is the point, so nothing re-sorts here.
-    openPullRequests = pullRequests.filter((pr) => pr.status === 'open');
-    if (selectedPrId && !openPullRequests.some((pr) => pr.id === selectedPrId)) selectedPrId = null;
-    renderBoard();
-  }
 
   function renderRepositories(repositories, pullRequests) {
     repositoryEmpty.hidden = repositories.length > 0;
@@ -189,7 +91,6 @@ const CONTROLLER_SOURCE = `
         ...jobs.jobs.slice(0, 20).map((job) =>
           job.status + '  ' + job.request.repository + '#' + job.request.number + '  ' + job.id),
       ].join('\\n');
-      renderPullRequests(prs.pullRequests);
       renderRepositories(repositories.repositories, prs.pullRequests);
       const products = document.querySelector('#test-products');
       products.replaceChildren(...workflow.products.map((product) =>
@@ -198,8 +99,6 @@ const CONTROLLER_SOURCE = `
       queue.textContent = error.message;
     }
   }
-
-  filterHuman.addEventListener('change', renderBoard);
 
   document.querySelector('#pr-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -235,7 +134,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${CONTROLLER_SOURCE}`;
 export function renderDashboardPage(sessionToken) {
   return renderPage({
     sessionToken,
-    title: "Revisor",
+    title: "Revisor — ダッシュボード",
     activeNav: "dashboard",
     bodyHtml: BODY,
     scriptSource: SCRIPT,

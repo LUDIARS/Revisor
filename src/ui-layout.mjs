@@ -2,7 +2,8 @@ import { STYLES } from "./ui-styles.mjs";
 
 function navigation(activeNav) {
   return [
-    { href: "/", label: "ダッシュボード", key: "dashboard" },
+    { href: "/", label: "PR", key: "prs" },
+    { href: "/dashboard", label: "ダッシュボード", key: "dashboard" },
     { href: "/settings", label: "設定", key: "settings" },
   ]
     .map((item) =>

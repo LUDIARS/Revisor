@@ -81,6 +81,16 @@ export const STYLES = `
     .test-output > summary { cursor: pointer; color: #ff7d8d; font-size: .9rem; }
     .test-output > pre { margin: 8px 0 0; max-height: 420px; font-size: .8rem; }
 
+    .pr-board { display: grid; grid-template-columns: minmax(340px, 460px) 1fr; gap: 20px; align-items: start; }
+    .pr-list-pane .cards { grid-template-columns: 1fr; max-height: calc(100vh - 260px); overflow-y: auto; padding-right: 4px; }
+    .pr-detail-pane { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+
+    @media (max-width: 960px) {
+      .pr-board { grid-template-columns: 1fr; }
+      .pr-list-pane .cards { max-height: none; overflow-y: visible; }
+      .pr-detail-pane { position: static; max-height: none; overflow-y: visible; }
+    }
+
     @media (max-width: 700px) {
       main { width: calc(100% - 16px); margin: 12px auto; gap: 12px; }
       section { padding: 16px; border-radius: 10px; }

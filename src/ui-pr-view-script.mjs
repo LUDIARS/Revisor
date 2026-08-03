@@ -369,9 +369,6 @@ export const PR_VIEW_SOURCE = `
         .map((entry) => '[' + entry.severity + '] ' + (entry.message || entry.rule)),
         'アーキテクチャ違反はありません。'),
     ));
-    const raw = document.createElement('pre');
-    raw.textContent = JSON.stringify(pr.anatomia, null, 2);
-    wrapper.append(block('生データ', raw));
     return wrapper;
   }
 `;

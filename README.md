@@ -41,6 +41,17 @@ leaves the workstation.
    commit, runs the final Codex Security scan against the exact squashed diff,
    and fast-forwards the local base branch. It does not push.
 
+A merge is attempted when the review completes and again on a sweep every 60
+seconds, because a pull request that was not mergeable at the moment its review
+finished would otherwise sit at `Open / Test OK` forever. The base branch is not
+pinned to the SHA it had at review time — every merge advances it, so pinning
+would make each merge block all the remaining ones. What is checked instead is
+that the squash still applies (a conflict drops the PR to `action_required` for
+a rebase, since another review will not resolve it) and that the head's diff
+content is unchanged since the review (compared by `git patch-id`, so a pure
+rebase keeps its review; changed content is re-queued for review automatically).
+Merges run one at a time regardless of what triggered them.
+
 For local PRs submitted by a Concordia session, creation, review pass/failure,
 and merge are published best-effort through Concordia's `報告` channel to
 Discord. Revisor reuses the submitting session binding; sessionless CLI/script
@@ -87,14 +98,20 @@ revisor config path
 
 ## Pages
 
-`/` is the dashboard. Open local pull requests come first as cards, ordered by
-who has to act next: the ones needing a human decision, then failures, then
-reviews in flight, then the ones clear to merge. Each card carries the decision
-badge, the merge-risk score against the configured threshold, whether a human
-still has to run the product, the test summary including skipped cases, and the
-reasons it is waiting. A filter shows only the ones needing a decision. The
-layout is responsive: on a phone the cards stack full width with touch-sized
-controls, so a decision can be made without a desktop.
+`/` is the pull request board and holds nothing else, so the whole first screen
+is the set of changes waiting on someone. Open local pull requests are cards
+ordered by who has to act next: the ones needing a human decision, then
+failures, then reviews in flight, then the ones clear to merge. Each card
+carries the decision badge, the merge-risk score against the configured
+threshold, whether a human still has to run the product, the test summary
+including skipped cases, and the reasons it is waiting. A filter shows only the
+ones needing a decision. The layout is responsive: on a wide screen the list
+sits beside the detail of the selected pull request, and below 960px the two
+panes stack, so on a phone the cards run full width with touch-sized controls
+and a decision can be made without a desktop.
+
+`/dashboard` holds the operational view: registered repositories, local PR
+creation, the test workflow, and the review queue.
 
 Selecting a pull request opens its detail: the decision with the itemised risk
 and runtime-verification factors, the review plan with each stage and why it ran

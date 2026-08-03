@@ -1,6 +1,6 @@
 {
   "name": "local-workspace",
-  "description": "ローカル repository 上の使い捨て detached worktree とローカル ref を所有する境界。ref 文字列の安全性検証、固定 SHA の worktree 生成、tracked change だけを見る清潔さ判定、compare-and-swap による branch 前進、および best-effort な cleanup を含む。fetch も push も行わず、審査や merge の可否判定も持たない。",
+  "description": "ローカル repository 上の使い捨て detached worktree とローカル ref を所有する境界。ref / SHA 文字列の安全性検証、固定 SHA の worktree 生成、tracked change だけを見る清潔さ判定、差分内容の指紋 (patch-id) の算出、compare-and-swap による branch 前進、および best-effort な cleanup を含む。fetch も push も行わず、審査や merge の可否判定も持たない。",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -13,23 +13,25 @@
     {
       "preset": "couplingCap",
       "params": {
-        "targetPattern": "assertSafeRef|parseWorktreeList|trackedChanges|branchWorktree|inspectLocalPullRequest|prepareLocalWorktrees|advanceLocalBranch|cleanupWorktrees",
+        "targetPattern": "assertSafeRef|assertSafeSha|parseWorktreeList|trackedChanges|branchWorktree|inspectLocalPullRequest|prepareLocalWorktrees|diffPatchId|advanceLocalBranch|cleanupWorktrees",
         "by": "name",
         "maxFanOut": 9007199254740991
       }
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the \"local-workspace\" domain: ローカル ref の安全性検証、固定 SHA の使い捨て detached worktree 生成、tracked change のみの清潔さ判定、compare-and-swap の branch 前進、best-effort cleanup。",
+  "cardTemplate": "Summarise the \"local-workspace\" domain: ローカル ref / SHA の安全性検証、固定 SHA の使い捨て detached worktree 生成、tracked change のみの清潔さ判定、差分内容の指紋 (patch-id)、compare-and-swap の branch 前進、best-effort cleanup。",
   "source": "spec-draft",
   "mechanics": [
     "disposable-worktree-lifecycle",
     "ref-validation",
+    "diff-content-fingerprint",
     "compare-and-swap-branch-advance",
     "best-effort-cleanup"
   ],
   "specRefs": [
     "local-workspace — ref の安全性",
+    "local-workspace — 差分内容の指紋",
     "local-workspace — 使い捨て worktree の生成",
     "local-workspace — cleanup の best-effort 範囲",
     "local-workspace — worktree の清潔さと branch 前進"

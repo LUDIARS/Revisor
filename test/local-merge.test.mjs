@@ -1,0 +1,146 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import test from "node:test";
+import { MergeConflictError, StaleReviewError } from "../src/errors.mjs";
+import { squashMergeLocalPullRequest } from "../src/local-merge.mjs";
+
+function git(repoPath, ...args) {
+  const result = spawnSync("git", ["-C", repoPath, ...args], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+
+// main 1 コミット + feat/local 1 コミットの素の作業リポジトリ。
+function repositoryFixture() {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-local-merge-"));
+  const repoPath = join(directory, "Product");
+  const init = spawnSync("git", ["init", repoPath], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (init.status !== 0) throw new Error(init.stderr || init.stdout);
+  git(repoPath, "checkout", "-b", "main");
+  git(repoPath, "config", "user.name", "Test");
+  git(repoPath, "config", "user.email", "test@example.invalid");
+  writeFileSync(join(repoPath, "product.txt"), "base\n", "utf8");
+  writeFileSync(join(repoPath, "other.txt"), "other\n", "utf8");
+  git(repoPath, "add", ".");
+  git(repoPath, "commit", "-m", "base");
+  git(repoPath, "checkout", "-b", "feat/local");
+  writeFileSync(join(repoPath, "product.txt"), "base\nfeature\n", "utf8");
+  git(repoPath, "add", "product.txt");
+  git(repoPath, "commit", "-m", "feature");
+  git(repoPath, "checkout", "main");
+  return { directory, repoPath };
+}
+
+function mergeInput(fixture, overrides = {}) {
+  const headSha = git(fixture.repoPath, "rev-parse", "refs/heads/feat/local");
+  return {
+    repository: { repository: "LUDIARS/Product", rootPath: fixture.repoPath },
+    pullRequest: {
+      id: "pr-1",
+      status: "open",
+      checkStatus: "test_ok",
+      draft: false,
+      title: "feature",
+      body: "",
+      headRef: "feat/local",
+      baseRef: "main",
+      headSha,
+      baseSha: git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+      reviewedHeadSha: headSha,
+      ...overrides,
+    },
+    scan: async () => ({ status: "passed" }),
+  };
+}
+
+test("merges even after the base advanced, as long as the squash applies cleanly", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    // 審査の後に base が別ファイルの変更で前進する (旧実装はここで必ず拒否した)。
+    writeFileSync(join(fixture.repoPath, "other.txt"), "other\nmoved\n", "utf8");
+    git(fixture.repoPath, "add", "other.txt");
+    git(fixture.repoPath, "commit", "-m", "base moves");
+
+    const mergeCommitSha = await squashMergeLocalPullRequest(input);
+
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("keeps the review when the head was only rebased (same patch content)", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    writeFileSync(join(fixture.repoPath, "other.txt"), "other\nmoved\n", "utf8");
+    git(fixture.repoPath, "add", "other.txt");
+    git(fixture.repoPath, "commit", "-m", "base moves");
+    git(fixture.repoPath, "checkout", "feat/local");
+    git(fixture.repoPath, "rebase", "main");
+    git(fixture.repoPath, "checkout", "main");
+    assert.notEqual(
+      git(fixture.repoPath, "rev-parse", "refs/heads/feat/local"),
+      input.pullRequest.reviewedHeadSha,
+    );
+
+    const mergeCommitSha = await squashMergeLocalPullRequest(input);
+
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("requires a new review when the head content changed after the review", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    git(fixture.repoPath, "checkout", "feat/local");
+    writeFileSync(join(fixture.repoPath, "product.txt"), "base\nfeature\nunreviewed\n", "utf8");
+    git(fixture.repoPath, "add", "product.txt");
+    git(fixture.repoPath, "commit", "-m", "unreviewed change");
+    git(fixture.repoPath, "checkout", "main");
+
+    await assert.rejects(
+      squashMergeLocalPullRequest(input),
+      StaleReviewError,
+    );
+    assert.equal(
+      git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+      input.pullRequest.baseSha,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("reports a conflict with the advanced base as a merge conflict", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    // base 側が同じ行を書き換える → squash はコンフリクトする。
+    writeFileSync(join(fixture.repoPath, "product.txt"), "rewritten\n", "utf8");
+    git(fixture.repoPath, "add", "product.txt");
+    git(fixture.repoPath, "commit", "-m", "conflicting base change");
+    const movedBase = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+
+    await assert.rejects(
+      squashMergeLocalPullRequest(input),
+      MergeConflictError,
+    );
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), movedBase);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
