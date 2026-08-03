@@ -87,8 +87,9 @@ runtime architecture.
 - `ui-*.mjs` own the workflow surface exposed directly on loopback or through a
   configured local reverse proxy. `ui-styles.mjs` owns the responsive stylesheet,
   `ui-layout.mjs` the shared shell, `ui-pr-view-script.mjs` the client-side card
-  and detail rendering, the dashboard page the board and its controller, and the
-  settings page every configuration form.
+  and detail rendering, `ui-pr-board-page.mjs` the `/` triage board and its
+  controller, `ui-dashboard-page.mjs` the `/dashboard` operational panels, and
+  the settings page every configuration form.
 
 The queue concurrency and worker-process count use the same validated setting,
 so the queue never admits more runs than the pool can execute.
@@ -105,11 +106,12 @@ executable change only.
 
 A local PR records title, body, author, draft, labels, assignees, reviewers,
 the submitting Concordia session (optional), a sequential number drawn from one
-sequence shared by every registered repository, base/head refs, exact original SHAs, workflow status, CI outcomes, projected
-Anatomia data, leakage locations, the security scan outcome and its finding
-locations, the review plan, the merge-risk and runtime-verification assessments,
-the automatic merge outcome, and the final reviewed SHA. The test workflow is a
-derived view containing only PRs in `Open / Test OK`.
+sequence shared by every registered repository, base/head refs, exact original
+SHAs, workflow status, CI outcomes, projected Anatomia data, leakage locations,
+the security scan outcome and its finding locations, the review plan, the
+merge-risk and runtime-verification assessments, the automatic merge outcome,
+and the final reviewed SHA. The test workflow is a derived view containing only
+PRs in `Open / Test OK`.
 
 The number is global rather than per-repository because it is used on its own to
 identify a pull request across the workflow (`Rv#xxx`), which a number that
@@ -222,6 +224,12 @@ Only `Open / Test OK` PRs can merge. Revisor verifies that both base and
 reviewed head still match their recorded SHAs, builds one squash commit in a
 disposable worktree, scans that commit against the recorded base SHA, then
 compare-and-swap advances the local base ref. It never pushes.
+
+A pull request that will never merge is closed instead of being left open: the
+status moves `open → merged` or `open → closed`, never back, and a terminal pull
+request refuses merge, retry, and a second close. Closing is refused while a
+review is in flight, because the running worker writes its own result back last.
+`spec/feature/pr-lifecycle.md` is authoritative.
 
 Squash is the only merge strategy, and it is the workspace-wide default (neco
 2026-07-30): one PR lands as exactly one commit on the base branch, so the base

@@ -116,6 +116,16 @@ export function createRequestHandler({
         sendJson(response, 200, { pullRequest });
         return;
       }
+      const close = /^\/v1\/local-prs\/([^/]+)\/close$/.exec(url.pathname);
+      if (request.method === "POST" && close) {
+        const body = await readJsonBody(request).catch(() => null);
+        const pullRequest = localPrService.closePullRequest(
+          decodeURIComponent(close[1]),
+          { reason: typeof body?.reason === "string" ? body.reason : null },
+        );
+        sendJson(response, 200, { pullRequest });
+        return;
+      }
       const retry = /^\/v1\/local-prs\/([^/]+)\/retry$/.exec(url.pathname);
       if (request.method === "POST" && retry) {
         const pullRequest = await localPrService.retryPullRequest(

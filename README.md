@@ -194,8 +194,17 @@ GET  /v1/local-prs           loopback only
 GET  /v1/local-prs/:id       loopback only
 POST /v1/local-prs/:id/merge workflow token
 POST /v1/local-prs/:id/retry workflow token
+POST /v1/local-prs/:id/close workflow token
 GET  /v1/test-workflow       loopback only
 ```
+
+`close` はマージせずに PR を終局させる (別経路で main へ入った / 案を破棄した)。
+任意の `{"reason": "..."}` を記録し、board・test workflow・オートマージの対象から
+外す。終局済み (`merged` / `closed`) の PR は merge も retry も close も拒否する。
+審査中 (`queued` / `running`) の close も拒否する — 走っているワーカーが完了時に
+自分の結果を書き戻すので、先に閉じても上書きされて open へ戻ったように見えるだけ。
+squash マージの実行中も同じ理由で拒否する。こちらは完了した merge が `merged` を
+書き戻すため、取り下げたはずの変更がそのまま main へ入ってしまう。
 
 A read through a configured external hostname still requires the workflow token.
 Opening the reads widens their audience from the owning OS account to every

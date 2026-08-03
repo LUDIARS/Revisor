@@ -10,6 +10,7 @@ export const DECISION_STATES = {
   in_review: { order: 2, label: "審査中", tone: "warn" },
   auto_ok: { order: 3, label: "自動マージ可", tone: "ok" },
   merged: { order: 4, label: "マージ済み", tone: "idle" },
+  closed: { order: 5, label: "取り下げ", tone: "idle" },
 };
 
 // Named for what it does rather than what it returns: a `*State` name reads to
@@ -17,6 +18,8 @@ export const DECISION_STATES = {
 // functions may reach, and this is a classifier, not a state node.
 function classifyDecision(pullRequest, blockers) {
   if (pullRequest.status === "merged") return "merged";
+  // 取り下げは終局。 審査結果が何であれ、 もう誰も判断しなくてよい。
+  if (pullRequest.status === "closed") return "closed";
   if (pullRequest.checkStatus === "queued" || pullRequest.checkStatus === "running") {
     return "in_review";
   }
@@ -64,6 +67,7 @@ export function decidePullRequest(pullRequest, {
   // asked to look at, so it has to say why on the board instead of hiding the
   // reasons behind the detail pane.
   const settled = pullRequest.status !== "merged"
+    && pullRequest.status !== "closed"
     && pullRequest.checkStatus !== "queued"
     && pullRequest.checkStatus !== "running";
   const blockers = settled ? blockersOf(pullRequest, thresholds) : [];

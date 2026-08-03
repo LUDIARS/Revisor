@@ -12,7 +12,8 @@ status: implemented
 related:
   - ../architecture.md
   - ./merge-risk.md
-updated: 2026-07-30
+  - ./pr-lifecycle.md
+updated: 2026-08-02
 ---
 
 # human-decision-board — 判断待ちを先頭に出すダッシュボード
@@ -39,13 +40,14 @@ updated: 2026-07-30
 | `in_review` | `queued` / `running` | 審査中 (warn) |
 | `auto_ok` | 審査通過・ブロッカー無し | 自動マージ可 (ok) |
 | `merged` | `status: merged` | マージ済み (idle) |
+| `closed` | `status: closed` | 取り下げ (idle) |
 
 ブロッカーは draft、マージブロック理由、人間への確認、閾値超過のマージリスク、
 必要な動作確認、そしてワーカー失敗時の `error`。すべて文言としてカードに出す。
 「なぜ止まっているか」を詳細画面まで潜らないと分からない状態を作らない。
 
 そのためブロッカーは `auto_ok` だけでなく**審査が確定したすべての PR**
-(`queued` / `running` / `merged` 以外) で算出する。`needs_human` や `failed` の
+(`queued` / `running` / `merged` / `closed` 以外) で算出する。`needs_human` や `failed` の
 カードこそ理由を必要とするので、`test_ok` に限って算出すると理由が空のまま
 「人間の判断が必要」とだけ表示されてしまう。
 
@@ -92,13 +94,13 @@ PR タイトルを HTML 文字列に混ぜればテンプレートインジェ�
   リスト側の高さ制限と詳細側の sticky も外し、狭い画面では従来どおり
   カード → 詳細の順で縦に読める。
 - `max-width: 700px` — 以下を畳む。
-- カードグリッド → 1 カラム
-- `dl.meta` の `max-content 1fr` → 1 カラム
-- ナビゲーションは全幅・等分
-- 入力とボタンは `font-size: 16px` (iOS Safari のフォーカス時ズーム抑止) と
-  `min-height: 44px` (タッチ目標)
-- 表は `.table-scroll` に入れて表だけ横スクロールさせ、`body` は横に
-  はみ出させない
+  - カードグリッド → 1 カラム
+  - `dl.meta` の `max-content 1fr` → 1 カラム
+  - ナビゲーションは全幅・等分
+  - 入力とボタンは `font-size: 16px` (iOS Safari のフォーカス時ズーム抑止) と
+    `min-height: 44px` (タッチ目標)
+  - 表は `.table-scroll` に入れて表だけ横スクロールさせ、`body` は横に
+    はみ出させない
 
 スマホで完結させたいのは「人間の判断」なので、判断待ちカード・バッジ・
 操作ボタンが幅を優先し、生データや表は縮めて後ろに置く。

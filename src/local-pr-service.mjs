@@ -68,6 +68,12 @@ export class LocalPrService {
   // まだ走っているうちに次を重ねると、同じ候補を二重に処理しにいく。
   #sweeping = false;
 
+  // squash の最中にある PR の id。 マージは数分かかる (マージ前セキュリティスキャン)
+  // 一方 closePullRequest は同期で status を書くので、 走っているマージが完了時に
+  // status: "merged" を書き戻して取り下げを踏み潰す — 取り下げたはずの変更が board に
+  // 出ないまま main へ入る。 審査中の close を拒否するのとまったく同じ理由。
+  #merging = new Set();
+
   async registerRepository(registration) {
     await access(registration.rootPath);
     const topLevel = await git(registration.rootPath, ["rev-parse", "--show-toplevel"]);
@@ -153,6 +159,34 @@ export class LocalPrService {
       throw new Error("Only an open local PR can be reviewed again.");
     }
     return this.#requeue(pullRequest);
+  }
+
+  /**
+   * 取り下げる。 マージせずに終わる PR (別経路で main へ入った / 案を破棄した) を
+   * 終局させ、 board と test workflow から外す。
+   *
+   * 審査中とマージ中は拒否する。 どちらも走っている処理が完了時に自分の結果を
+   * 書き戻すので、 先に closed にしても上書きされる — 審査なら open へ戻ったように
+   * 見えるだけ、 マージなら取り下げたはずの変更がそのまま main へ入る。
+   * 理由は必須にしない代わりに、 渡されたものは記録して後から辿れるようにする。
+   */
+  closePullRequest(id, { reason = null } = {}) {
+    const pullRequest = this.store.getPullRequest(id);
+    if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
+    if (pullRequest.status !== "open") {
+      throw new Error(`Only an open local PR can be closed (it is '${pullRequest.status}').`);
+    }
+    if (pullRequest.checkStatus === "queued" || pullRequest.checkStatus === "running") {
+      throw new Error("A local PR under review cannot be closed; wait for the review to finish.");
+    }
+    if (this.#merging.has(id)) {
+      throw new Error("A local PR being merged cannot be closed; wait for the merge to finish.");
+    }
+    return this.store.updatePullRequest(id, {
+      status: "closed",
+      closedAt: new Date().toISOString(),
+      closeReason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+    });
   }
 
   /**
@@ -273,18 +307,34 @@ export class LocalPrService {
   async #mergeOnce(id) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
+    // 終局済み (merged / closed) を再びマージしない。 closed を通すと、 取り下げた
+    // 変更が board に出ないまま main へ入る。
+    if (pullRequest.status !== "open") {
+      throw new Error(`Only an open local PR can be merged (it is '${pullRequest.status}').`);
+    }
     const repository = this.store.getRepository(pullRequest.repository);
     if (!repository) {
       throw new Error(`Repository '${pullRequest.repository}' is not registered.`);
     }
-    let mergeCommitSha;
+    // 取り下げを締め出す区間は、 squash を始めてから status を書き終えるまで。
+    // base ref が動いたあとに close が通ると、 main へ入った変更が closed として
+    // board から消え、 記録と Git が食い違う。
+    this.#merging.add(id);
     try {
-      mergeCommitSha = await this.merge({
+      const mergeCommitSha = await this.merge({
         repository,
         pullRequest,
         env: this.env,
         ...(this.securityScan ? { scan: this.securityScan } : {}),
       });
+      const merged = this.store.updatePullRequest(id, {
+        status: "merged",
+        checkStatus: "test_ok",
+        mergeCommitSha,
+        mergedAt: new Date().toISOString(),
+      });
+      await this.#announceLifecycle("merged", merged);
+      return merged;
     } catch (error) {
       // コンフリクトは再審査では直らない: ブランチ側の rebase が要るので、 Test OK
       // から外して人間の判断待ちに落とす (Test Forum からも消える)。
@@ -301,15 +351,9 @@ export class LocalPrService {
         throw error;
       }
       throw error;
+    } finally {
+      this.#merging.delete(id);
     }
-    const merged = this.store.updatePullRequest(id, {
-      status: "merged",
-      checkStatus: "test_ok",
-      mergeCommitSha,
-      mergedAt: new Date().toISOString(),
-    });
-    await this.#announceLifecycle("merged", merged);
-    return merged;
   }
 
   // レビュー完了直後の 1 回だけでは「その時点で base が古かった」PR が永久に残る。

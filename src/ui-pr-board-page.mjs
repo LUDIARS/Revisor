@@ -50,6 +50,12 @@ const CONTROLLER_SOURCE = `
       retry.textContent = '審査を再実行';
       retry.addEventListener('click', () => runAction(retry, pr.id, 'retry'));
       wrapper.append(retry);
+      const close = document.createElement('button');
+      close.className = 'secondary';
+      close.textContent = '取り下げ';
+      close.title = 'マージせずに終わらせる (別経路で main へ入った / 案を破棄した)';
+      close.addEventListener('click', () => runAction(close, pr.id, 'close'));
+      wrapper.append(close);
     }
     return wrapper;
   }

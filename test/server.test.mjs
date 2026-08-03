@@ -155,14 +155,64 @@ test("still requires the token for every mutating local API request", async () =
     localPrService: {
       mergePullRequest: async () => ({ id: "pr-1", status: "merged" }),
       retryPullRequest: async () => ({ id: "pr-1" }),
+      closePullRequest: () => ({ id: "pr-1", status: "closed" }),
     },
   });
   try {
-    for (const url of ["/v1/local-prs/pr-1/merge", "/v1/local-prs/pr-1/retry", "/v1/repositories"]) {
+    for (const url of [
+      "/v1/local-prs/pr-1/merge",
+      "/v1/local-prs/pr-1/retry",
+      "/v1/local-prs/pr-1/close",
+      "/v1/repositories",
+    ]) {
       const output = response();
       await handler(request({ method: "POST", url, body: "{}" }), output);
       assert.equal(output.status, 401);
     }
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+// 取り下げの理由は任意。 ダッシュボードのボタンは本文を送らないので、 本文が無い
+// (= JSON として読めない) 要求でも取り下げ自体は通り、 理由だけが null になる。
+test("closes a local PR from both APIs and forwards an optional reason", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const closed = [];
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {
+      closePullRequest(id, options) {
+        closed.push({ id, reason: options.reason });
+        return { id, status: "closed", closeReason: options.reason };
+      },
+    },
+  });
+  try {
+    const withReason = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs/pr%201/close",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({ reason: "別経路で main へ入った" }),
+    }), withReason);
+    assert.equal(withReason.status, 200);
+    assert.equal(JSON.parse(withReason.body).pullRequest.status, "closed");
+    // id は URL エンコードを解いて渡す (merge / retry と同じ扱い)。
+    assert.deepEqual(closed[0], { id: "pr 1", reason: "別経路で main へ入った" });
+
+    const withoutBody = response();
+    await handler(request({
+      method: "POST",
+      url: "/api/local-prs/pr-1/close",
+      headers: { "x-revisor-session": "ui-token" },
+    }), withoutBody);
+    assert.equal(withoutBody.status, 200);
+    assert.equal(JSON.parse(withoutBody.body).pullRequest.status, "closed");
+    assert.deepEqual(closed[1], { id: "pr-1", reason: null });
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

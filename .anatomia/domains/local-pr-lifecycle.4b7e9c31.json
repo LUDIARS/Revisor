@@ -1,0 +1,48 @@
+{
+  "name": "local-pr-lifecycle",
+  "description": "ローカル PR の status 遷移とその読み取り時の判定。open → merged / closed の一方向で、終局済み (merged / closed) への merge / retry / close をすべて拒否する。取り下げ (closed) は理由を任意で記録し、board・test workflow・オートマージから同時に外す。判定状態は保存せず decidePullRequest が読み取り時に導出する。",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/local-pr-service\\.mjs$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/pr-disposition\\.mjs$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "closePullRequest|mergePullRequest|retryPullRequest|recoverInterruptedReviews|autoMergeIfEligible|classifyDecision|decidePullRequest|decidePullRequests|blockersOf|compareByHumanAttention",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"local-pr-lifecycle\" domain: ローカル PR の status 遷移 (open → merged / closed)、終局の拒否規則、取り下げの波及先、読み取り時の判定導出。",
+  "source": "spec-draft",
+  "mechanics": [
+    "pr-status-transition",
+    "pr-close",
+    "terminal-state-guard",
+    "decision-derivation"
+  ],
+  "specRefs": [
+    "pr-lifecycle — status は open → merged / closed の一方向 (終局から open へ戻さない)",
+    "pr-lifecycle — 取り下げ (closePullRequest) / 審査中は拒否・理由は任意で記録",
+    "pr-lifecycle — 終局済みの merge / retry / close をすべて拒否する",
+    "pr-lifecycle — 終局が波及する先 (test workflow・判定状態・オートマージ・board)",
+    "human-decision-board — 判定状態の分類と並び順 (判断待ちを先頭に出す)"
+  ],
+  "rationale": "「この PR はもう誰かを待っているか」を決めるのは status 遷移とその読み取り時の判定であり、審査の実行 (runner) やマージ可否のポリシー (review-gate) とは別の責務。遷移を持つ LocalPrService と、遷移結果を判定へ写す pr-disposition を 1 つのドメインに置き、終局の規則が両者で食い違わないようにする。実際の squash merge 手順は local-merge、リスク評価は merge-risk が担い、ここでは status だけを解釈する。",
+  "updatedAt": "2026-08-02T00:00:00.000Z"
+}

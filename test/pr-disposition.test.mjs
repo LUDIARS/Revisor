@@ -155,3 +155,22 @@ test("a merged PR is neither a decision nor auto-mergeable again", () => {
   assert.equal(decided.decision.autoMergeEligible, false);
   assert.equal(autoMergeDecision(pullRequest({ status: "merged" }), SETTINGS).merge, false);
 });
+
+test("a closed PR is neither a decision nor auto-mergeable again", () => {
+  const decided = decidePullRequest(pullRequest({ status: "closed" }), SETTINGS);
+  assert.equal(decided.decision.state, "closed");
+  assert.equal(decided.decision.label, "取り下げ");
+  assert.equal(decided.decision.autoMergeEligible, false);
+  // 取り下げた PR に判断を求め続けない (board は blockers の有無で人間を呼ぶ)。
+  assert.deepEqual(decided.decision.blockers, []);
+  assert.equal(autoMergeDecision(pullRequest({ status: "closed" }), SETTINGS).merge, false);
+});
+
+test("a closed PR that failed review still reports no blockers", () => {
+  const decided = decidePullRequest(
+    pullRequest({ status: "closed", checkStatus: "action_required", reasons: ["target domain is still missing"] }),
+    SETTINGS,
+  );
+  assert.equal(decided.decision.state, "closed");
+  assert.deepEqual(decided.decision.blockers, []);
+});

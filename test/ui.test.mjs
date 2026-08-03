@@ -34,6 +34,9 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /block\('差分解析 \(Anatomia\)', analysisOf\(pr\)\)/);
   assert.match(page, /selectedPrId = id/);
   assert.match(page, /runAction\(retry, pr\.id, 'retry'\)/);
+  // 審査が終わっている open な PR は、 マージせずに取り下げられる。
+  assert.match(page, /runAction\(close, pr\.id, 'close'\)/);
+  assert.match(page, /close\.textContent = '取り下げ'/);
 });
 
 test("the PR board renders PRs as cards and keeps the risk badge in the card head", () => {
