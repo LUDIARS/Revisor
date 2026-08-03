@@ -152,7 +152,8 @@ one would wait on a review no worker will ever own.
 
 The notice is best-effort: a submission without a session, an unreachable
 Concordia, or a failed send never changes the verdict, fails the job, or blocks
-startup.
+startup. The review runner emits no interim Concordia message; the reporter is
+the sole owner of the terminal completion notice after the final state exists.
 
 ## Discord PR lifecycle notice
 

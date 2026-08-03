@@ -13,7 +13,7 @@ status: implemented
 related:
   - ../architecture.md
   - ./crash-recovery.md
-updated: 2026-08-02
+updated: 2026-08-04
 ---
 
 # pr-lifecycle-notice — PR ライフサイクルの外向き通知
@@ -95,4 +95,5 @@ token を一切保持しない。
 - `test/local-pr-service.test.mjs`: created → merged の順、復旧不能 PR が
   `review_failed` を 1 通だけ最終理由で出すこと
 - `test/review-completion-notice.test.mjs`: `review_passed` → auto-merge → 終局通知の
-  順序、action_required と worker 失敗の両方が `review_failed` になること
+  順序、action_required と worker 失敗の両方が `review_failed` になること、
+  レビュー runner が Concordia 通知を持たない (途中経過で 2 通目を出さない) こと

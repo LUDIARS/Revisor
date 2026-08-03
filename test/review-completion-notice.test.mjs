@@ -1,10 +1,28 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   notifyReviewCompletion,
   reviewCompletionMessage,
 } from "../src/review-completion-notice.mjs";
 import { LocalPrReporter } from "../src/local-reporter.mjs";
+
+test("the review runner leaves completion notification to the reporter", async () => {
+  const source = await readFile(new URL("../src/runner.mjs", import.meta.url), "utf8");
+  // 終局通知は最終状態が出揃った後に reporter が 1 通だけ出す。runner が途中経過を
+  // 送ると同じレビューで 2 通目が出るので、import も呼び出しも残っていないことを見る
+  // (単なる出現ではなく実際の使用を見るので、説明コメントでは落ちない)。
+  assert.doesNotMatch(
+    source,
+    /import\s*\{[^}]*\bnotifyConcordia\b[^}]*\}/,
+    "runner must not import a Concordia notifier",
+  );
+  assert.doesNotMatch(
+    source,
+    /\bnotifyConcordia\w*\s*\(/,
+    "runner must not send its own Concordia notice",
+  );
+});
 
 function pr(overrides = {}) {
   return {

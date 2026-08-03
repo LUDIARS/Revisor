@@ -3,7 +3,6 @@ import { resolveWorkspaceRoot } from "./catalog.mjs";
 import {
   loadConcordiaContext,
   loadPersistedConcordiaContext,
-  notifyConcordia,
   optionalConcordiaUrl,
   targetDomainQuestion,
 } from "./concordia-context.mjs";
@@ -324,12 +323,6 @@ export function createPrReviewRunner({
         };
       }
       if (initialLeakage.totalFindings > 0) {
-        await notifyConcordia({
-          baseUrl: concordiaUrl,
-          sessionId: authorContext?.sessionId,
-          text: `PRレビュー: ${request.repository}#${request.number} に情報流出の可能性がある追加箇所を ${initialLeakage.totalFindings} 件検出しました。外部レビュアーへ差分を送らず、人間の修正を待ちます。`,
-          transport,
-        });
         return {
           ...buildGateResult({
             ...gateInput,
@@ -346,14 +339,6 @@ export function createPrReviewRunner({
           humanQuestion: "Potential information leakage must be removed before automated review.",
         };
       }
-      if (needsTargetDomain(initial, docsOrConfigOnly)) {
-        await notifyConcordia({
-          baseUrl: concordiaUrl,
-          sessionId: authorContext?.sessionId,
-          text: `PRレビュー: ${request.repository}#${request.number} の差分に対象ドメインがありません。元の依頼文から spec/domain 定義の自動補完を試みます。`,
-          transport,
-        });
-      }
       const tier = reviewTier(plan);
       if (tier === "genius") {
         const geniusGuidance = await queryGenius({
@@ -364,12 +349,6 @@ export function createPrReviewRunner({
         const humanQuestion = needsTargetDomain(initial, docsOrConfigOnly)
           ? `${targetDomainQuestion(request.repository, request.number)} ${geniusQuestion}`
           : geniusQuestion;
-        await notifyConcordia({
-          baseUrl: concordiaUrl,
-          sessionId: authorContext?.sessionId,
-          text: `PRレビュー: ${request.repository}#${request.number} の決定的検査と Genius 判断カードの取得が完了しました。人間の判断を待ちます。`,
-          transport,
-        });
         return {
           ...buildGateResult({
             ...gateInput,
@@ -483,14 +462,6 @@ export function createPrReviewRunner({
       );
       const needsHuman = needsTargetDomain(finalAnalysis, finalDocsOrConfigOnly)
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
-      await notifyConcordia({
-        baseUrl: concordiaUrl,
-        sessionId: authorContext?.sessionId,
-        text: needsHuman
-          ? targetDomainQuestion(request.repository, request.number)
-          : `PRレビュー: ${request.repository}#${request.number} の相互モデルレビューと Anatomia 再解析が完了しました。`,
-        transport,
-      });
       return {
         ...buildGateResult({
           ...gateInput,
