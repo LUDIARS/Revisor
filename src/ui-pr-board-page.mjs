@@ -13,6 +13,10 @@ const BODY = `
       <p class="note">人間の判断が必要な PR を先頭に並べます。</p>
       <div class="filter-bar">
         <label class="check"><input id="filter-human" type="checkbox">判断が必要なものだけ表示</label>
+        <div class="field filter-projects">
+          <label for="filter-projects">プロジェクト（複数選択可・未選択はすべて）</label>
+          <select id="filter-projects" multiple></select>
+        </div>
         <span id="pr-counts" class="note"></span>
       </div>
       <div class="cards" id="pr-cards"></div>
@@ -26,6 +30,33 @@ const BODY = `
   </div>
 `;
 
+// 一覧に何を出すかの規則は DOM に触らない純関数として切り出す。 コントローラは
+// これを DOM へ結ぶだけになり、 フィルタの意味 (未選択は全件・複数選択は和集合・
+// 件数もフィルタ後の集合) を生成ソースの正規表現ではなく振る舞いで検証できる。
+export const PR_FILTER_SOURCE = `
+  function projectsOf(pullRequests) {
+    return [...new Set(pullRequests.map((pr) => pr.repository))]
+      .sort((left, right) => left.localeCompare(right));
+  }
+
+  function keepKnownProjects(selectedProjects, projects) {
+    return new Set([...selectedProjects].filter((project) => projects.includes(project)));
+  }
+
+  function sameProjectOptions(options, projects) {
+    return projects.length === options.length
+      && projects.every((project, index) => options[index].value === project);
+  }
+
+  function boardView(pullRequests, selectedProjects, humanOnly) {
+    const projectFiltered = selectedProjects.size === 0
+      ? pullRequests
+      : pullRequests.filter((pr) => selectedProjects.has(pr.repository));
+    const needsHuman = projectFiltered.filter((pr) => pr.decision.state === 'needs_human');
+    return { projectFiltered, needsHuman, visible: humanOnly ? needsHuman : projectFiltered };
+  }
+`;
+
 const CONTROLLER_SOURCE = `
   const prCards = document.querySelector('#pr-cards');
   const prCounts = document.querySelector('#pr-counts');
@@ -33,8 +64,10 @@ const CONTROLLER_SOURCE = `
   const prDetail = document.querySelector('#pr-detail');
   const prActionMessage = document.querySelector('#pr-action-message');
   const filterHuman = document.querySelector('#filter-human');
+  const filterProjects = document.querySelector('#filter-projects');
   let selectedPrId = null;
   let openPullRequests = [];
+  let selectedProjects = new Set();
 
   function actionsOf(pr) {
     const wrapper = element('div', 'actions');
@@ -94,14 +127,32 @@ const CONTROLLER_SOURCE = `
     renderBoard();
   }
 
+  function renderProjectFilter() {
+    const projects = projectsOf(openPullRequests);
+    selectedProjects = keepKnownProjects(selectedProjects, projects);
+    // Polling must not replace the native multiple-select while the operator is
+    // choosing projects. Rebuild only when the available project set changed.
+    if (sameProjectOptions(filterProjects.options, projects)) return;
+    filterProjects.replaceChildren(...projects.map((project) => {
+      const option = document.createElement('option');
+      option.value = project;
+      option.textContent = project;
+      option.selected = selectedProjects.has(project);
+      return option;
+    }));
+  }
+
   function renderBoard() {
-    const needsHuman = openPullRequests.filter((pr) => pr.decision.state === 'needs_human');
-    const visible = filterHuman.checked ? needsHuman : openPullRequests;
-    prCounts.textContent = '判断待ち ' + needsHuman.length + ' 件 / Open ' + openPullRequests.length + ' 件';
+    renderProjectFilter();
+    const { projectFiltered, needsHuman, visible } =
+      boardView(openPullRequests, selectedProjects, filterHuman.checked);
+    if (selectedPrId && !visible.some((pr) => pr.id === selectedPrId)) selectedPrId = null;
+    prCounts.textContent = '表示 ' + visible.length + ' 件 / 判断待ち ' + needsHuman.length
+      + ' 件 / Open ' + projectFiltered.length + ' 件';
     prEmpty.hidden = visible.length > 0;
     prEmpty.textContent = openPullRequests.length === 0
       ? 'Open な PR はありません。'
-      : '判断が必要な PR はありません。';
+      : '条件に一致する PR はありません。';
     prCards.replaceChildren(...visible.map((pr) => prCard(pr, selectedPrId, selectPullRequest)));
     renderDetail(openPullRequests.find((pr) => pr.id === selectedPrId) ?? null);
   }
@@ -124,11 +175,15 @@ const CONTROLLER_SOURCE = `
   }
 
   filterHuman.addEventListener('change', renderBoard);
+  filterProjects.addEventListener('change', () => {
+    selectedProjects = new Set([...filterProjects.selectedOptions].map((option) => option.value));
+    renderBoard();
+  });
   refresh();
   setInterval(refresh, 3000);
 `;
 
-const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${CONTROLLER_SOURCE}`;
+const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_FILTER_SOURCE}${CONTROLLER_SOURCE}`;
 
 export function renderPrBoardPage(sessionToken) {
   return renderPage({

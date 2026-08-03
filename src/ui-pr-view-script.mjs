@@ -44,51 +44,8 @@ export const PR_VIEW_SOURCE = `
     return element('span', 'badge ' + (tone || 'idle'), label);
   }
 
-  function chip(label, value) {
-    const node = element('span', 'chip');
-    node.append(document.createTextNode(text(label)));
-    if (value !== undefined) node.append(element('strong', null, value));
-    return node;
-  }
-
-  function chipRow(chips) {
-    const row = element('div', 'chips');
-    row.append(...chips.filter(Boolean));
-    return row;
-  }
-
-  function riskTone(band) {
-    if (band === 'low') return 'ok';
-    if (band === 'moderate') return 'warn';
-    return 'bad';
-  }
-
-  function meter(score, tone) {
-    const wrapper = element('div', 'meter-row');
-    const bar = element('div', 'meter ' + tone);
-    const fill = element('span');
-    fill.style.width = Math.max(2, Math.min(100, Number(score) || 0)) + '%';
-    bar.append(fill);
-    wrapper.append(bar);
-    return wrapper;
-  }
-
-  function riskLabel(decision) {
-    if (decision.riskScore === null) return 'リスク未算定';
-    return 'リスク ' + decision.riskScore + ' (' + text(decision.riskBandLabel) + ')';
-  }
-
-  function prCardChips(pr) {
-    const decision = pr.decision;
-    return chipRow([
-      decision.riskScore === null
-        ? chip('リスク', '未算定')
-        : chip('リスク', decision.riskScore + ' / 閾値 ' + decision.riskThreshold),
-      decision.runtimeVerificationRequired ? chip('動作確認', '必要') : null,
-      chip('テスト', testSummary(pr)),
-      pr.security ? chip('security', securitySummary(pr.security)) : null,
-      pr.reviewPlan ? chip('計画', planSummary(pr.reviewPlan)) : null,
-    ]);
+  function menuDecisionLabel(decision) {
+    return decision.state === 'needs_human' ? 'レビュー項目があります' : decision.label;
   }
 
   function prCard(pr, selectedId, select) {
@@ -97,35 +54,13 @@ export const PR_VIEW_SOURCE = `
     card.setAttribute('role', 'button');
     card.tabIndex = 0;
     const head = element('div', 'card-head');
-    head.append(badge(pr.decision.label, pr.decision.tone), element('span', 'card-sub', riskLabel(pr.decision)));
+    head.append(
+      element('span', 'pr-number', '#' + pr.number),
+      badge(menuDecisionLabel(pr.decision), pr.decision.tone),
+    );
     card.append(head);
-    card.append(element('div', 'card-title', pr.repository + ' #' + pr.number + ' ' + pr.title));
-    card.append(element(
-      'div',
-      'card-sub',
-      (pr.draft ? 'draft / ' : '') + pr.headRef + ' → ' + pr.baseRef + '  ·  ' + pr.updatedAt,
-    ));
-    if (pr.decision.riskScore !== null) {
-      card.append(meter(pr.decision.riskScore, riskTone(pr.decision.riskBand)));
-    }
-    card.append(prCardChips(pr));
-    if (pr.decision.blockers.length > 0) {
-      const list = element('ul', 'card-blockers');
-      for (const blocker of pr.decision.blockers.slice(0, 4)) {
-        list.append(element('li', null, blocker));
-      }
-      if (pr.decision.blockers.length > 4) {
-        list.append(element('li', null, '他 ' + (pr.decision.blockers.length - 4) + ' 件'));
-      }
-      card.append(list);
-    }
-    if (pr.autoMerge) {
-      card.append(element(
-        'div',
-        'card-sub ' + (pr.autoMerge.merged ? 'ok' : 'idle'),
-        (pr.autoMerge.merged ? '自動マージ済み: ' : '自動マージ見送り: ') + pr.autoMerge.reason,
-      ));
-    }
+    card.append(element('div', 'card-repository', pr.repository));
+    card.append(element('div', 'card-title', pr.title));
     const activate = () => select(pr.id);
     card.addEventListener('click', activate);
     card.addEventListener('keydown', (event) => {
@@ -135,25 +70,6 @@ export const PR_VIEW_SOURCE = `
       }
     });
     return card;
-  }
-
-  function testSummary(pr) {
-    if (!Array.isArray(pr.ci) || pr.ci.length === 0) return '—';
-    const passed = pr.ci.filter((entry) => entry.status === 'passed').length;
-    const skipped = pr.ci.filter((entry) => entry.status === 'skipped').length;
-    const ran = pr.ci.length - skipped;
-    return passed + '/' + ran + ' passed' + (skipped > 0 ? ' (省略 ' + skipped + ')' : '');
-  }
-
-  function securitySummary(security) {
-    if (security.status === 'skipped') return '省略';
-    if (security.status === 'passed') return 'clean';
-    return security.status + ' ' + security.totalFindings;
-  }
-
-  function planSummary(plan) {
-    const run = (plan.stages || []).filter((stage) => stage.run !== false).length;
-    return run + '/' + (plan.stages || []).length + ' ステージ';
   }
 
   function decisionOf(pr) {

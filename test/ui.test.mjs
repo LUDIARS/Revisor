@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderDashboardPage } from "../src/ui-dashboard-page.mjs";
-import { renderPrBoardPage } from "../src/ui-pr-board-page.mjs";
+import { PR_FILTER_SOURCE, renderPrBoardPage } from "../src/ui-pr-board-page.mjs";
 import { renderSettingsPage } from "../src/ui-settings-page.mjs";
 import { PR_VIEW_SOURCE } from "../src/ui-pr-view-script.mjs";
 import {
@@ -19,6 +19,8 @@ test("the top page is a two-pane PR board: list left, detail right", () => {
   assert.match(page, /class="pr-detail-pane"/);
   assert.ok(page.indexOf('class="pr-list-pane"') < page.indexOf('class="pr-detail-pane"'));
   assert.match(page, /判断が必要なものだけ表示/);
+  assert.match(page, /id="filter-projects" multiple/);
+  assert.match(page, /<label for="filter-projects">プロジェクト（複数選択可・未選択はすべて）<\/label>/);
   assert.match(page, /nonce="session-nonce"/);
   // 狭幅では 1 カラムへ畳む。
   assert.match(page, /@media \(max-width: 960px\)/);
@@ -39,12 +41,100 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /close\.textContent = '取り下げ'/);
 });
 
-test("the PR board renders PRs as cards and keeps the risk badge in the card head", () => {
+test("the compact PR menu puts the number before the review state and omits merge risk", () => {
   const page = renderPrBoardPage("session-nonce");
   assert.match(page, /class="cards" id="pr-cards"/);
-  assert.match(page, /badge\(pr\.decision\.label, pr\.decision\.tone\)/);
-  assert.match(page, /decision\.riskScore \+ ' \/ 閾値 ' \+ decision\.riskThreshold/);
+  assert.match(page, /function menuDecisionLabel\(decision\)/);
+  assert.match(page, /'レビュー項目があります'/);
+  assert.match(page, /element\('span', 'pr-number', '#' \+ pr\.number\)/);
+  assert.match(page, /badge\(menuDecisionLabel\(pr\.decision\), pr\.decision\.tone\)/);
+  assert.doesNotMatch(page, /function prCardChips\(pr\)/);
+  assert.doesNotMatch(page, /function riskLabel\(decision\)/);
   assert.match(page, /@media \(max-width: 700px\)/);
+});
+
+test("the generated PR board script stays syntactically valid", () => {
+  const page = renderPrBoardPage("session-nonce");
+  const script = page.match(/<script nonce="session-nonce">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script, "expected the PR board page to include its inline script");
+  assert.doesNotThrow(() => new Function(script));
+});
+
+// The filter rules are pure, so they are exercised as functions instead of being
+// matched in the generated source: a regex over the script passes for code that
+// never runs, and breaks on a rename that changes nothing the operator sees.
+function boardFilters() {
+  return new Function(`${PR_FILTER_SOURCE}
+    return { projectsOf, keepKnownProjects, sameProjectOptions, boardView };`)();
+}
+
+function fakePr(id, repository, state) {
+  return { id, number: Number(id), repository, title: id, decision: { state } };
+}
+
+test("no project selected means every project, and selecting projects unions them", () => {
+  const { boardView } = boardFilters();
+  const prs = [
+    fakePr("1", "Revisor", "needs_human"),
+    fakePr("2", "Cernere", "auto_ok"),
+    fakePr("3", "Actio", "needs_human"),
+  ];
+  const all = boardView(prs, new Set(), false);
+  assert.deepEqual(all.visible.map((pr) => pr.id), ["1", "2", "3"]);
+  const picked = boardView(prs, new Set(["Revisor", "Actio"]), false);
+  assert.deepEqual(picked.visible.map((pr) => pr.id), ["1", "3"]);
+});
+
+test("the counts and the human-only filter apply to the project-filtered set", () => {
+  const { boardView } = boardFilters();
+  const prs = [
+    fakePr("1", "Revisor", "needs_human"),
+    fakePr("2", "Revisor", "auto_ok"),
+    fakePr("3", "Cernere", "needs_human"),
+  ];
+  const board = boardView(prs, new Set(["Revisor"]), true);
+  // Open も判断待ちも Cernere を数えない。 表示は判断待ちの 1 件だけ。
+  assert.deepEqual(board.projectFiltered.map((pr) => pr.id), ["1", "2"]);
+  assert.deepEqual(board.needsHuman.map((pr) => pr.id), ["1"]);
+  assert.deepEqual(board.visible.map((pr) => pr.id), ["1"]);
+});
+
+test("the project filter rebuilds its options only when the project set changed", () => {
+  const { projectsOf, sameProjectOptions } = boardFilters();
+  const projects = projectsOf([
+    fakePr("1", "Revisor", "needs_human"),
+    fakePr("2", "Actio", "auto_ok"),
+    fakePr("3", "Revisor", "auto_ok"),
+  ]);
+  assert.deepEqual(projects, ["Actio", "Revisor"]);
+  // 3 秒ごとの更新で option を作り直すと、選択中の multiple-select が閉じる。
+  assert.equal(sameProjectOptions([{ value: "Actio" }, { value: "Revisor" }], projects), true);
+  assert.equal(sameProjectOptions([{ value: "Actio" }], projects), false);
+  assert.equal(sameProjectOptions([{ value: "Actio" }, { value: "Cernere" }], projects), false);
+});
+
+// A selected project whose last PR closed must drop out of the selection, or the
+// rebuilt options and the selection disagree and the board filters on a project
+// the operator can no longer see or unselect.
+test("a project that no longer has an open PR drops out of the selection", () => {
+  const { keepKnownProjects, boardView } = boardFilters();
+  const kept = keepKnownProjects(new Set(["Revisor", "Cernere"]), ["Actio", "Revisor"]);
+  assert.deepEqual([...kept], ["Revisor"]);
+  // 残った選択がそのまま絞り込みに効く。 空になれば未選択と同じく全件へ戻る。
+  const prs = [fakePr("1", "Revisor", "needs_human"), fakePr("2", "Actio", "auto_ok")];
+  assert.deepEqual(boardView(prs, kept, false).visible.map((pr) => pr.id), ["1"]);
+  assert.deepEqual(
+    boardView(prs, keepKnownProjects(new Set(["Cernere"]), ["Actio", "Revisor"]), false)
+      .visible.map((pr) => pr.id),
+    ["1", "2"],
+  );
+});
+
+test("the board wires the pure filters into its polling render", () => {
+  const page = renderPrBoardPage("session-nonce");
+  assert.match(page, /selectedProjects = keepKnownProjects\(selectedProjects, projects\)/);
+  assert.match(page, /sameProjectOptions\(filterProjects\.options, projects\)/);
+  assert.match(page, /boardView\(openPullRequests, selectedProjects, filterHuman\.checked\)/);
 });
 
 test("the detail view no longer dumps the raw Anatomia payload", () => {
@@ -145,6 +235,11 @@ function renderTests(pr) {
   return view(fakeDocument())(pr);
 }
 
+function renderCard(pr) {
+  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn prCard;`);
+  return view(fakeDocument())(pr, null, () => {});
+}
+
 function flatten(node) {
   const own = node.textContent ? [node.textContent] : [];
   return [...own, ...(node.children ?? []).flatMap(flatten)];
@@ -183,6 +278,32 @@ test("the test panel marks a truncated output as a tail", () => {
   const texts = flatten(rendered);
   assert.equal(texts.includes("unit (末尾のみ)"), true);
   assert.equal(texts.some((entry) => entry.includes("[truncated: kept the last 12288")), true);
+});
+
+// The menu card is the one place where dropping a field is invisible in the
+// source: `doesNotMatch` on a deleted helper still passes if the card grew a new
+// one. Rendering it and comparing the whole text list pins the 3 items exactly.
+test("the menu card carries the number, review state and project only", () => {
+  const texts = flatten(renderCard({
+    id: "pr-42",
+    number: 42,
+    repository: "Revisor",
+    title: "compact the PR menu",
+    decision: { state: "needs_human", label: "人間の判断が必要", tone: "bad", riskScore: 87 },
+  }));
+  assert.deepEqual(texts, ["#42", "レビュー項目があります", "Revisor", "compact the PR menu"]);
+});
+
+test("the menu card keeps the plain decision label for states other than needs_human", () => {
+  const card = renderCard({
+    id: "pr-7",
+    number: 7,
+    repository: "Revisor",
+    title: "自動マージ可の PR",
+    decision: { state: "auto_ok", label: "自動マージ可", tone: "ok", riskScore: 12 },
+  });
+  assert.deepEqual(flatten(card), ["#7", "自動マージ可", "Revisor", "自動マージ可の PR"]);
+  assert.equal(card.dataset.tone, "ok");
 });
 
 test("a review recorded before test output was kept still renders its table", () => {

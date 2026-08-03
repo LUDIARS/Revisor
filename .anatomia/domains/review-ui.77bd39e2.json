@@ -1,0 +1,38 @@
+{
+  "name": "review-ui",
+  "description": "Revisor のローカル PR を人間がトリアージする表示・操作境界。PR 一覧と詳細の 2 ペイン、判断状態を起点にしたカード、プロジェクト複数選択フィルタ、レスポンシブ表示を担当する。審査可否や状態遷移は持たず、API が返す公開済みの PR 表示モデルを描画するだけに留める。",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "(?:src/(?:ui-pr-board-page|ui-pr-view-script|ui-styles)|test/ui\\.test)\\.mjs$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:ui-pr-board-page|ui-pr-view-script|ui-styles)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/ui\\.test\\.mjs$"
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the review-ui domain: ローカル PR の判断待ちを選び、詳細と照合するための 2 ペイン UI。プロジェクト絞り込み・状態ラベル・レスポンシブ表示を含むが、審査判定や状態遷移は持たない。",
+  "source": "spec-draft",
+  "mechanics": [
+    "human-decision-triage",
+    "project-multi-filter",
+    "responsive-two-pane-detail"
+  ],
+  "specRefs": [
+    "human-decision-board — ページ構成",
+    "human-decision-board — 並び順とプロジェクトフィルタ",
+    "human-decision-board — カード表示",
+    "human-decision-board — レスポンシブ"
+  ],
+  "rationale": "表示と操作の責務を review-gate（判定）、local-workspace（Git 操作）、pr-notification（外部通知）から分離する。UI は API レスポンスを表示するだけで、マージ可否や PR の状態遷移を独自に決めない。UI はブラウザ側スクリプトを文字列として持つため関数の多くはテスト側に現れる。test/ui.test.mjs をメンバに含め、描画とフィルタ規則の検証をこのドメインへ帰属させる。",
+  "updatedAt": "2026-08-03T00:00:00.000Z"
+}

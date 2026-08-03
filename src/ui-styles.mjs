@@ -51,26 +51,17 @@ export const STYLES = `
     .card[data-tone="idle"] { border-left-color: #40506a; }
     .card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .card-title { font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
-    .card-sub { color: #aebbd0; font-size: .85rem; overflow-wrap: anywhere; }
-    .card-blockers { margin: 0; padding-left: 18px; color: #ffc2ca; font-size: .85rem; }
-    .card-blockers li { margin: 2px 0; overflow-wrap: anywhere; }
+    .card-repository { color: #aebbd0; font-size: .85rem; overflow-wrap: anywhere; }
+    .pr-number { color: #aebbd0; font-variant-numeric: tabular-nums; font-weight: 600; }
 
     .badge {
       display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
       border-radius: 999px; padding: 3px 12px; font-size: .8rem; font-weight: 600;
       border: 1px solid currentColor;
     }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chip {
-      display: inline-flex; gap: 6px; align-items: baseline; white-space: nowrap;
-      background: #111722; border: 1px solid #2d394a; border-radius: 6px;
-      padding: 2px 8px; font-size: .8rem; color: #aebbd0;
-    }
-    .chip strong { color: #edf1f7; font-weight: 600; }
-    .meter { height: 6px; border-radius: 999px; background: #111722; overflow: hidden; }
-    .meter span { display: block; height: 100%; border-radius: 999px; background: currentColor; }
-    .meter-row { display: grid; gap: 6px; }
     .filter-bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 8px 0 16px; }
+    .filter-projects { margin: 0; min-width: min(280px, 100%); }
+    .filter-projects select { min-height: 6.5rem; }
     .stage-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
     .stage-list li { display: flex; gap: 8px; align-items: baseline; font-size: .9rem; }
     .stage-list .stage-mark { width: 1.4em; flex: none; font-weight: 600; }
