@@ -1,0 +1,28 @@
+# Excubitor catalog fragment (Revisor)
+# 集積仕様: Excubitor catalog/FRAGMENTS.md (services.yaml > fragment > auto)
+services:
+  - code: revisor
+    name: Revisor (PR Review)
+    tier: personal
+    project_code: revisor
+    component: pr-review
+    port: 4240
+    repo: LUDIARS/Revisor
+    runtime: node
+    cwd: ${ARS_ROOT}/Revisor
+    command: node src/cli.mjs serve
+    allow_hot_reload: false
+    autostart: true
+    restart_policy: always
+    max_restart: 5
+    log_path: ${ARS_ROOT}/logs/revisor
+    health:
+      type: http
+      url: http://127.0.0.1:4240/health
+      interval_sec: 30
+    provides:
+      # `startRevisor` binds 127.0.0.1 only, so ${host} would hand consumers an
+      # address nothing is listening on. The literal IPv4 loopback also matches
+      # what `resolveServiceLoopbackUrl` builds and what the UI host policy
+      # admits without prior registration.
+      REVISOR_URL: http://127.0.0.1:${port}
