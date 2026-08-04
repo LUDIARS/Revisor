@@ -11,7 +11,6 @@ import {
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
-import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { renderDashboardPage } from "./ui-dashboard-page.mjs";
 import { renderPrBoardPage } from "./ui-pr-board-page.mjs";
 import { renderSettingsPage } from "./ui-settings-page.mjs";
@@ -114,14 +113,16 @@ export function createUiRequestHandler({
       }
       if (request.method === "PUT" && url.pathname === "/api/settings") {
         const body = await readJsonBody(request);
-        await resolveAnatomiaCli(body.anatomiaFolder);
-        const nextAllowedHosts = body.allowedHosts === undefined
-          ? allowedHosts
-          : normalizeAllowedHosts(body.allowedHosts);
-        const settings = writeSettings(body, env);
+        // Allowed hosts now belong to their own endpoint. Refuse the field here
+        // instead of dropping it: this response echoes `allowedHosts`, so a 200
+        // would report a host registration that never reached the config.
         if (body.allowedHosts !== undefined) {
-          allowedHosts = writeAllowedHosts(nextAllowedHosts, env);
+          throw new Error(
+            "Allowed hosts are saved from PUT /api/settings/allowed-hosts.",
+          );
         }
+        await resolveAnatomiaCli(body.anatomiaFolder);
+        const settings = writeSettings(body, env);
         if (typeof body.workflowToken === "string" && body.workflowToken.trim()) {
           writeWorkflowToken(body.workflowToken, env);
         }
@@ -130,6 +131,15 @@ export function createUiRequestHandler({
           allowedHosts,
           workflowTokenConfigured: hasWorkflowToken(env),
         });
+        return;
+      }
+      // This endpoint stays independent of the initial settings boundary:
+      // writeSettings requires a valid Anatomia folder, but a loopback operator
+      // may need to allow the external host used to finish that setup remotely.
+      if (request.method === "PUT" && url.pathname === "/api/settings/allowed-hosts") {
+        const body = await readJsonBody(request);
+        allowedHosts = writeAllowedHosts(body.allowedHosts, env);
+        sendJson(response, 200, { allowedHosts });
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/jobs") {

@@ -94,6 +94,14 @@ runtime architecture.
   controller, `ui-dashboard-page.mjs` the `/dashboard` operational panels, and
   the settings page every configuration form.
 
+Allowed-host registration is an independent settings boundary. Its dedicated
+UI-session-protected endpoint does not require the Anatomia folder or workflow
+token to be configured, so a loopback operator can authorize the external host
+needed to finish setup; the new host takes effect in the same running process.
+The general settings endpoint rejects the field rather than dropping it, so a
+success response never reports a host registration that did not happen. See
+`feature/ui-http-boundary.md`.
+
 The queue concurrency and worker-process count use the same validated setting,
 so the queue never admits more runs than the pool can execute.
 

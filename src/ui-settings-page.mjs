@@ -100,13 +100,20 @@ const BODY = `
         <input id="workflow-token" type="password" autocomplete="new-password">
         <span id="token-status" class="note"></span>
       </div>
+      <button type="submit">設定を保存</button>
+      <p id="message" role="status"></p>
+    </form>
+  </section>
+  <section>
+    <h2>許可Host</h2>
+    <form id="allowed-hosts-form">
       <div class="field">
         <label for="allowed-hosts">許可Host（Cloudflare Tunnel等、1行1件）</label>
         <textarea id="allowed-hosts" placeholder="revisor.example.com"></textarea>
-        <span class="note">localhost / 127.0.0.1 / ::1 は常に許可されます。登録値は暗号化configへ保存し、保存直後から反映します。</span>
+        <span class="note">localhost / 127.0.0.1 / ::1 は常に許可されます。登録値は暗号化configへ保存し、保存直後から反映します。初期設定が未完了でも、この欄だけ独立して保存できます。</span>
       </div>
-      <button type="submit">設定を保存</button>
-      <p id="message" role="status"></p>
+      <button type="submit">許可Hostを保存</button>
+      <p id="allowed-hosts-message" role="status"></p>
     </form>
   </section>
   <section>
@@ -138,6 +145,8 @@ const BODY = `
 const SCRIPT = `${CLIENT_REQUEST_SOURCE}
   const form = document.querySelector('#settings-form');
   const message = document.querySelector('#message');
+  const allowedHostsForm = document.querySelector('#allowed-hosts-form');
+  const allowedHostsMessage = document.querySelector('#allowed-hosts-message');
   const repositoryMessage = document.querySelector('#repository-message');
   const repositoryRows = document.querySelector('#repository-rows');
 
@@ -164,10 +173,10 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     document.querySelector('#security-effort').value = state.settings.securityScanEffort;
     document.querySelector('#security-model').value = state.settings.securityScanModel;
     document.querySelector('#security-max-cost').value = String(state.settings.securityMaxCostUsd);
-    document.querySelector('#allowed-hosts').value = state.allowedHosts.join('\\n');
     document.querySelector('#token-status').textContent = state.workflowTokenConfigured
       ? 'workflow token 設定済み'
       : 'workflow token 未設定';
+    return state;
   }
 
   async function refreshRepositories() {
@@ -211,8 +220,6 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           securityScanModel: document.querySelector('#security-model').value.trim(),
           securityMaxCostUsd: Number(document.querySelector('#security-max-cost').value),
           workflowToken: document.querySelector('#workflow-token').value,
-          allowedHosts: document.querySelector('#allowed-hosts').value
-            .split('\\n').map((host) => host.trim()).filter(Boolean),
         }),
       });
       document.querySelector('#workflow-token').value = '';
@@ -220,6 +227,25 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
       message.textContent = '保存しました。ワーカー数は次回起動から適用されます。';
     } catch (error) {
       message.textContent = error.message;
+    }
+  });
+
+  allowedHostsForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    allowedHostsMessage.textContent = '保存中…';
+    try {
+      const state = await request('/api/settings/allowed-hosts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          allowedHosts: document.querySelector('#allowed-hosts').value
+            .split('\\n').map((host) => host.trim()).filter(Boolean),
+        }),
+      });
+      document.querySelector('#allowed-hosts').value = state.allowedHosts.join('\\n');
+      allowedHostsMessage.textContent = '保存しました。即時反映済みです。';
+    } catch (error) {
+      allowedHostsMessage.textContent = error.message;
     }
   });
 
@@ -244,7 +270,11 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     }
   });
 
-  refreshSettings().catch((error) => { message.textContent = error.message; });
+  refreshSettings()
+    .then((state) => {
+      document.querySelector('#allowed-hosts').value = state.allowedHosts.join('\\n');
+    })
+    .catch((error) => { message.textContent = error.message; });
   refreshRepositories().catch((error) => { repositoryMessage.textContent = error.message; });
 `;
 

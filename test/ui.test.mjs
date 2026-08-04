@@ -202,6 +202,28 @@ test("the settings page owns the security scan effort and model", () => {
   assert.match(page, /<option value="xhigh">xhigh<\/option>/);
 });
 
+// `PUT /api/settings` now answers 400 when the body carries `allowedHosts`, so
+// one stray line in the general form would break every settings save. The
+// textarea is also filled on load only: refreshing after a general save would
+// discard an allowed-host edit that has not been submitted yet.
+test("the settings page saves allowed hosts from their own form", () => {
+  const page = renderSettingsPage("session-nonce");
+  assert.match(page, /id="allowed-hosts-form"/);
+  assert.match(page, /request\('\/api\/settings\/allowed-hosts', \{/);
+  const generalSave = page.slice(
+    page.indexOf("form.addEventListener"),
+    page.indexOf("allowedHostsForm.addEventListener"),
+  );
+  assert.ok(generalSave.length > 0);
+  assert.doesNotMatch(generalSave, /allowedHosts/);
+  const refresh = page.slice(
+    page.indexOf("async function refreshSettings"),
+    page.indexOf("async function refreshRepositories"),
+  );
+  assert.ok(refresh.length > 0);
+  assert.doesNotMatch(refresh, /#allowed-hosts/);
+});
+
 test("limits settings access to loopback and the UI session", () => {
   assert.equal(isLoopbackHost("127.0.0.1:4240"), true);
   assert.equal(isLoopbackHost("localhost:4240"), true);

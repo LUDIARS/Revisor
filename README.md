@@ -154,7 +154,8 @@ The loopback UI configures:
   accepted risk is stated;
 - an encrypted local workflow API token.
 - encrypted allowed hostnames for Cloudflare Tunnel or another local reverse
-  proxy. Loopback hostnames remain permanently allowed.
+  proxy. Loopback hostnames remain permanently allowed, and this field can be
+  saved independently before the rest of the initial setup is valid.
 
 A test case may declare which change kinds it covers (`kinds`), that it always
 runs (`always`), and that it is a runtime check (`runtime`). A case that declares
