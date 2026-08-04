@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 import { RevisorError } from "./errors.mjs";
 
@@ -30,11 +30,47 @@ export function readServicePort(catalogText, serviceCode) {
   return port;
 }
 
+/**
+ * Excubitor の catalog は「公開リポの services.yaml」と「各リポ直下の
+ * excubitor.catalog.yaml (断片)」の 2 ソースからなる。private な定義が公開リポへ
+ * 流出しないよう断片へ移されたサービスは services.yaml に現れないため、そこだけを
+ * 見ると解決できない (実例: Genius は Genius/excubitor.catalog.yaml にしか無く、
+ * genius-review が全リポのレビューで落ちていた)。断片は services.yaml と同じ
+ * サービスブロック形式なので、同じパーサをそのまま当てられる。
+ */
+function readServicePortFromFragments(workspaceRoot, serviceCode) {
+  let entries;
+  try {
+    entries = readdirSync(workspaceRoot, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const fragment = join(workspaceRoot, entry.name, "excubitor.catalog.yaml");
+    if (!existsSync(fragment)) continue;
+    try {
+      return readServicePort(readFileSync(fragment, "utf8"), serviceCode);
+    } catch {
+      // この断片は当該サービスを宣言していないだけ。次を見る。
+    }
+  }
+  return null;
+}
+
 export function resolveServicePort(cwd, serviceCode = "revisor") {
-  return readServicePort(
-    readFileSync(findExcubitorCatalog(cwd), "utf8"),
-    serviceCode,
-  );
+  const catalogPath = findExcubitorCatalog(cwd);
+  try {
+    return readServicePort(readFileSync(catalogPath, "utf8"), serviceCode);
+  } catch (error) {
+    if (!(error instanceof RevisorError)) throw error;
+    const fromFragment = readServicePortFromFragments(
+      dirname(dirname(dirname(catalogPath))),
+      serviceCode,
+    );
+    if (fromFragment !== null) return fromFragment;
+    throw error;
+  }
 }
 
 export function readInjectedServicePort(env, serviceCode) {

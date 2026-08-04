@@ -8,6 +8,7 @@ import {
   readInjectedServicePort,
   readServicePort,
   resolveManagedServicePort,
+  resolveServicePort,
 } from "../src/catalog.mjs";
 
 const FRAGMENT = readFileSync(
@@ -98,4 +99,41 @@ test("rejects an invalid injected port instead of falling back silently", () => 
       /invalid REVISOR_PORT/,
     );
   }
+});
+
+// private 定義の流出回避で断片へ移されたサービス (Genius 等) は services.yaml に
+// 現れない。そこだけを見ると解決できず、genius-review が全リポのレビューで落ちる。
+async function withFragmentCatalog(run) {
+  const workspace = await mkdtemp(join(tmpdir(), "revisor-fragment-"));
+  try {
+    const repo = join(workspace, "Revisor");
+    await mkdir(join(workspace, "Excubitor", "catalog"), { recursive: true });
+    await mkdir(repo, { recursive: true });
+    await mkdir(join(workspace, "Genius"), { recursive: true });
+    await writeFile(
+      join(workspace, "Excubitor", "catalog", "services.yaml"),
+      "services:\n  - code: revisor\n    port: 4240\n",
+    );
+    await writeFile(
+      join(workspace, "Genius", "excubitor.catalog.yaml"),
+      "services:\n  - code: genius\n    port: 4230\n",
+    );
+    await run(repo);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+test("resolves a service that only a repository fragment declares", async () => {
+  await withFragmentCatalog((repo) => {
+    assert.equal(resolveServicePort(repo, "genius"), 4230);
+    // 中央カタログ側は従来どおり優先される。
+    assert.equal(resolveServicePort(repo, "revisor"), 4240);
+  });
+});
+
+test("still reports an unregistered service after searching fragments", async () => {
+  await withFragmentCatalog((repo) => {
+    assert.throws(() => resolveServicePort(repo, "nowhere"), /not registered/);
+  });
 });
