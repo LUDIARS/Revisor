@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { resolveServicePort } from "./catalog.mjs";
+import { resolveManagedServicePort } from "./catalog.mjs";
 import { resolveConfigPath } from "./config.mjs";
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
@@ -94,7 +94,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
   const service = await startRevisor({
     cwd,
     env: process.env,
-    port: resolveServicePort(cwd),
+    port: resolveManagedServicePort(cwd, process.env),
   });
   registerShutdown(service.close);
   process.stdout.write(`Revisor: ${service.url}\n`);

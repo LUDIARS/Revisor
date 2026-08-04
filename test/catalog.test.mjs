@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { readServicePort } from "../src/catalog.mjs";
+import {
+  readInjectedServicePort,
+  readServicePort,
+  resolveManagedServicePort,
+} from "../src/catalog.mjs";
 
 const FRAGMENT = readFileSync(
   new URL("../excubitor.catalog.yaml", import.meta.url),
@@ -49,4 +56,46 @@ test("rejects missing service registration", () => {
     () => readServicePort("services:\n", "revisor"),
     /not registered/,
   );
+});
+
+// A workspace whose central catalog declares a port distinct from the injected
+// one, so each resolution order below names which source it actually used.
+async function withCentralCatalog(port, run) {
+  const workspace = await mkdtemp(join(tmpdir(), "revisor-catalog-"));
+  try {
+    const repo = join(workspace, "Revisor");
+    await mkdir(join(workspace, "Excubitor", "catalog"), { recursive: true });
+    await mkdir(repo, { recursive: true });
+    await writeFile(
+      join(workspace, "Excubitor", "catalog", "services.yaml"),
+      `services:\n  - code: revisor\n    port: ${port}\n`,
+    );
+    await run(repo);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+test("uses the port Excubitor injects from its aggregated catalog", async () => {
+  assert.equal(readInjectedServicePort({ REVISOR_PORT: "4240" }, "revisor"), 4240);
+  await withCentralCatalog(4241, (repo) => {
+    assert.equal(resolveManagedServicePort(repo, { REVISOR_PORT: "4240" }), 4240);
+  });
+});
+
+// Direct CLI launches get no injected port, so the central catalog stays the
+// compatibility path for them.
+test("falls back to the central catalog when no port is injected", async () => {
+  await withCentralCatalog(4241, (repo) => {
+    assert.equal(resolveManagedServicePort(repo, {}), 4241);
+  });
+});
+
+test("rejects an invalid injected port instead of falling back silently", () => {
+  for (const value of ["", "0", "65536", "42.4", "not-a-port"]) {
+    assert.throws(
+      () => readInjectedServicePort({ REVISOR_PORT: value }, "revisor"),
+      /invalid REVISOR_PORT/,
+    );
+  }
 });

@@ -28,6 +28,9 @@ runtime architecture.
   without CORS. Reads through a configured non-loopback host, and every mutation,
   still require the workflow token — it stays where it actually matters.
 - `local-contracts.mjs` validates repository, test-case, and PR inputs.
+- `catalog.mjs` owns managed-service bootstrap location resolution. Excubitor
+  injects `REVISOR_PORT` from its aggregated catalog; direct CLI starts fall back
+  to the central catalog. See `spec/feature/service-bootstrap.md`.
 - `state-store.mjs` atomically persists repository and local PR projections.
 - `local-pr-service.mjs` orchestrates registration, submission, re-review,
   startup recovery of interrupted reviews, and merge.
