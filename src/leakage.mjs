@@ -90,6 +90,20 @@ export function redactSecretLines(text) {
     .join("\n");
 }
 
+export function scanTextForLeaks(text, path = "metadata") {
+  if (typeof text !== "string") throw new TypeError("Leakage scan requires text.");
+  const findings = [];
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length && findings.length < MAX_FINDINGS; index += 1) {
+    const line = lines[index];
+    for (const rule of rulesForLine(line)) {
+      findings.push({ rule, path, line: index + 1 });
+      if (findings.length >= MAX_FINDINGS) break;
+    }
+  }
+  return { findings, totalFindings: findings.length };
+}
+
 export function scanAddedDiffForLeaks(unifiedDiff) {
   if (typeof unifiedDiff !== "string") {
     throw new TypeError("Leakage scan requires a unified diff string.");

@@ -85,6 +85,8 @@ export function pullRequestLifecycleMessage(event, pullRequest) {
     if (pullRequest.mergeCommitSha) {
       lines.push(`マージコミット: ${plain(pullRequest.mergeCommitSha).slice(0, 12)}`);
     }
+    if (pullRequest.releaseTag) lines.push(`リリース: ${plain(pullRequest.releaseTag)}`);
+    if (pullRequest.releaseUrl) lines.push(plain(pullRequest.releaseUrl));
   } else {
     throw new TypeError(`Unknown PR lifecycle event '${event}'.`);
   }

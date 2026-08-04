@@ -174,7 +174,15 @@ test("renders a dedicated token-free settings page", () => {
   assert.match(page, /許可Host/);
   assert.match(page, /暗号化config/);
   assert.match(page, /プロダクト登録/);
-  assert.doesNotMatch(page, /GitHub App ID/);
+  assert.match(page, /GitHub App ID/);
+  assert.match(page, /GitHub App 秘密鍵/);
+  assert.match(page, /githubAppPrivateKey: document\.querySelector\('#github-app-private-key'\)/);
+  const settingsForm = page.slice(
+    page.indexOf('<form id="settings-form">'),
+    page.indexOf('<form id="allowed-hosts-form">'),
+  );
+  assert.match(settingsForm, /id="github-app-id"/);
+  assert.match(settingsForm, /id="github-app-private-key"/);
   assert.match(page, /nonce="session-nonce"/);
   assert.doesNotMatch(page, /origin-secret/);
   assert.doesNotMatch(page, /<h2>PR の判断待ち<\/h2>/);

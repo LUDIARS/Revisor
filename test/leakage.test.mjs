@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { redactSecretLines, scanAddedDiffForLeaks } from "../src/leakage.mjs";
+import {
+  redactSecretLines,
+  scanAddedDiffForLeaks,
+  scanTextForLeaks,
+} from "../src/leakage.mjs";
 
 function diff(path, lines) {
   return [
@@ -21,6 +25,17 @@ test("finds known tokens without returning their values", () => {
     rule: "github-token",
     path: "src/config.mjs",
     line: 1,
+  }]);
+  assert.equal(JSON.stringify(result).includes(secret), false);
+});
+
+test("scans release metadata without retaining matched values", () => {
+  const secret = "ghp_" + "B".repeat(36);
+  const result = scanTextForLeaks(`release\n${secret}`, "release-notes");
+  assert.deepEqual(result.findings, [{
+    rule: "github-token",
+    path: "release-notes",
+    line: 2,
   }]);
   assert.equal(JSON.stringify(result).includes(secret), false);
 });

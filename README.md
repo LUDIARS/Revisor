@@ -3,10 +3,10 @@
 Revisor is the local control plane for **LUDIARS LOCAL PR WORKFLOW**. Feature
 branches stay on the workstation: Revisor records GitHub-compatible pull
 request metadata, runs registered CI and Anatomia analysis, performs an
-opposite-provider review, and squash merges approved changes into local
-`main`.
+opposite-provider review, and publishes approved squash commits to `main` with
+an annotated semantic-version tag and GitHub Release.
 
-Only `main` is eligible for a later remote push. A managed pre-push hook scans
+Only the reviewed squash commit on `main` is eligible for remote publication. A managed pre-push hook rejects direct pushes and scans
 the outgoing `main` diff for high-confidence leakage. Unsafe pushes are
 blocked as `amend_required`; after the local commit is amended, the next push
 is scanned again. Any feature-branch create or update is rejected before data
@@ -40,7 +40,10 @@ leaves the workstation.
 8. A pull request at or below the risk threshold the operator accepted merges
    automatically; everything else waits for a person. Revisor creates one squash
    commit, runs the final Codex Security scan against the exact squashed diff,
-   and fast-forwards the local base branch. It does not push.
+   increments the patch tag (or adopts the next major/minor version declared in
+   local Revisor state), atomically pushes the base and tag
+   with the Revisor GitHub App, creates the Release Notes, and then fast-forwards
+   the local base branch.
 
 A merge is attempted when the review completes and again on a sweep every 60
 seconds, because a pull request that was not mergeable at the moment its review
@@ -86,6 +89,8 @@ their severity, but never source excerpts or reproduction steps.
   queue behind the scanner's machine-wide state database (scan history and
   resume are given up; Revisor deletes the report artifacts anyway).
 - an existing Anatomia checkout
+- a GitHub App installed on every published repository with Contents write
+  permission (and Workflows write when workflow files may be released)
 - an Excubitor catalog registration when using `revisor serve`
 
 ## Commands
@@ -93,7 +98,28 @@ their severity, but never source excerpts or reproduction steps.
 ```text
 revisor serve
 revisor config path
+revisor config github-app status
+revisor config github-app set --app-id <id> --private-key-stdin
+revisor config github-app remove
+revisor version show --repo <path>
+revisor version set <MAJOR.MINOR.PATCH> --repo <path>
 ```
+
+`dw` is a compatibility alias for this same Revisor CLI. It no longer owns a
+separate GitHub command implementation or configuration. Existing `dw ui`
+usage starts the Revisor UI; managed operation still starts the `revisor`
+service through Excubitor.
+
+Versioning has one current line and no LTS branches. Each repository tracks an
+`uninitialized` `.revisor-version`; registration marks it `skip-worktree`.
+Specify the repository's initial version separately before its first push with
+`revisor version set`. A normal merge then advances patch automatically. Set
+the local file to the next `X.0.0` or `X.Y.0` before a major/minor merge; Revisor
+uses it for the tag and writes the successful version back after publication.
+Older tags and Releases remain immutable history only.
+GitHub Release bodies are the release-note source of truth. Major and minor
+Releases also state the version transition and link the previous-tag comparison;
+release notes are not duplicated into the repository Wiki.
 
 `guard-push` is an internal command used only by Revisor-managed Git hooks.
 
@@ -153,6 +179,8 @@ The loopback UI configures:
   and whether a required human run blocks it. Automatic merging is off until the
   accepted risk is stated;
 - an encrypted local workflow API token.
+- encrypted GitHub App credentials used only for the merge-time base/tag push
+  and Release creation;
 - encrypted allowed hostnames for Cloudflare Tunnel or another local reverse
   proxy. Loopback hostnames remain permanently allowed, and this field can be
   saved independently before the rest of the initial setup is valid.

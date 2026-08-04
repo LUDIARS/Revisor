@@ -2,9 +2,10 @@
 
 ## Purpose
 
-Revisor owns the local PR, CI, review, merge, and outgoing-main leakage-gate
-lifecycle. Hosted pull requests and remote feature branches are outside the
-runtime architecture.
+Revisor owns the local PR, CI, review, merge, release publication, and
+outgoing-main leakage-gate lifecycle. Hosted pull requests and remote feature
+branches are outside the runtime architecture. GitHub receives only the
+released base commit, its semantic version tag, and its Release Notes.
 
 ## Components
 
@@ -73,7 +74,16 @@ runtime architecture.
   the scanner's default state directory is shared machine-wide and its SQLite
   write lock would serialise the workers.
 - `local-merge.mjs` creates a squash commit in a disposable worktree, scans that
-  exact squashed diff, and advances the local base branch.
+  exact squashed diff, publishes it, and advances the local base branch only
+  after publication succeeds.
+- `github-app.mjs` owns GitHub App JWT and short-lived installation tokens.
+- `authenticated-git.mjs` owns secret-safe authenticated Git process transport.
+- `git-publication.mjs` owns local/remote release refs and atomic base-plus-tag
+  publication policy.
+- `release-version.mjs` owns the stable semantic version sequence.
+- `local-version.mjs` owns the tracked, skip-worktree local version projection.
+- `release-notes.mjs` owns the bounded local-PR-to-Release projection.
+- `release-publisher.mjs` orchestrates one idempotent remote publication.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe
   outgoing `main` updates as `amend_required`.
 - `concordia-context.mjs` owns optional live and persisted author context, the
@@ -196,6 +206,9 @@ See `spec/feature/pr-lifecycle-notice.md` for the `pr-notification` domain.
 ## Data boundaries
 
 - Feature branches, diffs, and matched leakage values are never sent to GitHub.
+- A merged PR title and body become GitHub Release Notes only after the same
+  high-confidence credential patterns pass; author, session, reviewer, and
+  local branch metadata remain local.
 - Test stdout/stderr is process-local except for a failed case, whose output is
   kept so the board can say why it failed. It is redacted line by line with the
   leakage rules before it is stored and truncated to its last 12 KB, and the
@@ -235,12 +248,27 @@ verification, merges automatically once, and records the outcome either way.
 Automatic merging is off by default. `spec/feature/merge-risk.md` is
 authoritative.
 
-## Merge and push boundary
+## Merge and publication boundary
 
 Only `Open / Test OK` PRs can merge. Revisor verifies that both base and
 reviewed head still match their recorded SHAs, builds one squash commit in a
 disposable worktree, scans that commit against the recorded base SHA, then
-compare-and-swap advances the local base ref. It never pushes.
+publishes the commit and its annotated semantic-version tag atomically through
+the Revisor GitHub App, creates the GitHub Release, and only then
+compare-and-swap advances the local base ref and records the PR as merged.
+It never publishes a feature branch.
+
+The remote base must be contained in the local source-of-truth base; it may be
+behind, but it may not diverge. There is no force-push, PAT, anonymous, or
+local-only fallback. GitHub is not used for
+hosted PRs, Actions dispatch, repository administration, or branch-protection
+configuration. See `spec/feature/remote-publication.md`.
+
+Revisor advances one latest release line. Each registered repository has a
+tracked `.revisor-version` ignored with `skip-worktree`; its initial value is
+specified separately before the first publication. Normal merges increment
+patch, while changing that local file to the next major/minor boundary declares
+that transition. There are no LTS or maintenance branches.
 
 A pull request that will never merge is closed instead of being left open: the
 status moves `open → merged` or `open → closed`, never back, and a terminal pull
@@ -267,10 +295,11 @@ pre-merge scan already covers those edits. Findings at or above the configured
 severity block the merge, and a scan that does not complete blocks it as well
 rather than reading as a pass.
 
-The managed pre-push hook inspects only outgoing updates to the registered base
-branch and rejects every non-base branch create/update. A main finding blocks
-the push and records `amend_required`; the unsafe SHA is not sent. An amended
-commit must pass a subsequent hook invocation.
+The managed pre-push hook rejects every non-base branch create/update and every
+direct base/tag push. A Revisor-owned publication marks its release refs; the
+hook scans the base update before allowing them. A finding blocks the push and records
+`amend_required`; the unsafe SHA is not sent. An amended commit must pass a
+subsequent merge/publication attempt.
 Existing effective hooks are chained and repository-local hook configuration
 does not overwrite the shared hook.
 

@@ -154,6 +154,10 @@ export class LocalPrStore {
       status: "open",
       checkStatus: "queued",
       mergeCommitSha: null,
+      mergeError: null,
+      releaseTag: null,
+      releaseUrl: null,
+      publishedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };

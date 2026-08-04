@@ -33,6 +33,8 @@ export function reviewCompletionMessage(pullRequest) {
       if (pullRequest.mergeCommitSha) {
         lines.push(`マージコミット: ${String(pullRequest.mergeCommitSha).slice(0, 12)}`);
       }
+      if (pullRequest.releaseTag) lines.push(`リリース: ${pullRequest.releaseTag}`);
+      if (pullRequest.releaseUrl) lines.push(String(pullRequest.releaseUrl));
     } else {
       lines.push(`✅ Revisor レビュー完了: ${label} は Open / Test OK です (マージ可能)。`);
       // Test OK のまま open な PR は Concordia の TestWorkflow フォーラムに載る。

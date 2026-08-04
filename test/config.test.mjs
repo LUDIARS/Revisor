@@ -7,9 +7,13 @@ import {
   readAllowedHosts,
   readSettings,
   hasWorkflowToken,
+  hasGitHubAppCredentials,
+  readGitHubAppCredentials,
   readWorkflowToken,
   writeAllowedHosts,
   writeWorkflowToken,
+  writeGitHubAppCredentials,
+  removeGitHubAppCredentials,
   writeSettings,
 } from "../src/config.mjs";
 
@@ -102,6 +106,28 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.equal(rawConfig.includes("workflow-secret"), false);
     assert.equal(rawConfig.includes("revisor.example.com"), false);
     assert.equal(readSettings(state.env).workerCount, 3);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("encrypts and removes GitHub App credentials", () => {
+  const state = fixture();
+  const privateKey = [
+    ["-----BEGIN", "PRIVATE KEY-----"].join(" "),
+    "test-only",
+    ["-----END", "PRIVATE KEY-----"].join(" "),
+  ].join("\n");
+  try {
+    assert.equal(hasGitHubAppCredentials(state.env), false);
+    assert.deepEqual(
+      writeGitHubAppCredentials({ appId: "4436890", privateKey }, state.env),
+      { appId: "4436890" },
+    );
+    assert.deepEqual(readGitHubAppCredentials(state.env), { appId: "4436890", privateKey });
+    assert.equal(readFileSync(state.path, "utf8").includes(privateKey), false);
+    removeGitHubAppCredentials(state.env);
+    assert.equal(hasGitHubAppCredentials(state.env), false);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

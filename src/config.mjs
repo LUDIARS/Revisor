@@ -15,6 +15,7 @@ const LOCAL_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CONFIG_PATH_ENV = "REVISOR_CONFIG_PATH";
 const KEY_PATH_ENV = "REVISOR_KEY_PATH";
 const MASTER_KEY_ENV = "REVISOR_MASTER_KEY";
+const GITHUB_APP_PRIVATE_KEY_PATTERN = /^-----BEGIN (?:RSA )?PRIVATE KEY-----/;
 
 const SECURITY_SEVERITIES = new Set(["critical", "high", "medium", "low"]);
 const SECURITY_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
@@ -323,6 +324,74 @@ export function writeWorkflowToken(token, env = process.env) {
 export function hasWorkflowToken(env = process.env) {
   try {
     readWorkflowToken(env);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readGitHubAppCredentials(env = process.env) {
+  const configPath = resolveConfigPath(env);
+  const config = readConfig(env);
+  const blob = config.secrets.githubAppCredentials;
+  const legacyBlob = config.secrets.githubAppPrivateKey;
+  if (!isEncryptedBlob(blob) && !isEncryptedBlob(legacyBlob)) {
+    throw new RevisorError("GitHub App credentials are not configured.");
+  }
+  try {
+    const masterKey = readMasterKey(configPath, env);
+    const value = isEncryptedBlob(blob)
+      ? JSON.parse(decryptString(blob, masterKey))
+      : {
+          appId: config.settings.githubAppId,
+          privateKey: decryptString(legacyBlob, masterKey),
+        };
+    const appId = String(value?.appId ?? "").trim();
+    const privateKey = String(value?.privateKey ?? "").trim();
+    if (!/^\d+$/.test(appId) || Number(appId) < 1) throw new Error("invalid App id");
+    if (!GITHUB_APP_PRIVATE_KEY_PATTERN.test(privateKey)) {
+      throw new Error("invalid PEM private key");
+    }
+    return { appId, privateKey };
+  } catch (error) {
+    throw new RevisorError("GitHub App credentials could not be decrypted.", {
+      cause: error,
+    });
+  }
+}
+
+export function writeGitHubAppCredentials(credentials, env = process.env) {
+  const appId = String(credentials?.appId ?? "").trim();
+  const privateKey = String(credentials?.privateKey ?? "").trim();
+  if (!/^\d+$/.test(appId) || Number(appId) < 1) {
+    throw new RevisorError("GitHub App id must be a positive integer.");
+  }
+  if (!GITHUB_APP_PRIVATE_KEY_PATTERN.test(privateKey)) {
+    throw new RevisorError("GitHub App private key must be a PEM private key.");
+  }
+  const configPath = resolveConfigPath(env);
+  const config = readConfig(env);
+  config.secrets.githubAppCredentials = encryptString(
+    JSON.stringify({ appId, privateKey }),
+    readOrCreateMasterKey(configPath, env),
+  );
+  delete config.secrets.githubAppPrivateKey;
+  delete config.settings.githubAppId;
+  writeConfig(config, env);
+  return { appId };
+}
+
+export function removeGitHubAppCredentials(env = process.env) {
+  const config = readConfig(env);
+  delete config.secrets.githubAppCredentials;
+  delete config.secrets.githubAppPrivateKey;
+  delete config.settings.githubAppId;
+  writeConfig(config, env);
+}
+
+export function hasGitHubAppCredentials(env = process.env) {
+  try {
+    readGitHubAppCredentials(env);
     return true;
   } catch {
     return false;

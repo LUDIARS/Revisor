@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
+import { findTaggedMerge } from "./git-publication.mjs";
+import { assertLocalVersionUnchanged } from "./local-version.mjs";
+import { publishMergedPullRequest } from "./release-publisher.mjs";
 import {
   advanceLocalBranch,
   cleanupWorktrees,
@@ -96,6 +99,7 @@ export async function squashMergeLocalPullRequest({
   pullRequest,
   env = process.env,
   scan = configuredSecurityScan,
+  publish = publishMergedPullRequest,
 }) {
   if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
     throw new Error("Only an Open / Test OK local PR can be squash merged.");
@@ -114,6 +118,7 @@ export async function squashMergeLocalPullRequest({
     "--verify",
     `refs/heads/${pullRequest.headRef}`,
   ]);
+  await assertLocalVersionUnchanged(repository.rootPath, baseSha, headSha);
   if (headSha.toLowerCase() !== pullRequest.reviewedHeadSha.toLowerCase()) {
     // rebase で SHA だけ変わったヘッドは審査結果を引き継ぐ。差分内容が審査時と
     // 変わっていたら、それは未審査のコードなので再審査へ。
@@ -123,6 +128,32 @@ export async function squashMergeLocalPullRequest({
       headSha,
       baseSha,
     );
+  }
+  // A process can stop after the atomic GitHub push or Release creation and
+  // before local state is marked merged. The annotated version tag keeps that
+  // prepared commit reachable, so retry completes publication instead of
+  // generating a second squash commit for the same reviewed PR.
+  const prepared = await findTaggedMerge(repository.rootPath, pullRequest.id);
+  if (prepared) {
+    const expectedBaseSha = await git(repository.rootPath, [
+      "rev-parse",
+      `${prepared.mergeCommitSha}^`,
+    ]);
+    const publication = await publish({
+      repository,
+      pullRequest,
+      expectedBaseSha,
+      mergeCommitSha: prepared.mergeCommitSha,
+      preparedTag: prepared.tag,
+      env,
+    });
+    await advanceLocalBranch(
+      repository.rootPath,
+      pullRequest.baseRef,
+      baseSha,
+      prepared.mergeCommitSha,
+    );
+    return publication;
   }
   const root = await mkdtemp(join(tmpdir(), "revisor-squash-merge-"));
   const worktrees = {
@@ -160,13 +191,20 @@ export async function squashMergeLocalPullRequest({
       env,
       scan,
     });
+    const publication = await publish({
+      repository,
+      pullRequest,
+      expectedBaseSha: baseSha,
+      mergeCommitSha,
+      env,
+    });
     await advanceLocalBranch(
       repository.rootPath,
       pullRequest.baseRef,
       baseSha,
       mergeCommitSha,
     );
-    return mergeCommitSha;
+    return publication;
   } finally {
     await cleanupWorktrees(repository.rootPath, worktrees);
   }

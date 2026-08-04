@@ -1,15 +1,27 @@
 #!/usr/bin/env node
 import { resolveManagedServicePort } from "./catalog.mjs";
-import { resolveConfigPath } from "./config.mjs";
+import {
+  hasGitHubAppCredentials,
+  removeGitHubAppCredentials,
+  resolveConfigPath,
+  writeGitHubAppCredentials,
+} from "./config.mjs";
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
 import { startRevisor } from "./server.mjs";
+import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 
 function printHelp() {
   process.stdout.write([
     "Usage:",
     "  revisor serve",
+    "  dw ui  # compatibility alias for revisor serve",
     "  revisor config path",
+    "  revisor config github-app status",
+    "  revisor config github-app set --app-id <id> --private-key-stdin",
+    "  revisor config github-app remove",
+    "  revisor version show --repo <path>",
+    "  revisor version set <MAJOR.MINOR.PATCH> --repo <path>",
     "  revisor guard-push --repo <path> --state <path>  # managed hook only",
     "",
   ].join("\n"));
@@ -54,6 +66,43 @@ export async function main(args, { stdin = process.stdin } = {}) {
     process.stdout.write(`${resolveConfigPath(process.env)}\n`);
     return 0;
   }
+  if (args[0] === "config" && args[1] === "github-app" && args[2] === "status") {
+    process.stdout.write(hasGitHubAppCredentials(process.env) ? "configured\n" : "not configured\n");
+    return 0;
+  }
+  if (args[0] === "config" && args[1] === "github-app" && args[2] === "set") {
+    const appId = option(args, "--app-id");
+    if (!appId || !args.includes("--private-key-stdin")) {
+      throw new Error("github-app set requires --app-id and --private-key-stdin.");
+    }
+    writeGitHubAppCredentials({ appId, privateKey: await readStdin(stdin) }, process.env);
+    process.stdout.write("GitHub App credentials saved.\n");
+    return 0;
+  }
+  if (
+    args[0] === "config"
+    && args[1] === "github-app"
+    && args[2] === "remove"
+    && args.length === 3
+  ) {
+    removeGitHubAppCredentials(process.env);
+    process.stdout.write("GitHub App credentials removed.\n");
+    return 0;
+  }
+  if (args[0] === "version" && args[1] === "show") {
+    const repoPath = option(args, "--repo") ?? process.cwd();
+    process.stdout.write(`${await readLocalVersion(repoPath, { allowUninitialized: true })}\n`);
+    return 0;
+  }
+  if (args[0] === "version" && args[1] === "set") {
+    const repoPath = option(args, "--repo") ?? process.cwd();
+    if (!args[2] || args[2].startsWith("--")) {
+      throw new Error("version set requires MAJOR.MINOR.PATCH.");
+    }
+    const version = await writeLocalVersion(repoPath, args[2]);
+    process.stdout.write(`${version}\n`);
+    return 0;
+  }
   if (args[0] === "guard-push") {
     const repoPath = option(args, "--repo");
     const statePath = option(args, "--state");
@@ -66,6 +115,12 @@ export async function main(args, { stdin = process.stdin } = {}) {
       input: await readStdin(stdin),
     });
     if (!result.allowed) {
+      if (result.publicationRequired) {
+        process.stderr.write(
+          "Revisor blocked a direct main push. Merge and publish the reviewed local PR through Revisor.\n",
+        );
+        return 1;
+      }
       if (Array.isArray(result.blockedRefs) && result.blockedRefs.length > 0) {
         process.stderr.write(
           `Revisor blocked non-main branch push: ${result.blockedRefs.join(", ")}. `
@@ -87,7 +142,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
     );
     return 0;
   }
-  if (args[0] !== "serve" || args.length !== 1) {
+  if ((args[0] !== "serve" && args[0] !== "ui") || args.length !== 1) {
     throw new Error(`Unknown command '${args.join(" ")}'.`);
   }
   const cwd = process.cwd();

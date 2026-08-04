@@ -61,7 +61,8 @@ function repositoryFixture() {
   const repoPath = join(directory, "Product");
   initRepository(repoPath);
   writeFileSync(join(repoPath, "product.txt"), "base\n", "utf8");
-  git(repoPath, "add", "product.txt");
+  writeFileSync(join(repoPath, ".revisor-version"), "0.1.0\n", "utf8");
+  git(repoPath, "add", "product.txt", ".revisor-version");
   git(repoPath, "commit", "-m", "base");
   const baseSha = git(repoPath, "rev-parse", "HEAD");
   git(repoPath, "checkout", "-b", "feat/local");
@@ -85,6 +86,14 @@ function passingSecurityScan() {
   });
 }
 
+function passingPublisher() {
+  return async ({ mergeCommitSha }) => ({
+    mergeCommitSha,
+    releaseTag: "v0.1.0",
+    releaseUrl: "https://github.com/LUDIARS/Product/releases/tag/v0.1.0",
+  });
+}
+
 test("registers tests, queues a local-only PR, and squash merges it", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
@@ -100,6 +109,7 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     },
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
     securityScan: passingSecurityScan(),
+    publisher: passingPublisher(),
     notifyLifecycle: async (event, pullRequest) => {
       lifecycle.push([event, pullRequest.status]);
     },
@@ -135,6 +145,7 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     });
     const merged = await service.mergePullRequest(pullRequest.id);
     assert.equal(merged.status, "merged");
+    assert.equal(merged.releaseTag, "v0.1.0");
     assert.equal(
       readFileSync(join(fixture.repoPath, "product.txt"), "utf8").replace(/\r\n/g, "\n"),
       "base\nfeature\n",
@@ -310,6 +321,7 @@ async function registeredService(fixture, store, securityScan = passingSecurityS
     queue: { async submit() { return { id: "job-1" }; } },
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
     securityScan,
+    publisher: passingPublisher(),
   });
   await service.registerRepository({
     repository: "LUDIARS/Product",

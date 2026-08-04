@@ -100,6 +100,19 @@ const BODY = `
         <input id="workflow-token" type="password" autocomplete="new-password">
         <span id="token-status" class="note"></span>
       </div>
+      <div class="field">
+        <label for="github-app-id">GitHub App ID（秘密鍵を変更するときに入力）</label>
+        <input id="github-app-id" inputmode="numeric" pattern="[0-9]+">
+      </div>
+      <div class="field">
+        <label for="github-app-private-key">GitHub App 秘密鍵（変更時のみ入力）</label>
+        <textarea id="github-app-private-key" autocomplete="off"></textarea>
+        <span id="github-app-status" class="note"></span>
+        <label class="check">
+          <input id="remove-github-app" type="checkbox">
+          保存済みGitHub App認証を削除する
+        </label>
+      </div>
       <button type="submit">設定を保存</button>
       <p id="message" role="status"></p>
     </form>
@@ -176,6 +189,9 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     document.querySelector('#token-status').textContent = state.workflowTokenConfigured
       ? 'workflow token 設定済み'
       : 'workflow token 未設定';
+    document.querySelector('#github-app-status').textContent = state.githubAppConfigured
+      ? 'GitHub App 設定済み'
+      : 'GitHub App 未設定（マージ時のpushとRelease作成は失敗します）';
     return state;
   }
 
@@ -220,9 +236,15 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           securityScanModel: document.querySelector('#security-model').value.trim(),
           securityMaxCostUsd: Number(document.querySelector('#security-max-cost').value),
           workflowToken: document.querySelector('#workflow-token').value,
+          githubAppId: document.querySelector('#github-app-id').value,
+          githubAppPrivateKey: document.querySelector('#github-app-private-key').value,
+          removeGitHubApp: document.querySelector('#remove-github-app').checked,
         }),
       });
       document.querySelector('#workflow-token').value = '';
+      document.querySelector('#github-app-id').value = '';
+      document.querySelector('#github-app-private-key').value = '';
+      document.querySelector('#remove-github-app').checked = false;
       await refreshSettings();
       message.textContent = '保存しました。ワーカー数は次回起動から適用されます。';
     } catch (error) {

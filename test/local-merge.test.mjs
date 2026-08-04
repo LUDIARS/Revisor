@@ -59,6 +59,7 @@ function mergeInput(fixture, overrides = {}) {
       ...overrides,
     },
     scan: async () => ({ status: "passed" }),
+    publish: async ({ mergeCommitSha }) => mergeCommitSha,
   };
 }
 
@@ -74,6 +75,52 @@ test("merges even after the base advanced, as long as the squash applies cleanly
     const mergeCommitSha = await squashMergeLocalPullRequest(input);
 
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("reuses a tagged prepared merge when publication is retried", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    const baseSha = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+    git(fixture.repoPath, "checkout", "--detach", baseSha);
+    git(fixture.repoPath, "merge", "--squash", "refs/heads/feat/local");
+    git(
+      fixture.repoPath,
+      "commit",
+      "-m",
+      "feature",
+      "-m",
+      `Revisor-Local-PR: ${input.pullRequest.id}`,
+    );
+    const preparedSha = git(fixture.repoPath, "rev-parse", "HEAD");
+    git(fixture.repoPath, "tag", "-a", "v1.2.3", "-m", "prepared release");
+    git(fixture.repoPath, "checkout", "main");
+
+    const calls = [];
+    const publication = await squashMergeLocalPullRequest({
+      ...input,
+      scan: async () => {
+        throw new Error("a prepared merge must not be rebuilt or rescanned");
+      },
+      publish: async (request) => {
+        calls.push(request);
+        return {
+          mergeCommitSha: request.mergeCommitSha,
+          releaseTag: request.preparedTag,
+          releaseUrl: "https://github.example/releases/v1.2.3",
+        };
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].expectedBaseSha, baseSha);
+    assert.equal(calls[0].mergeCommitSha, preparedSha);
+    assert.equal(calls[0].preparedTag, "v1.2.3");
+    assert.equal(publication.releaseTag, "v1.2.3");
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), preparedSha);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

@@ -25,7 +25,7 @@ export function renderPage({ sessionToken, title, activeNav, bodyHtml, scriptSou
   <section>
     <header class="bar">
       <h1>Revisor</h1>
-      <span class="note">LUDIARS LOCAL PR WORKFLOW。作業ブランチを GitHub へ送らず、ローカルで CI・Anatomia・レビュー・squash merge を完結します。</span>
+      <span class="note">LUDIARS LOCAL PR WORKFLOW。作業ブランチを GitHub へ送らず、Revisorが CI・レビュー・squash merge・main/tag/Release公開まで完結します。</span>
       <nav>${navigation(activeNav)}</nav>
     </header>
   </section>

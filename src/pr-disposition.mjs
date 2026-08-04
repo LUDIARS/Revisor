@@ -35,6 +35,7 @@ function blockersOf(pullRequest, thresholds) {
   if (pullRequest.checkStatus === "failed" && pullRequest.error) {
     blockers.push(String(pullRequest.error));
   }
+  if (pullRequest.mergeError) blockers.push(String(pullRequest.mergeError));
   if (pullRequest.draft === true) blockers.push("draft のままです");
   for (const reason of pullRequest.reasons ?? []) blockers.push(reason);
   if (pullRequest.humanQuestion) blockers.push(pullRequest.humanQuestion);

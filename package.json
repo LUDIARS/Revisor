@@ -1,11 +1,12 @@
 {
   "name": "@ludiars/revisor",
   "version": "0.1.0",
-  "description": "Independent local pull-request review service",
+  "description": "Local pull-request review, merge, and release publication service",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "revisor": "src/cli.mjs"
+    "revisor": "src/cli.mjs",
+    "dw": "src/cli.mjs"
   },
   "files": [
     "src",

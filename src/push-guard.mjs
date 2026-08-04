@@ -173,6 +173,7 @@ export async function guardMainPush({
   statePath,
   input,
   now = () => new Date().toISOString(),
+  authorizedPublication = process.env.REVISOR_PUBLISHING === "1",
 }) {
   const store = new LocalPrStore({ path: statePath, now });
   const repository = store.findRepositoryByPath(repoPath);
@@ -203,9 +204,25 @@ export async function guardMainPush({
     };
   }
   const mainPushes = pushes.filter((record) =>
-    record.localRef === `refs/heads/${repository.baseRef}`
-    && record.remoteRef === `refs/heads/${repository.baseRef}`
+    record.remoteRef === `refs/heads/${repository.baseRef}`
     && !ZERO_SHA.test(record.localSha));
+  const tagPushes = pushes.filter((record) => record.remoteRef.startsWith("refs/tags/"));
+  if ((mainPushes.length > 0 || tagPushes.length > 0) && !authorizedPublication) {
+    store.updatePushGuard(repository.repository, {
+      status: "revisor_publication_required",
+      checkedAt,
+      scannedAddedLines: 0,
+      findings: [],
+    });
+    return {
+      allowed: false,
+      amendRequired: false,
+      publicationRequired: true,
+      repository: repository.repository,
+      findings: [],
+      scannedAddedLines: 0,
+    };
+  }
   let scannedAddedLines = 0;
   const findings = [];
   for (const record of mainPushes) {

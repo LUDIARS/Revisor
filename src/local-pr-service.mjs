@@ -5,9 +5,14 @@ import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
+import { redactSecretLines } from "./leakage.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
 import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
 import { inspectLocalPullRequest, git } from "./workspace.mjs";
+import {
+  assertLocalVersionUnchanged,
+  prepareLocalVersionFile,
+} from "./local-version.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -34,6 +39,8 @@ export class LocalPrService {
     installGuard = installPushGuard,
     merge = squashMergeLocalPullRequest,
     securityScan,
+    publisher,
+    prepareVersionFile = prepareLocalVersionFile,
     cliPath = CLI_PATH,
     env = process.env,
     loadSettings = () => readSettings(env),
@@ -50,6 +57,8 @@ export class LocalPrService {
     this.installGuard = installGuard;
     this.merge = merge;
     this.securityScan = securityScan;
+    this.publisher = publisher;
+    this.prepareVersionFile = prepareVersionFile;
     this.env = env;
     this.cliPath = cliPath;
     this.notifyLifecycle = notifyLifecycle;
@@ -88,6 +97,7 @@ export class LocalPrService {
       "--verify",
       `refs/heads/${registration.baseRef}`,
     ]);
+    await this.prepareVersionFile(registration.rootPath);
     const hookPath = await this.installGuard({
       repoPath: registration.rootPath,
       cliPath: this.cliPath,
@@ -116,6 +126,7 @@ export class LocalPrService {
       submission.headRef,
       baseRef,
     );
+    await assertLocalVersionUnchanged(repository.rootPath, refs.baseSha, refs.headSha);
     const existing = this.store.findExactPullRequest(
       repository.repository,
       refs.headSha,
@@ -240,6 +251,7 @@ export class LocalPrService {
       pullRequest.headRef,
       pullRequest.baseRef,
     );
+    await assertLocalVersionUnchanged(repository.rootPath, refs.baseSha, refs.headSha);
     return this.#enqueue(
       repository,
       this.store.updatePullRequest(pullRequest.id, {
@@ -248,6 +260,10 @@ export class LocalPrService {
         baseSha: refs.baseSha,
         checkStatus: "queued",
         error: null,
+        // A publication failure is a blocker until it is superseded. A fresh
+        // review is that supersession, so keeping the old merge error would
+        // leave the re-approved PR permanently un-mergeable on the board.
+        mergeError: null,
       }),
       // The refs may be unchanged, and the queue caches settled jobs by exact
       // head, so an unforced re-review would resolve to the run being retried.
@@ -321,16 +337,24 @@ export class LocalPrService {
     // board から消え、 記録と Git が食い違う。
     this.#merging.add(id);
     try {
-      const mergeCommitSha = await this.merge({
+      const publication = await this.merge({
         repository,
         pullRequest,
         env: this.env,
         ...(this.securityScan ? { scan: this.securityScan } : {}),
+        ...(this.publisher ? { publish: this.publisher } : {}),
       });
+      const mergeCommitSha = typeof publication === "string"
+        ? publication
+        : publication.mergeCommitSha;
       const merged = this.store.updatePullRequest(id, {
         status: "merged",
         checkStatus: "test_ok",
         mergeCommitSha,
+        mergeError: null,
+        releaseTag: typeof publication === "object" ? publication.releaseTag ?? null : null,
+        releaseUrl: typeof publication === "object" ? publication.releaseUrl ?? null : null,
+        publishedAt: new Date().toISOString(),
         mergedAt: new Date().toISOString(),
       });
       await this.#announceLifecycle("merged", merged);
@@ -350,6 +374,14 @@ export class LocalPrService {
         await this.#requeue(pullRequest);
         throw error;
       }
+      // A publication failure carries Git and GitHub API text straight onto the
+      // decision board and into notifications, so it obeys the same boundary as
+      // any other stored free-form output: locations survive, secrets do not.
+      this.store.updatePullRequest(id, {
+        mergeError: redactSecretLines(
+          error instanceof Error ? error.message : String(error),
+        ),
+      });
       throw error;
     } finally {
       this.#merging.delete(id);

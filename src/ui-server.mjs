@@ -1,9 +1,12 @@
 import {
   hasWorkflowToken,
+  hasGitHubAppCredentials,
   readAllowedHosts,
   readSettings,
   writeAllowedHosts,
   writeWorkflowToken,
+  writeGitHubAppCredentials,
+  removeGitHubAppCredentials,
   writeSettings,
 } from "./config.mjs";
 import { resolveAnatomiaCli } from "./anatomia.mjs";
@@ -74,7 +77,8 @@ export function createUiRequestHandler({
         sendJson(response, 200, {
           status: "ok",
           configured: Boolean(readSettings(env).anatomiaFolder)
-            && hasWorkflowToken(env),
+            && hasWorkflowToken(env)
+            && hasGitHubAppCredentials(env),
         });
       } catch (error) {
         sendJson(response, 503, {
@@ -108,6 +112,7 @@ export function createUiRequestHandler({
           settings: readSettings(env),
           allowedHosts,
           workflowTokenConfigured: hasWorkflowToken(env),
+          githubAppConfigured: hasGitHubAppCredentials(env),
         });
         return;
       }
@@ -126,10 +131,22 @@ export function createUiRequestHandler({
         if (typeof body.workflowToken === "string" && body.workflowToken.trim()) {
           writeWorkflowToken(body.workflowToken, env);
         }
+        if (body.removeGitHubApp === true) {
+          removeGitHubAppCredentials(env);
+        } else if (
+          typeof body.githubAppPrivateKey === "string"
+          && body.githubAppPrivateKey.trim()
+        ) {
+          writeGitHubAppCredentials({
+            appId: body.githubAppId,
+            privateKey: body.githubAppPrivateKey,
+          }, env);
+        }
         sendJson(response, 200, {
           settings,
           allowedHosts,
           workflowTokenConfigured: hasWorkflowToken(env),
+          githubAppConfigured: hasGitHubAppCredentials(env),
         });
         return;
       }

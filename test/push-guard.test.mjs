@@ -38,7 +38,7 @@ function fixture() {
   return { directory, repoPath, baseSha: git(repoPath, "rev-parse", "HEAD") };
 }
 
-test("blocks main leakage, records amend_required, then accepts the amended commit", async () => {
+test("scans a detached commit refspec, blocks leakage, then accepts the amended commit", async () => {
   const state = fixture();
   const statePath = join(state.directory, "state.json");
   const store = new LocalPrStore({ path: statePath });
@@ -60,7 +60,8 @@ test("blocks main leakage, records amend_required, then accepts the amended comm
     const unsafe = await guardMainPush({
       repoPath: state.repoPath,
       statePath,
-      input: `refs/heads/main ${unsafeSha} refs/heads/main ${state.baseSha}\n`,
+      input: `${unsafeSha} ${unsafeSha} refs/heads/main ${state.baseSha}\n`,
+      authorizedPublication: true,
     });
     assert.equal(unsafe.allowed, false);
     assert.equal(unsafe.amendRequired, true);
@@ -73,7 +74,8 @@ test("blocks main leakage, records amend_required, then accepts the amended comm
     const safe = await guardMainPush({
       repoPath: state.repoPath,
       statePath,
-      input: `refs/heads/main ${amendedSha} refs/heads/main ${state.baseSha}\n`,
+      input: `${amendedSha} ${amendedSha} refs/heads/main ${state.baseSha}\n`,
+      authorizedPublication: true,
     });
     assert.equal(safe.allowed, true);
     assert.equal(store.getRepository("LUDIARS/Product").pushGuard.status, "safe");
@@ -107,6 +109,29 @@ test("blocks every non-main branch update before it reaches a remote", async () 
       store.getRepository("LUDIARS/Product").pushGuard.status,
       "branch_push_blocked",
     );
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("blocks a direct release-tag push outside Revisor publication", async () => {
+  const state = fixture();
+  const statePath = join(state.directory, "state.json");
+  const store = new LocalPrStore({ path: statePath });
+  store.registerRepository({
+    repository: "LUDIARS/Product",
+    rootPath: state.repoPath,
+    baseRef: "main",
+    testCases: [{ name: "unit" }],
+  });
+  try {
+    const result = await guardMainPush({
+      repoPath: state.repoPath,
+      statePath,
+      input: `refs/tags/v0.1.0 ${state.baseSha} refs/tags/v0.1.0 ${"0".repeat(40)}\n`,
+    });
+    assert.equal(result.allowed, false);
+    assert.equal(result.publicationRequired, true);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }
