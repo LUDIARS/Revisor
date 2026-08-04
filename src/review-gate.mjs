@@ -61,11 +61,17 @@ export function hasAnalyzableChangedAnchors(analysis) {
 
 // One definition of "this change still owes a code target domain", shared by the
 // merge gate, the reviewer prompt, and the human question, so the relaxation can
-// never apply to one of them and not the others. The flag is the docs/config-only
-// judgement: documentation and settings files carry no code domain of their own,
-// so demanding one of them blocks the change forever instead of improving it.
-export function needsTargetDomain(analysis, docsOrConfigOnly = false) {
+// never apply to one of them and not the others. Documentation, settings, tests,
+// operational manifests and generated artifacts carry no application code
+// domain of their own, so demanding one blocks the change forever instead of
+// improving it. `codeDomainRequired` comes from the deterministic path classifier.
+export function needsTargetDomain(
+  analysis,
+  docsOrConfigOnly = false,
+  codeDomainRequired = true,
+) {
   return !analysis.domain.hasTargetDomain
+    && codeDomainRequired
     && !docsOrConfigOnly
     && hasAnalyzableChangedAnchors(analysis);
 }
@@ -91,6 +97,7 @@ export function gateOutcome({
   // A docs-only change is always docs/config-only, so the narrower flag alone
   // still selects the relaxation for callers that only know about documentation.
   docsOrConfigOnly = docsOnly,
+  codeDomainRequired = true,
   plan = null,
   security,
   humanReviewRequired = false,
@@ -115,15 +122,18 @@ export function gateOutcome({
   }
   // needsTargetDomain stays the only place that decides whether the domain is
   // still owed; the gate only chooses where to record it.
-  if (needsTargetDomain(finalAnalysis, docsOrConfigOnly)) {
+  if (needsTargetDomain(finalAnalysis, docsOrConfigOnly, codeDomainRequired)) {
     reasons.push("target domain is still missing");
   } else if (!finalAnalysis.domain.hasTargetDomain) {
-    // A docs/config-only change also has no analyzable anchors, so its own
-    // relaxation is reported first; the unanalyzable-surface note is for a code
-    // change Anatomia could not parse, which is the narrower case.
+    // The relaxations overlap — a docs/config-only change is also a non-code
+    // change and also has no analyzable anchors — so the most specific wording
+    // is reported first: docs/config, then non-code, then the unanalyzable
+    // surface (a code change Anatomia could not parse), which is the narrowest.
     advisories.push(
       docsOrConfigOnly
         ? `target domain is still missing (${docsOnly ? "docs-only" : "docs/config-only"} change)`
+        : !codeDomainRequired
+        ? "target domain is not applicable (no production code change)"
         : "target domain is not applicable (no analyzable changed functions)",
     );
   }

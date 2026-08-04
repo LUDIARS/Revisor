@@ -105,6 +105,7 @@ function buildGateResult({
     ci,
     docsOnly,
     docsOrConfigOnly,
+    codeDomainRequired: classification?.codeDomainRequired ?? true,
     plan,
     security,
     humanReviewRequired,
@@ -211,6 +212,7 @@ export function createPrReviewRunner({
       const submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
       const docsOnly = submitted.classification.docsOnly;
       const docsOrConfigOnly = submitted.classification.docsOrConfigOnly;
+      const codeDomainRequired = submitted.classification.codeDomainRequired;
       const initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
       const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
       const authorContext = request.reviewMode === "verification"
@@ -300,7 +302,7 @@ export function createPrReviewRunner({
             docsOrConfigOnly,
             security: initialSecurity,
           }),
-          humanQuestion: needsTargetDomain(initial, docsOrConfigOnly)
+          humanQuestion: needsTargetDomain(initial, docsOrConfigOnly, codeDomainRequired)
             ? targetDomainQuestion(request.repository, request.number)
             : null,
         };
@@ -346,7 +348,7 @@ export function createPrReviewRunner({
           classification: submitted.classification,
         });
         const geniusQuestion = "Genius の判断カードを確認し、この変更を承認または差し戻してください。";
-        const humanQuestion = needsTargetDomain(initial, docsOrConfigOnly)
+        const humanQuestion = needsTargetDomain(initial, docsOrConfigOnly, codeDomainRequired)
           ? `${targetDomainQuestion(request.repository, request.number)} ${geniusQuestion}`
           : geniusQuestion;
         return {
@@ -379,6 +381,7 @@ export function createPrReviewRunner({
           leakage: initialLeakage,
           docsOnly,
           docsOrConfigOnly,
+          codeDomainRequired,
           plan,
         }),
         timeoutMs: reviewerTimeoutMs,
@@ -399,6 +402,7 @@ export function createPrReviewRunner({
       // docs/config-only, and the missing target domain has to block again.
       const finalDocsOnly = reviewed.classification.docsOnly;
       const finalDocsOrConfigOnly = reviewed.classification.docsOrConfigOnly;
+      const finalCodeDomainRequired = reviewed.classification.codeDomainRequired;
       // For the same reason the plan itself has to follow the reviewed diff. A
       // plan made for a documentation edit switched the registered tests and the
       // code-analysis gating off; if the autofix introduced executable content,
@@ -460,7 +464,11 @@ export function createPrReviewRunner({
         repoPath,
         request,
       );
-      const needsHuman = needsTargetDomain(finalAnalysis, finalDocsOrConfigOnly)
+      const needsHuman = needsTargetDomain(
+        finalAnalysis,
+        finalDocsOrConfigOnly,
+        finalCodeDomainRequired,
+      )
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
       return {
         ...buildGateResult({

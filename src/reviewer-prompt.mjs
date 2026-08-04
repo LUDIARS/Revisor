@@ -5,11 +5,18 @@ import {
 } from "./review-gate.mjs";
 import { stageEnabled } from "./review-plan.mjs";
 
-// A docs-only or configuration-only change must not be asked for a code domain:
-// the reviewer would report PR_GATE_NEEDS_HUMAN, which blocks the merge and would
-// undo the relaxation the gate just made for exactly this case.
-export function domainInstruction({ analysis, docsOnly, docsOrConfigOnly = docsOnly }) {
-  if (needsTargetDomain(analysis, docsOrConfigOnly)) {
+// A docs-only, configuration-only or otherwise non-code change must not be asked
+// for a code domain: the reviewer would report PR_GATE_NEEDS_HUMAN, which blocks
+// the merge and would undo the relaxation the gate just made for exactly this
+// case. The branches below run most-specific first, so the instruction the
+// reviewer reads matches the advisory `gateOutcome` records for the same change.
+export function domainInstruction({
+  analysis,
+  docsOnly,
+  docsOrConfigOnly = docsOnly,
+  codeDomainRequired = true,
+}) {
+  if (needsTargetDomain(analysis, docsOrConfigOnly, codeDomainRequired)) {
     return [
       "Anatomia found no target domain for the changed functions.",
       "Infer the target domain from the PR diff and optional original-session context.",
@@ -28,8 +35,17 @@ export function domainInstruction({ analysis, docsOnly, docsOrConfigOnly = docsO
         : "Do check that the changed values stay consistent with the specs, schemas and behaviour that read them.",
     ].join(" ");
   }
-  // Checked after the docs/config relaxation: a docs-only change has no
-  // analyzable anchors either, and its own instruction is the accurate one.
+  // Checked after the docs/config relaxation, which is the more specific
+  // wording for a change that is both non-code and documentation or settings.
+  if (!codeDomainRequired) {
+    return [
+      "This change contains no production code (change kind 'code'), so it owns no application code domain even if tests or operational files contain parseable functions.",
+      "Do not add a code domain or .anatomia/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
+      "Review the changed non-code artifact against the behaviour or contract it validates or configures.",
+    ].join(" ");
+  }
+  // Checked last: a docs-only or non-code change has no analyzable anchors
+  // either, and each of their own instructions is the accurate one.
   if (!analysis.domain.hasTargetDomain && !hasAnalyzableChangedAnchors(analysis)) {
     return [
       "Anatomia found no analyzable changed functions, so its function-level domain membership cannot identify a target domain for this change.",
@@ -81,6 +97,7 @@ export function buildReviewerPrompt({
   leakage,
   docsOnly = false,
   docsOrConfigOnly = docsOnly,
+  codeDomainRequired = true,
   plan = null,
 }) {
   return [
@@ -93,7 +110,7 @@ export function buildReviewerPrompt({
     "Preserve existing user changes and keep edits scoped to this PR.",
     `Anatomia temporary analysis (may be truncated):\n${JSON.stringify(analysis, null, 2).slice(0, 80_000)}`,
     `Unified PR diff (may be truncated):\n${unifiedDiff}`,
-    domainInstruction({ analysis, docsOnly, docsOrConfigOnly }),
+    domainInstruction({ analysis, docsOnly, docsOrConfigOnly, codeDomainRequired }),
     stageEnabled(plan, "anatomia_code_analysis")
       ? "Resolve newly orphaned functions and avoid a material complexity-score regression where practical."
       : null,

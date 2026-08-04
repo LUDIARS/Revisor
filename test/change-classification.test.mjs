@@ -116,7 +116,21 @@ test("a settings-only change is docs/config-only but not docs-only", () => {
   });
   assert.equal(profile.docsOnly, false);
   assert.equal(profile.docsOrConfigOnly, true);
+  assert.equal(profile.codeDomainRequired, false);
   assert.deepEqual(profile.kinds, ["config"]);
+});
+
+test("requires an application domain only when production code changed", () => {
+  const catalogWithItsTest = classifyChange({
+    changedPaths: ["excubitor.catalog.yaml", "test/catalog.test.mjs"],
+  });
+  assert.deepEqual(catalogWithItsTest.kinds, ["test", "config"]);
+  assert.equal(catalogWithItsTest.codeDomainRequired, false);
+
+  const productionCode = classifyChange({
+    changedPaths: ["src/catalog.mjs", "test/catalog.test.mjs"],
+  });
+  assert.equal(productionCode.codeDomainRequired, true);
 });
 
 test("reports the runtime surfaces a registered unit test cannot stand in for", () => {
@@ -125,6 +139,7 @@ test("reports the runtime surfaces a registered unit test cannot stand in for", 
     unifiedDiff: "+++ b/src/server.mjs\n+one\n+two\n",
   });
   assert.deepEqual(profile.kinds, ["code", "infra"]);
+  assert.equal(profile.codeDomainRequired, true);
   assert.equal(profile.docsOnly, false);
   assert.deepEqual([...profile.runtimeSurfaces].sort(), ["entrypoint", "migration", "ui"]);
   assert.equal(profile.changedFiles, 3);

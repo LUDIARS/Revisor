@@ -258,6 +258,36 @@ test("relaxes a missing target domain to an advisory for a config-only change", 
   ]);
 });
 
+test("does not require an application domain for a non-code change with test anchors", () => {
+  const finalAnalysis = analysis();
+  finalAnalysis.domain.hasTargetDomain = false;
+  finalAnalysis.domain.targetDomains = [];
+  finalAnalysis.domain.unassignedAnchors = ["test:catalog"];
+  finalAnalysis.quality.changedFunctions = [{ anchor: "test:catalog" }];
+  const outcome = evaluate(finalAnalysis, { codeDomainRequired: false });
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, [
+    "target domain is not applicable (no production code change)",
+  ]);
+  assert.equal(needsTargetDomain(finalAnalysis, false, false), false);
+});
+
+test("a docs/config-only change keeps its advisory over the generic non-code one", () => {
+  const finalAnalysis = analysis();
+  finalAnalysis.domain.hasTargetDomain = false;
+  finalAnalysis.domain.targetDomains = [];
+  finalAnalysis.domain.unassignedAnchors = [];
+  finalAnalysis.quality.changedFunctions = [];
+  const outcome = evaluate(finalAnalysis, {
+    docsOrConfigOnly: true,
+    codeDomainRequired: false,
+  });
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, [
+    "target domain is still missing (docs/config-only change)",
+  ]);
+});
+
 test("the config-only relaxation covers the missing domain and nothing else", () => {
   const finalAnalysis = analysis({ gates: [{ gate: "rule_conformance", pass: false }] });
   finalAnalysis.domain.hasTargetDomain = false;

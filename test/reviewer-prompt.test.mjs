@@ -47,3 +47,27 @@ test("a config-only change keeps its own instruction rather than the executable 
   assert.match(instruction, /documentation and configuration files only/);
   assert.doesNotMatch(instruction, /Review the executable script/);
 });
+
+test("does not invent an application domain for parseable test helpers", () => {
+  const instruction = domainInstruction({
+    analysis: analysis({ anchors: ["test:catalog"] }),
+    codeDomainRequired: false,
+  });
+  assert.match(instruction, /no production code/);
+  assert.match(instruction, /tests or operational files/);
+  assert.match(instruction, /do not report PR_GATE_NEEDS_HUMAN/i);
+  assert.doesNotMatch(instruction, /Infer the target domain/);
+});
+
+test("a docs/config-only change keeps its wording over the generic non-code one", () => {
+  // Every docs/config-only change is also a non-code change, so the two
+  // relaxations overlap; the reviewer must get the more specific instruction.
+  const instruction = domainInstruction({
+    analysis: analysis({ anchors: [] }),
+    docsOnly: false,
+    docsOrConfigOnly: true,
+    codeDomainRequired: false,
+  });
+  assert.match(instruction, /documentation and configuration files only/);
+  assert.doesNotMatch(instruction, /no production code/);
+});

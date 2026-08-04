@@ -18,9 +18,9 @@ const CONFIG_FILE =
   /(?:^|\/)(?:\.env\.(?:example|sample|template)|\.editorconfig|\.gitignore|\.gitattributes|\.gitmodules|\.npmrc|\.nvmrc|\.dockerignore|\.eslintignore|\.prettierignore)$|\.(?:ya?ml|json|jsonl|jsonc|json5|toml|ini|cfg|conf|properties)$/i;
 
 // Dependency manifests match CONFIG_FILE by extension but are not settings text:
-// editing them pulls third-party code into the build, which is the change class
-// that should keep every gate it has. Excluded from the relaxation so a dependency
-// bump still owes a target domain (neco 2026-07-30).
+// editing them pulls third-party code into the build, so they are excluded from
+// the narrow docs/config relaxation and keep its other risk signals. The broader
+// non-code policy below still avoids inventing an application domain for them.
 const DEPENDENCY_MANIFEST =
   /(?:^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|Cargo\.(?:toml|lock)|poetry\.lock|pyproject\.toml|requirements[^/]*\.txt|Gemfile(?:\.lock)?|composer\.(?:json|lock)|go\.(?:mod|sum))$/i;
 
@@ -135,7 +135,8 @@ export function isDocsOnlyChange(changedPaths) {
 // change made only of them can never satisfy the target-domain gate: keeping the
 // gate would make configuration changes permanently unmergeable (a one-line
 // `excubitor.catalog.yaml` edit was blocked exactly this way, Genius#6). A single
-// code file brings the requirement back — `every` is what makes that hold.
+// executable file removes this narrow relaxation — `every` is what makes that
+// hold. Application-domain applicability is decided separately from change kinds.
 export function isDocsOrConfigOnlyChange(changedPaths) {
   return changedPaths.length > 0
     && changedPaths.every((path) =>
@@ -162,6 +163,11 @@ export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
     ...stats,
     docsOnly: isDocsOnlyChange(changedPaths),
     docsOrConfigOnly: isDocsOrConfigOnlyChange(changedPaths),
+    // Anatomia domains describe production behaviour. Tests, operational
+    // manifests, documentation and generated assets may contain parseable
+    // functions, but assigning those helpers to an application domain invents
+    // ownership that the product does not have.
+    codeDomainRequired: (counts.code ?? 0) > 0,
     touchesSpec: changedPaths.some((path) => SPEC_FILE.test(path)),
     touchesTests: counts.test > 0,
     // A docs-only change carries no runtime surface even when a documentation

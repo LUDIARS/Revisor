@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "review-gate — マージ可否判定ポリシー"
-description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。docs/設定ファイルのみの変更は対象ドメイン欠如を advisory に緩和し、ドメインレビュー自体は維持する。Anatomia の warn 相当ゲート (spec_linkage / coupling_delta / convention_drift) は advisory 扱い。セキュリティスキャンの所見と未完了はブロックする。"
+description: "ローカル PR の審査結果を reasons (ブロック) / advisories (非ブロック) に振り分ける判定ポリシー。業務コードを含まない変更は application domain の対象外とし、他の審査は維持する。Anatomia の warn 相当ゲート (spec_linkage / coupling_delta / convention_drift) は advisory 扱い。セキュリティスキャンの所見と未完了はブロックする。"
 service: revisor
 domain: review-gate
 tags:
@@ -9,13 +9,14 @@ tags:
   - policy
   - docs-only
   - config-only
+  - non-code
   - security-scan
 status: implemented
 related:
   - ../architecture.md
   - ./review-plan.md
   - ./merge-risk.md
-updated: 2026-08-01
+updated: 2026-08-04
 ---
 
 # review-gate — マージ可否判定ポリシー
@@ -27,7 +28,7 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 ## ブロック条件 (reasons)
 
 - 登録テストの失敗
-- 対象ドメイン欠如 (**docs / 設定ファイルのみの変更**と**解析可能な変更関数が
+- 対象ドメイン欠如 (**業務コード (`kind=code`) を含まない変更**と**解析可能な変更関数が
   1 件も無い変更**を除く、下記)
 - Anatomia の **block 相当ゲート** (`rule_conformance` / `duplication`)、および
   advisory 集合に載っていないゲートの不合格 (未知のゲートは fail-closed で
@@ -49,6 +50,7 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 - error 未満のアーキテクチャ違反
 - **docs / 設定ファイルのみの変更の対象ドメイン欠如**
 - **解析可能な変更関数が無い変更の対象ドメイン欠如**
+- **業務コードを含まない変更の対象ドメイン欠如**
 - レビュー計画が担当外とした登録テスト (`status: "skipped"`)
 - 決定的ルールが `anatomia_code_analysis` を落としたときの全ゲート・全違反
 - 設定無効 (`disabled by settings`) 以外の理由でスキップされたセキュリティスキャン
@@ -109,12 +111,15 @@ plan`) として記録する。これは advisory であって pass ではない
   `npm-shrinkwrap.json`・`yarn.lock`・`pnpm-lock.yaml`・`Cargo.toml`・`Cargo.lock`・
   `pyproject.toml`・`requirements*.txt`・`poetry.lock`・`Gemfile`・`Gemfile.lock`・
   `composer.json`・`composer.lock`・`go.mod`・`go.sum`) は拡張子上は設定に見えるが
-  緩和しない (neco 2026-07-30)。これらの変更は第三者コードをビルドへ持ち込む変更で
-  あり、ゲートを保つべき変更種別だから。docs と組み合わせても緩和されない。
+  この狭い docs/config-only 緩和の対象にしない (neco 2026-07-30)。これらの変更は
+  第三者コードをビルドへ持ち込む変更であり、他のリスク信号を保つべき変更種別だから。
+  docs と組み合わせても docs/config-only にはならない。ただし application domain の
+  要否は下記の非コード変更ルールで別に判定し、依存マニフェストだけなら要求しない。
 - 例外: **実行を定義する設定** (`.github/workflows/`・`.circleci/`・`.gitlab/` 配下と
   `.gitlab-ci.yml`・`docker-compose*.yml`・`azure-pipelines*.yml`・`cloudbuild.yaml`)
-  も緩和しない。これらは設定値ではなく「何が・どの資格情報で実行されるか」を書く
-  ファイルで、依存マニフェストと同じ理由でゲートを保つ。変更種別分類でも
+  も docs/config-only にはしない。これらは設定値ではなく「何が・どの資格情報で
+  実行されるか」を書くファイルで、依存マニフェストと同じ理由で他のリスク信号を
+  保つ。変更種別分類でも
   workflow は `config` より先に `infra` と判定される。緩和しなければ拡張子を持たない
   `Dockerfile` (元から緩和対象外) との非対称も生まれない。
 - 再判定: 最終ゲートは**レビュー後の差分**で docs-only を判定し直す。autofix が
@@ -154,6 +159,29 @@ Anatomia のドメイン所属は**解析できた関数**から導出される�
 - docs / 設定のみの変更も解析可能な関数を持たないので、**その緩和を先に判定する**。
   ゲートの advisory 文言もレビュアーへの指示も、docs / 設定であればそちら側を
   返す (より具体的で正確なため)。
+
+## 非コード変更の application domain 除外 (neco 決定 2026-08-04)
+
+Anatomia の application domain は、製品の振る舞いを実装する業務コードの責務境界を
+表す。テスト、運用マニフェスト、設定、文書、アセット、生成物は、構文解析できる
+関数を含んでいても製品の業務ドメインを所有しない。これらの補助関数から
+application domain を作ると、実在しない責務をカタログ等へ割り当てることになる。
+
+- 判定: `classifyChange().codeDomainRequired` は変更種別 `kind=code` が 1 件以上ある
+  ときだけ `true`。`test` / `config` / `infra` / `docs` / `asset` / `generated` だけの
+  変更は `false`。
+- 適用先: `needsTargetDomain` を正本として、マージゲート、レビュアープロンプト、
+  `humanQuestion`、マージリスクの `missing_domain` 加点が同じ signal を共有する。
+  テスト関数等が解析可能でも、対象ドメインの新設や `.anatomia/domains` への帰属を
+  要求しない。
+- 再判定: レビュー後の最終差分でも変更種別を再分類する。autofix が業務コードを
+  追加した場合は `codeDomainRequired=true` に戻り、通常どおり対象ドメインを要求する。
+- 文言の優先順位: docs / 設定のみの変更は常に非コード変更でもあるため緩和が重なる。
+  ゲートの advisory もレビュアーへの指示も **docs / 設定 → 非コード →
+  解析対象なし** の順に、より具体的な方を返す (上記 2026-08-01 の方針と同じ)。
+- 維持されるもの: 緩和されるのは application domain 欠如だけ。登録テスト、
+  leakage、セキュリティ、complexity、アーキテクチャルール、レビュアーのその他の
+  判断は従来どおり実行し、設定・テストは検証または設定する契約との整合性を審査する。
 
 ## coupling_delta の advisory 化 (neco 決定 2026-07-30)
 

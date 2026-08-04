@@ -128,6 +128,28 @@ test("does not price a missing function domain when there are no analyzable anch
   assert.ok(pointsFor(risk, "change_surface") > 0);
 });
 
+test("does not price an application domain for parseable non-code helpers", () => {
+  const analysis = structuredClone(CLEAN_ANALYSIS);
+  analysis.domain = {
+    hasTargetDomain: false,
+    targetDomains: [],
+    unassignedAnchors: ["test:catalog"],
+  };
+  analysis.quality.changedFunctions = [{ anchor: "test:catalog" }];
+  const classification = profile(["excubitor.catalog.yaml", "test/catalog.test.mjs"]);
+  // Taken from the real classifier rather than set by hand, so the test fails if
+  // the flag stops being derived from the changed paths.
+  assert.equal(classification.codeDomainRequired, false);
+  const risk = assessMergeRisk({
+    classification,
+    analysis,
+    leakage: { totalFindings: 0 },
+    ci: [],
+    runtimeVerification: { required: false, score: 0 },
+  });
+  assert.equal(pointsFor(risk, "missing_domain"), 0);
+});
+
 test("an advised skip is priced as reduced confidence", () => {
   const classification = profile(["README.md"], "+++ b/README.md\n+x\n");
   const base = {

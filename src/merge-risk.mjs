@@ -158,6 +158,7 @@ export function assessMergeRisk({
   if (
     analysis?.domain
     && analysis.domain.hasTargetDomain === false
+    && classification.codeDomainRequired !== false
     && !docsOnly
     && hasAnalyzableChangedAnchors(analysis)
   ) {
