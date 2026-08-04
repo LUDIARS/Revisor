@@ -2,18 +2,32 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 import { RevisorError } from "./errors.mjs";
 
-const CATALOG_RELATIVE_PATH = join("Excubitor", "catalog", "services.yaml");
+const CATALOG_DIR_RELATIVE_PATH = join("Excubitor", "catalog");
+const CENTRAL_CATALOG_FILE = "services.yaml";
 
-export function findExcubitorCatalog(cwd = process.cwd()) {
+/**
+ * workspace root = `Excubitor/catalog/` を持つ最も近い祖先。
+ *
+ * 以前は `Excubitor/catalog/services.yaml` の存在を目印にしていたが、
+ * 「各サービスが自分の catalog を持つ」方針で中央 services.yaml は撤去された
+ * (Excubitor `refactor(catalog): require service-owned definitions`)。
+ * ファイルではなくディレクトリを目印にして、中央カタログの有無に依存しない。
+ */
+export function findWorkspaceRoot(cwd = process.cwd()) {
   let current = resolve(cwd);
   const root = parse(current).root;
   while (true) {
-    const candidate = join(current, CATALOG_RELATIVE_PATH);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(join(current, CATALOG_DIR_RELATIVE_PATH))) return current;
     if (current === root) break;
     current = dirname(current);
   }
-  throw new RevisorError("Excubitor catalog was not found above the current directory.");
+  throw new RevisorError("Excubitor catalog directory was not found above the current directory.");
+}
+
+/** 中央カタログのパス。撤去済みなら null (断片だけで解決する)。 */
+export function findExcubitorCatalog(cwd = process.cwd()) {
+  const candidate = join(findWorkspaceRoot(cwd), CATALOG_DIR_RELATIVE_PATH, CENTRAL_CATALOG_FILE);
+  return existsSync(candidate) ? candidate : null;
 }
 
 export function readServicePort(catalogText, serviceCode) {
@@ -59,18 +73,21 @@ function readServicePortFromFragments(workspaceRoot, serviceCode) {
 }
 
 export function resolveServicePort(cwd, serviceCode = "revisor") {
+  const workspaceRoot = findWorkspaceRoot(cwd);
   const catalogPath = findExcubitorCatalog(cwd);
-  try {
-    return readServicePort(readFileSync(catalogPath, "utf8"), serviceCode);
-  } catch (error) {
-    if (!(error instanceof RevisorError)) throw error;
-    const fromFragment = readServicePortFromFragments(
-      dirname(dirname(dirname(catalogPath))),
-      serviceCode,
-    );
-    if (fromFragment !== null) return fromFragment;
-    throw error;
+  let centralError = null;
+  if (catalogPath) {
+    try {
+      return readServicePort(readFileSync(catalogPath, "utf8"), serviceCode);
+    } catch (error) {
+      if (!(error instanceof RevisorError)) throw error;
+      centralError = error;
+    }
   }
+  const fromFragment = readServicePortFromFragments(workspaceRoot, serviceCode);
+  if (fromFragment !== null) return fromFragment;
+  throw centralError
+    ?? new RevisorError(`Service '${serviceCode}' is not registered in Excubitor.`);
 }
 
 export function readInjectedServicePort(env, serviceCode) {
@@ -99,5 +116,5 @@ export function resolveServiceLoopbackUrl(cwd, serviceCode) {
 }
 
 export function resolveWorkspaceRoot(cwd) {
-  return dirname(dirname(dirname(findExcubitorCatalog(cwd))));
+  return findWorkspaceRoot(cwd);
 }

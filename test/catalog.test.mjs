@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  findExcubitorCatalog,
   readInjectedServicePort,
   readServicePort,
   resolveManagedServicePort,
   resolveServicePort,
+  resolveWorkspaceRoot,
 } from "../src/catalog.mjs";
 
 const FRAGMENT = readFileSync(
@@ -134,6 +136,45 @@ test("resolves a service that only a repository fragment declares", async () => 
 
 test("still reports an unregistered service after searching fragments", async () => {
   await withFragmentCatalog((repo) => {
+    assert.throws(() => resolveServicePort(repo, "nowhere"), /not registered/);
+  });
+});
+
+// 「各サービスが自分の catalog を持つ」方針で中央 services.yaml は撤去された。
+// 目印をファイルからディレクトリへ移していないと、ここで
+// "Excubitor catalog was not found above the current directory." になり
+// 全リポのレビューが落ちる。
+async function withFragmentsOnly(run) {
+  const workspace = await mkdtemp(join(tmpdir(), "revisor-no-central-"));
+  try {
+    const repo = join(workspace, "Revisor");
+    await mkdir(join(workspace, "Excubitor", "catalog"), { recursive: true });
+    await mkdir(repo, { recursive: true });
+    await mkdir(join(workspace, "Genius"), { recursive: true });
+    await writeFile(
+      join(workspace, "Excubitor", "catalog", "FRAGMENTS.md"),
+      "# fragments\n",
+    );
+    await writeFile(
+      join(workspace, "Genius", "excubitor.catalog.yaml"),
+      "services:\n  - code: genius\n    port: 4230\n",
+    );
+    await run(repo, workspace);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+test("resolves services when the central catalog has been removed", async () => {
+  await withFragmentsOnly((repo, workspace) => {
+    assert.equal(findExcubitorCatalog(repo), null);
+    assert.equal(resolveWorkspaceRoot(repo), workspace);
+    assert.equal(resolveServicePort(repo, "genius"), 4230);
+  });
+});
+
+test("reports an unregistered service without a central catalog", async () => {
+  await withFragmentsOnly((repo) => {
     assert.throws(() => resolveServicePort(repo, "nowhere"), /not registered/);
   });
 });
