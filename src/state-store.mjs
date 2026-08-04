@@ -12,6 +12,11 @@ import { resolveConfigPath } from "./config.mjs";
 import { RevisorError } from "./errors.mjs";
 
 const STATE_PATH_ENV = "REVISOR_STATE_PATH";
+const QA_ELIGIBLE_CHECK_STATUSES = new Set(["queued", "running", "test_ok"]);
+
+function testWorkflowStatus(checkStatus) {
+  return checkStatus === "test_ok" ? "Open / Test OK" : "Open / In Review";
+}
 
 function emptyState() {
   return {
@@ -203,19 +208,26 @@ export class LocalPrStore {
           pullRequest.repository.toLowerCase() === repository.repository.toLowerCase()
           && pullRequest.status === "open"
           && pullRequest.draft !== true
-          && pullRequest.checkStatus === "test_ok")
+          && QA_ELIGIBLE_CHECK_STATUSES.has(pullRequest.checkStatus))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-      return latest
-        ? [{
-            repository: repository.repository,
-            pullRequestId: latest.id,
-            number: latest.number,
-            title: latest.title,
-            status: "Open / Test OK",
-            reviewedHeadSha: latest.reviewedHeadSha,
-            updatedAt: latest.updatedAt,
-          }]
-        : [];
+      if (!latest) return [];
+      // 審査を通ったかどうかがこの射影の唯一の分岐。 状態名・QA モード・reviewed head
+      // を 1 か所で判定し、 3 つが食い違わないようにする。
+      const approved = latest.checkStatus === "test_ok";
+      return [{
+        repository: repository.repository,
+        pullRequestId: latest.id,
+        number: latest.number,
+        title: latest.title,
+        status: testWorkflowStatus(latest.checkStatus),
+        checkStatus: latest.checkStatus,
+        qaMode: approved ? "approved" : "early",
+        headSha: latest.headSha,
+        // 審査中は reviewed head を出さない。 出すと先行QAの記録が審査済みの証拠に
+        // 化ける。
+        reviewedHeadSha: approved ? (latest.reviewedHeadSha ?? null) : null,
+        updatedAt: latest.updatedAt,
+      }];
     });
   }
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { LocalPrStore } from "../src/state-store.mjs";
 
-test("persists local PR status and projects only Open / Test OK products", () => {
+test("projects a non-draft PR for early QA while review is queued", () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-state-"));
   const path = join(directory, "state.json");
   let id = 0;
@@ -31,7 +31,20 @@ test("persists local PR status and projects only Open / Test OK products", () =>
       headSha: "a".repeat(40),
       baseSha: "b".repeat(40),
     });
-    assert.deepEqual(store.testWorkflowProducts(), []);
+    assert.deepEqual(store.testWorkflowProducts(), [{
+      repository: "LUDIARS/Revisor",
+      pullRequestId: pullRequest.id,
+      number: 1,
+      title: "Local PR",
+      status: "Open / In Review",
+      checkStatus: "queued",
+      qaMode: "early",
+      headSha: "a".repeat(40),
+      reviewedHeadSha: null,
+      updatedAt: "2026-07-28T00:00:00.000Z",
+    }]);
+    store.updatePullRequest(pullRequest.id, { checkStatus: "running" });
+    assert.equal(store.testWorkflowProducts()[0].status, "Open / In Review");
     store.updatePullRequest(pullRequest.id, {
       checkStatus: "test_ok",
       reviewedHeadSha: "a".repeat(40),
@@ -42,11 +55,44 @@ test("persists local PR status and projects only Open / Test OK products", () =>
       number: 1,
       title: "Local PR",
       status: "Open / Test OK",
+      checkStatus: "test_ok",
+      qaMode: "approved",
+      headSha: "a".repeat(40),
       reviewedHeadSha: "a".repeat(40),
       updatedAt: "2026-07-28T00:00:00.000Z",
     }]);
     const reloaded = new LocalPrStore({ path });
     assert.equal(reloaded.getPullRequest(pullRequest.id).checkStatus, "test_ok");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("early QA excludes drafts and settled reviews that still need action", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-state-"));
+  const path = join(directory, "state.json");
+  let id = 0;
+  const store = new LocalPrStore({
+    path,
+    createId: () => `id-${++id}`,
+    now: () => "2026-08-04T00:00:00.000Z",
+  });
+  try {
+    store.registerRepository({
+      repository: "LUDIARS/Revisor",
+      rootPath: "E:/Document/Ars/Revisor",
+      baseRef: "main",
+      testCases: [],
+    });
+    const draft = store.createPullRequest({
+      repository: "LUDIARS/Revisor",
+      title: "Draft",
+      draft: true,
+      headSha: "a".repeat(40),
+    });
+    assert.deepEqual(store.testWorkflowProducts(), []);
+    store.updatePullRequest(draft.id, { draft: false, checkStatus: "action_required" });
+    assert.deepEqual(store.testWorkflowProducts(), []);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

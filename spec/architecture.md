@@ -113,8 +113,10 @@ sequence shared by every registered repository, base/head refs, exact original
 SHAs, workflow status, CI outcomes, projected Anatomia data, leakage locations,
 the security scan outcome and its finding locations, the review plan, the
 merge-risk and runtime-verification assessments, the automatic merge outcome,
-and the final reviewed SHA. The test workflow is a derived view containing only
-PRs in `Open / Test OK`.
+and the final reviewed SHA. The test workflow is a derived view containing the
+latest non-draft Open PR per repository while it is `queued`, `running`, or
+`test_ok`. The first two states are early-QA candidates for the current head;
+only `Open / Test OK` means the review gate has passed.
 
 The number is global rather than per-repository because it is used on its own to
 identify a pull request across the workflow (`Rv#xxx`), which a number that
@@ -138,11 +140,12 @@ Reviews run locally and take minutes, so a submitter that had to poll would
 either burn a session waiting or walk away and miss the verdict. A submission may
 name the Concordia session that made it, and every terminal outcome — merged,
 merge-ready, blocked, or a failed run — sends that session exactly one message
-through Concordia, after any automatic merge so the reported state is final. Only
-a non-draft PR left at `Open / Test OK` appears in the TestWorkflow forum, so its
-notice points there for the runtime verification record; an automatically merged
-one reports the merge instead, and a draft is told to leave draft rather than
-sent to a thread it never gets.
+through Concordia, after any automatic merge so the reported state is final.
+A non-draft PR appears in the TestWorkflow forum from `queued` onward, for as
+long as it is its repository's latest candidate, so a person may start QA before
+review settles. The terminal notice points to that forum thread when the PR is
+left at `Open / Test OK`; an automatically merged one reports the merge instead,
+and a draft is told to leave draft rather than sent to a thread it never gets.
 
 Resubmitting the same head joins the review already running for it, so a
 submission that names a session adopts it as the notice target when the review

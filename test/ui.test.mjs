@@ -43,6 +43,12 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /close\.textContent = '取り下げ'/);
 });
 
+test("the dashboard explains early QA while automated review is running", () => {
+  const page = renderDashboardPage("session-nonce");
+  assert.match(page, /審査中は先行QA/);
+  assert.match(page, /審査通過後は確定QA/);
+});
+
 test("the compact PR menu puts the number before the review state and omits merge risk", () => {
   const page = renderPrBoardPage("session-nonce");
   assert.match(page, /class="cards" id="pr-cards"/);
@@ -149,7 +155,6 @@ test("the dashboard keeps the operational panels and hands PR triage to the top 
   const page = renderDashboardPage("session-nonce");
   assert.match(page, /<h2>登録プロジェクト<\/h2>/);
   assert.match(page, /<h2>ローカル PR 作成<\/h2>/);
-  assert.match(page, /Open \/ Test OK/);
   assert.doesNotMatch(page, /class="cards" id="pr-cards"/);
   assert.match(page, /href="\/dashboard" class="active"/);
 });

@@ -5,7 +5,7 @@
     {
       "preset": "couplingCap",
       "params": {
-        "targetPattern": "(?:src/(?:ui-pr-board-page|ui-pr-view-script|ui-styles)|test/ui\\.test)\\.mjs$",
+        "targetPattern": "(?:src/(?:ui-pr-board-page|ui-pr-view-script|ui-dashboard-page|ui-styles)|test/ui\\.test)\\.mjs$",
         "by": "path",
         "maxFanOut": 9007199254740991
       }
@@ -13,7 +13,7 @@
   ],
   "membership": [
     {
-      "pathPattern": "(^|/)src/(?:ui-pr-board-page|ui-pr-view-script|ui-styles)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:ui-pr-board-page|ui-pr-view-script|ui-dashboard-page|ui-styles)\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/ui\\.test\\.mjs$"
@@ -31,8 +31,9 @@
     "human-decision-board — ページ構成",
     "human-decision-board — 並び順とプロジェクトフィルタ",
     "human-decision-board — カード表示",
-    "human-decision-board — レスポンシブ"
+    "human-decision-board — レスポンシブ",
+    "early-qa-mode — ダッシュボード表示 (審査中の先行QAと審査後の確定QAを区別する)"
   ],
   "rationale": "表示と操作の責務を review-gate（判定）、local-workspace（Git 操作）、pr-notification（外部通知）から分離する。UI は API レスポンスを表示するだけで、マージ可否や PR の状態遷移を独自に決めない。UI はブラウザ側スクリプトを文字列として持つため関数の多くはテスト側に現れる。test/ui.test.mjs をメンバに含め、描画とフィルタ規則の検証をこのドメインへ帰属させる。",
-  "updatedAt": "2026-08-03T00:00:00.000Z"
+  "updatedAt": "2026-08-04T00:00:00.000Z"
 }

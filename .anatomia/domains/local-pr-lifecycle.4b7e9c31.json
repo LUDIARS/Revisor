@@ -1,6 +1,6 @@
 {
   "name": "local-pr-lifecycle",
-  "description": "ローカル PR の status 遷移とその読み取り時の判定。open → merged / closed の一方向で、終局済み (merged / closed) への merge / retry / close をすべて拒否する。取り下げ (closed) は理由を任意で記録し、board・test workflow・オートマージから同時に外す。判定状態は保存せず decidePullRequest が読み取り時に導出する。",
+  "description": "ローカル PR の status 遷移とその読み取り時の判定。open → merged / closed の一方向で、終局済み (merged / closed) への merge / retry / close をすべて拒否する。取り下げ (closed) は理由を任意で記録し、board・test workflow・オートマージから同時に外す。test workflow は queued / running から先行QA候補を公開するが、マージ可否は test_ok のまま変えない。判定状態は保存せず decidePullRequest が読み取り時に導出する。",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -25,6 +25,14 @@
         "by": "name",
         "maxFanOut": 9007199254740991
       }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "testWorkflowProducts|testWorkflowStatus",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
     }
   ],
   "templateRules": [],
@@ -34,15 +42,19 @@
     "pr-status-transition",
     "pr-close",
     "terminal-state-guard",
-    "decision-derivation"
+    "decision-derivation",
+    "early-qa-projection"
   ],
   "specRefs": [
     "pr-lifecycle — status は open → merged / closed の一方向 (終局から open へ戻さない)",
     "pr-lifecycle — 取り下げ (closePullRequest) / 審査中は拒否・理由は任意で記録",
     "pr-lifecycle — 終局済みの merge / retry / close をすべて拒否する",
     "pr-lifecycle — 終局が波及する先 (test workflow・判定状態・オートマージ・board)",
-    "human-decision-board — 判定状態の分類と並び順 (判断待ちを先頭に出す)"
+    "human-decision-board — 判定状態の分類と並び順 (判断待ちを先頭に出す)",
+    "early-qa-mode — 候補条件 (queued / running の非 draft Open PR を先行QA候補にする)",
+    "early-qa-mode — SHA契約 (先行QA中は reviewedHeadSha を出さない)",
+    "early-qa-mode — 安全境界 (マージ条件と reviewed head の意味を緩和しない)"
   ],
   "rationale": "「この PR はもう誰かを待っているか」を決めるのは status 遷移とその読み取り時の判定であり、審査の実行 (runner) やマージ可否のポリシー (review-gate) とは別の責務。遷移を持つ LocalPrService と、遷移結果を判定へ写す pr-disposition を 1 つのドメインに置き、終局の規則が両者で食い違わないようにする。実際の squash merge 手順は local-merge、リスク評価は merge-risk が担い、ここでは status だけを解釈する。",
-  "updatedAt": "2026-08-02T00:00:00.000Z"
+  "updatedAt": "2026-08-04T00:00:00.000Z"
 }

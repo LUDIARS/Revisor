@@ -34,7 +34,7 @@ const BODY = `
     </section>
     <section>
       <h2>テストワークフロー</h2>
-      <p class="note">このローカル審査を通過した Open / Test OK のプロダクトだけを表示します。</p>
+      <p class="note">審査中は先行QA、審査通過後は確定QAとして、人間が同じ変更を早期に確認できます。</p>
       <ul id="test-products"></ul>
       <h3>キュー</h3><pre id="queue">確認中…</pre>
     </section>
