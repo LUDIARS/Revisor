@@ -150,7 +150,10 @@ async function autofixFailingTests({
   return { ...outcome, reviewer: activeReviewer };
 }
 
-async function runReviewWithCapacityFallback(options, execute) {
+export async function runReviewWithCapacityFallback(options, execute) {
+  if (typeof execute !== "function") {
+    throw new TypeError("A reviewer executor function is required.");
+  }
   const first = await execute(options);
   if (first.ok || !reviewerCapacityUnavailable(first)) {
     return { ...first, reviewer: options.reviewer };
@@ -406,6 +409,10 @@ export function createPrReviewRunner({
   runSecurity = runSecurityScan,
   transport = fetch,
 } = {}) {
+  // Bind the executor once so intent-review call sites cannot accidentally omit
+  // the second helper argument. That omission used to fail every normal review
+  // before a reviewer or registered test could produce evidence.
+  const reviewWithFallback = (options) => runReviewWithCapacityFallback(options, runReview);
   return async (request) => {
     if (request.repository !== request.headRepository) {
       throw new Error("Fork pull requests are not eligible for the local autofix review");
@@ -679,7 +686,7 @@ export function createPrReviewRunner({
       let reviewer = externalReviewer;
       let investigation = null;
       if (reviewStrategy.mode === "multi-agent") {
-        investigation = await runReviewWithCapacityFallback({
+        investigation = await reviewWithFallback({
           reviewer,
           cwd: worktrees.head,
           prompt: investigationPrompt({
@@ -690,7 +697,7 @@ export function createPrReviewRunner({
           timeoutMs: reviewerTimeoutMs,
           readOnly: true,
           ...reviewStrategy.investigator,
-        }, runReview);
+        });
         reviewer = investigation.reviewer;
         if (!investigation.ok) {
           throw new Error(
@@ -709,7 +716,7 @@ export function createPrReviewRunner({
         codeDomainRequired,
         plan,
       });
-      const reviewResult = await runReviewWithCapacityFallback({
+      const reviewResult = await reviewWithFallback({
         reviewer,
         cwd: worktrees.head,
         prompt: investigation?.ok
