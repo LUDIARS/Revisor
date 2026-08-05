@@ -15,7 +15,7 @@ export async function runProcess({
     let settled = false;
     let invocation = { command, args, env };
     try {
-      if (isGitCommand(command)) invocation = managedGitInvocation(args, { env });
+      if (isGitCommand(command)) invocation = managedGitInvocation(args, { cwd, env });
     } catch (error) {
       resolve({ ok: false, stdout, stderr: error.message, exitCode: null });
       return;

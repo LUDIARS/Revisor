@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
 import {
   isGitCommand,
@@ -19,6 +20,7 @@ function completeRuntime(path) {
 
 test("wraps Windows Git with the Revisor-owned shell and preserves argv and env", () => {
   const invocation = managedGitInvocation(["-C", "repo with spaces", "status"], {
+    cwd: "C:\\review worktree",
     env: ENV,
     platform: "win32",
     fileExists: completeRuntime,
@@ -28,6 +30,10 @@ test("wraps Windows Git with the Revisor-owned shell and preserves argv and env"
   assert.equal(invocation.command, paths.shell);
   assert.deepEqual(invocation.args.slice(-3), ["-C", "repo with spaces", "status"]);
   assert.equal(invocation.args[2], paths.git);
+  assert.deepEqual(invocation.args.slice(3, 5), [
+    "-c",
+    `safe.directory=${resolve("C:\\review worktree").replaceAll("\\", "/")}`,
+  ]);
   assert.match(invocation.args[1], /mingw64\/libexec\/git-core/);
   assert.equal(invocation.env, ENV);
 });
@@ -59,7 +65,15 @@ test("fails closed when the managed runtime is incomplete", () => {
 test("uses the configured Revisor Git binary on non-Windows hosts", () => {
   const env = { REVISOR_GIT_BIN: "/opt/revisor/bin/git" };
   assert.deepEqual(
-    managedGitInvocation(["status"], { env, platform: "linux" }),
-    { command: "/opt/revisor/bin/git", args: ["status"], env },
+    managedGitInvocation(["status"], { cwd: "/review/worktree", env, platform: "linux" }),
+    {
+      command: "/opt/revisor/bin/git",
+      args: [
+        "-c",
+        `safe.directory=${resolve("/review/worktree").replaceAll("\\", "/")}`,
+        "status",
+      ],
+      env,
+    },
   );
 });

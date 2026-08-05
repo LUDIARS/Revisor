@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join, normalize } from "node:path";
+import { join, normalize, resolve } from "node:path";
 
 const WINDOWS_GIT_SCRIPT = [
   "export PATH=/usr/bin:/mingw64/bin:/mingw64/libexec/git-core:\"$PATH\"",
@@ -64,14 +64,18 @@ export function resolveManagedGitRoot({
 }
 
 export function managedGitInvocation(args, {
+  cwd,
   env = process.env,
   platform = process.platform,
   fileExists = existsSync,
 } = {}) {
+  const managedArgs = cwd
+    ? ["-c", `safe.directory=${resolve(cwd).replaceAll("\\", "/")}`, ...args]
+    : args;
   if (platform !== "win32") {
     return {
       command: env.REVISOR_GIT_BIN || "git",
-      args,
+      args: managedArgs,
       env,
     };
   }
@@ -79,7 +83,7 @@ export function managedGitInvocation(args, {
   const paths = resolveManagedGitRoot({ env, platform, fileExists });
   return {
     command: paths.shell,
-    args: ["-c", WINDOWS_GIT_SCRIPT, paths.git, ...args],
+    args: ["-c", WINDOWS_GIT_SCRIPT, paths.git, ...managedArgs],
     env,
   };
 }

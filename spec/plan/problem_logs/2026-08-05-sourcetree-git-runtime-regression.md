@@ -56,3 +56,24 @@ the service environment.
 - The full Revisor test and syntax suites pass.
 - Operationally, retry Anatomia #230 and confirm its registered submodule case
   reaches the repository tests.
+
+## Follow-up regression: sandbox-owned worktrees
+
+After #232 installed the managed runtime and Revisor restarted, retrying Anatomia
+#230 failed before review with:
+
+```text
+fatal: detected dubious ownership in repository at
+'E:/Document/Ars/.wt-Anatomia-scene-knowledge-okf-redacted-v2'
+```
+
+The service runs as the interactive user while task worktrees created by the
+implementation harness are owned by its sandbox account. Git correctly refused
+that cross-account worktree because Revisor had not declared its explicit cwd as
+safe. The fix must add only the current process cwd through command-scoped
+`safe.directory`; it must not add `safe.directory=*` or mutate global Git config.
+
+Regression coverage asserts that both Windows and non-Windows managed invocations
+prepend the resolved cwd while preserving the original argv and environment. The
+operational check is a successful retry of Anatomia #230 without a global
+safe-directory exception.

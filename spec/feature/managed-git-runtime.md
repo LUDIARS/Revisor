@@ -48,6 +48,13 @@ The installation must contain:
 Revisor fails closed when the runtime is absent or incomplete. SourceTree paths
 are refused even when supplied through `REVISOR_GIT_ROOT`.
 
+Each Git process also receives `safe.directory=<cwd>` as command-scoped
+configuration. The cwd is already an explicit Revisor input: a registered
+repository, a branch worktree checked for cleanliness, or a disposable review
+worktree. Command-scoped trust lets the service account inspect a worktree made
+by a sandboxed implementation account without weakening Git globally or trusting
+unrelated repositories.
+
 Windows registered test cases normally use `cmd.exe` for command shims. A case
 whose configured executable is Git stays a direct process request, so it
 passes through the same managed Git boundary. Other registered commands retain
