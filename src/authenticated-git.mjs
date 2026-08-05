@@ -18,6 +18,7 @@ function authenticatedEnvironment(token, env) {
     GIT_CONFIG_VALUE_0: `Authorization: Basic ${header}`,
     GIT_TERMINAL_PROMPT: "0",
     REVISOR_PUBLISHING: "1",
+    ALLOW_MAIN_PUSH: "1",
   };
 }
 
