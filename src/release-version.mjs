@@ -21,17 +21,6 @@ export function latestReleaseTag(tags) {
   return `v${major}.${minor}.${patch}`;
 }
 
-export function nextPatchReleaseTag(tags) {
-  const current = latestReleaseTag(tags);
-  if (!current) throw new Error("The initial release version has not been published.");
-  const [major, minor, patch] = parse(current);
-  const nextPatch = patch + 1;
-  if (!Number.isSafeInteger(nextPatch)) {
-    throw new Error(`Patch version cannot advance beyond '${current}'.`);
-  }
-  return `v${major}.${minor}.${nextPatch}`;
-}
-
 export function classifyReleaseKind(previousTag, nextTag) {
   const next = parse(nextTag);
   if (!next) throw new Error(`Release tag '${nextTag}' is not canonical.`);
@@ -64,9 +53,7 @@ export function classifyReleaseKind(previousTag, nextTag) {
 
 export function selectReleaseTag({ releasedTags, localVersion }) {
   if (localVersion === "uninitialized") {
-    throw new Error(
-      "Initial version is not set; run 'revisor version set MAJOR.MINOR.PATCH --repo <path>' before publishing.",
-    );
+    return { tag: null, kind: "none" };
   }
   const requestedTag = `v${localVersion}`;
   const requested = parse(requestedTag);
@@ -74,7 +61,7 @@ export function selectReleaseTag({ releasedTags, localVersion }) {
   const currentTag = latestReleaseTag(releasedTags);
   if (!currentTag) return { tag: requestedTag, kind: "initial" };
   if (requestedTag === currentTag) {
-    return { tag: nextPatchReleaseTag(releasedTags), kind: "patch" };
+    return { tag: null, kind: "none" };
   }
   const current = parse(currentTag);
   const isMajor = requested[0] === current[0] + 1
@@ -85,7 +72,7 @@ export function selectReleaseTag({ releasedTags, localVersion }) {
     && requested[2] === 0;
   if (!isMajor && !isMinor) {
     throw new Error(
-      `Local version '${localVersion}' must equal '${currentTag}' or declare its next major/minor version.`,
+      `Local version '${localVersion}' must equal '${currentTag}' or declare its next human-selected major/minor version. Patch Releases are not created.`,
     );
   }
   return { tag: requestedTag, kind: isMajor ? "major" : "minor" };

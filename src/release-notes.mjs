@@ -7,30 +7,33 @@ function compareUrl(repository, previousTag, tag) {
     + `/compare/${encodeURIComponent(previousTag)}...${encodeURIComponent(tag)}`;
 }
 
-export function composeReleaseNotes(
-  pullRequest,
-  mergeCommitSha,
-  { repository = null, tag = null, previousTag = null, kind = "patch" } = {},
-) {
-  const body = String(pullRequest.body ?? "").trim();
-  const notes = [
-    `# ${pullRequest.title}`,
-    body || "No additional release notes were provided.",
-    "",
-    `Revisor local PR: #${pullRequest.number}`,
-    `Commit: ${mergeCommitSha}`,
-  ];
-  if (kind === "major" || kind === "minor") {
-    if (!repository || !tag || !previousTag) {
-      throw new TypeError(`${kind} release notes require repository, tag, and previousTag.`);
-    }
-    const label = kind === "major" ? "Major" : "Minor";
-    notes.push(
-      "",
-      `## ${label} version release`,
-      `Version transition: \`${previousTag}\` → \`${tag}\`.`,
-      `[Compare ${previousTag}...${tag}](${compareUrl(repository, previousTag, tag)})`,
-    );
+function escapeMarkdown(value) {
+  return String(value).replace(/([\\`*_[\]<>])/g, "\\$1");
+}
+
+export function composeReleaseNotes({ repository, tag, previousTag, kind, changes = [] }) {
+  if (kind === "initial") return "";
+  if (kind !== "major" && kind !== "minor") {
+    throw new TypeError("Release Notes are created only for initial, major, or minor Releases.");
   }
+  if (!repository || !tag || !previousTag) {
+    throw new TypeError(`${kind} release notes require repository, tag, and previousTag.`);
+  }
+  const label = kind === "major" ? "Major" : "Minor";
+  const notes = [
+    `## ${label} version release`,
+    "",
+    `Version transition: \`${previousTag}\` → \`${tag}\`.`,
+    "",
+    `## Changes since ${previousTag}`,
+    "",
+    ...changes.map(({ sha, subject }) =>
+      `- ${escapeMarkdown(subject)} (\`${String(sha).slice(0, 12)}\`)`),
+  ];
+  if (changes.length === 0) notes.push("- No commit differences.");
+  notes.push(
+    "",
+    `[Compare ${previousTag}...${tag}](${compareUrl(repository, previousTag, tag)})`,
+  );
   return notes.join("\n");
 }

@@ -38,6 +38,9 @@ function defaults() {
     fallbackReviewer: "codex-sol",
     concordiaContextEnabled: true,
     workerCount: 1,
+    largeReviewLineThreshold: 1_000,
+    multiDomainReviewThreshold: 3,
+    costValidationModeEnabled: false,
     // Automatic merging stays off until a human sets the risk they accept. The
     // threshold is the human's decision, so there is no safe value to assume.
     autoMergeEnabled: false,
@@ -160,6 +163,15 @@ export function readSettings(env = process.env) {
       && value.workerCount <= 8
       ? value.workerCount
       : base.workerCount,
+    largeReviewLineThreshold: Number.isInteger(value.largeReviewLineThreshold)
+      && value.largeReviewLineThreshold >= 1
+      ? value.largeReviewLineThreshold
+      : base.largeReviewLineThreshold,
+    multiDomainReviewThreshold: Number.isInteger(value.multiDomainReviewThreshold)
+      && value.multiDomainReviewThreshold >= 1
+      ? value.multiDomainReviewThreshold
+      : base.multiDomainReviewThreshold,
+    costValidationModeEnabled: value.costValidationModeEnabled === true,
     autoMergeEnabled: value.autoMergeEnabled === true,
     autoMergeRiskThreshold: riskThreshold(
       value.autoMergeRiskThreshold,
@@ -205,6 +217,18 @@ export function writeSettings(settings, env = process.env) {
     throw new RevisorError("Worker count must be an integer from 1 to 8.");
   }
   const current = readSettings(env);
+  const largeReviewLineThreshold = settings.largeReviewLineThreshold === undefined
+    ? current.largeReviewLineThreshold
+    : Number(settings.largeReviewLineThreshold);
+  if (!Number.isInteger(largeReviewLineThreshold) || largeReviewLineThreshold < 1) {
+    throw new RevisorError("Large review line threshold must be a positive integer.");
+  }
+  const multiDomainReviewThreshold = settings.multiDomainReviewThreshold === undefined
+    ? current.multiDomainReviewThreshold
+    : Number(settings.multiDomainReviewThreshold);
+  if (!Number.isInteger(multiDomainReviewThreshold) || multiDomainReviewThreshold < 1) {
+    throw new RevisorError("Multi-domain review threshold must be a positive integer.");
+  }
   const autoMergeRiskThreshold = settings.autoMergeRiskThreshold === undefined
     ? current.autoMergeRiskThreshold
     : Number(settings.autoMergeRiskThreshold);
@@ -271,6 +295,11 @@ export function writeSettings(settings, env = process.env) {
     fallbackReviewer: settings.fallbackReviewer,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,
+    largeReviewLineThreshold,
+    multiDomainReviewThreshold,
+    costValidationModeEnabled: settings.costValidationModeEnabled === undefined
+      ? current.costValidationModeEnabled
+      : settings.costValidationModeEnabled === true,
     autoMergeEnabled: settings.autoMergeEnabled === undefined
       ? current.autoMergeEnabled
       : settings.autoMergeEnabled === true,

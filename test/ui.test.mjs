@@ -201,6 +201,16 @@ test("the settings page owns the auto-merge threshold and the plan advisor", () 
   assert.match(page, /autoMergeRiskThreshold: Number/);
 });
 
+test("the settings page owns the review scale thresholds", () => {
+  const page = renderSettingsPage({ nonce: "test-nonce" });
+  assert.match(page, /id="large-review-line-threshold"/);
+  assert.match(page, /id="multi-domain-review-threshold"/);
+  assert.match(page, /largeReviewLineThreshold:/);
+  assert.match(page, /multiDomainReviewThreshold:/);
+  assert.match(page, /id="cost-validation-mode"/);
+  assert.match(page, /costValidationModeEnabled:/);
+});
+
 // The page script reads every control by id, so a missing field throws on
 // `.value` and takes the whole settings page down rather than just its own row.
 test("the settings page owns the security scan effort and model", () => {

@@ -12,14 +12,28 @@ import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { assessMergeRisk, assessRuntimeVerification } from "./merge-risk.mjs";
 import { advisePlan } from "./plan-advisor.mjs";
 import { runSecurityScan, skippedSecurityScan } from "./security-scan.mjs";
-import { reviewerForProvider, runReviewer } from "./reviewer.mjs";
+import {
+  alternateReviewer,
+  reviewerCapacityUnavailable,
+  reviewerForProvider,
+  runReviewer,
+} from "./reviewer.mjs";
 import { buildReviewerPrompt } from "./reviewer-prompt.mjs";
+import {
+  assertMeaningfulReviewDiff,
+  investigationPrompt,
+  selectReviewStrategy,
+} from "./review-strategy.mjs";
+import {
+  buildTestAutofixPrompt,
+  runTestAutofixLoop,
+  isTestAutofixEnabled,
+} from "./test-autofix.mjs";
 import { gateOutcome, needsTargetDomain } from "./review-gate.mjs";
 import { readChangeProfile } from "./review-diff.mjs";
-import { queryGeniusReview } from "./genius-review.mjs";
 import {
   codeAnalysisGating,
-  hasExecutableChange,
+  applyCostValidationMode,
   planReview,
   reviewTier,
   stageEnabled,
@@ -59,6 +73,93 @@ async function commitAndAdvanceAutofix(cwd, repoPath, request) {
   return reviewedHead;
 }
 
+function changeKindsDiffer(before, after) {
+  const beforeKinds = before?.kinds ?? [];
+  const afterKinds = after?.kinds ?? [];
+  return beforeKinds.length !== afterKinds.length
+    || beforeKinds.some((kind) => !afterKinds.includes(kind));
+}
+
+async function verifyAutofixPlan({ worktreePath, testCases, plan, env }) {
+  const ci = await runPlannedTests({ worktreePath, testCases, plan, env });
+  if (!testsPassed(ci)) {
+    throw new Error(
+      "Test autofix changed the review plan and the newly selected registered tests do not pass.",
+    );
+  }
+  return ci;
+}
+
+async function worktreeChangeFingerprint(cwd) {
+  const [diff, untracked] = await Promise.all([
+    git(cwd, ["diff", "--binary", "HEAD", "--"]),
+    git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
+  const paths = untracked.split("\0").filter(Boolean);
+  const hashes = [];
+  for (const path of paths) {
+    hashes.push([path, await git(cwd, ["hash-object", "--", path])]);
+  }
+  return JSON.stringify({ diff, hashes });
+}
+
+async function autofixFailingTests({
+  request,
+  reviewer,
+  worktreePath,
+  mergeBase,
+  initialCi,
+  testCases,
+  plan,
+  env,
+  runReview,
+  reviewerTimeoutMs,
+}) {
+  let activeReviewer = reviewer;
+  const outcome = await runTestAutofixLoop({
+    initialCi,
+    repair: async ({ ci, attempt, maxAttempts }) => {
+      const before = await worktreeChangeFingerprint(worktreePath);
+      const result = await runReviewWithCapacityFallback({
+        reviewer: activeReviewer,
+        cwd: worktreePath,
+        prompt: buildTestAutofixPrompt({ request, ci, attempt, maxAttempts }),
+        timeoutMs: reviewerTimeoutMs,
+        tier: "economy",
+        effort: "low",
+      }, runReview);
+      activeReviewer = result.reviewer;
+      if (!result.ok) return { ...result, changed: false };
+      const profile = await readChangeProfile(worktreePath, mergeBase);
+      const leakage = scanAddedDiffForLeaks(profile.unifiedDiff);
+      if (leakage.totalFindings > 0) {
+        throw new Error(
+          "Test autofix introduced potential information leakage; changes were discarded before commit or push.",
+        );
+      }
+      const after = await worktreeChangeFingerprint(worktreePath);
+      return { ...result, changed: before !== after };
+    },
+    runTests: () => runPlannedTests({
+      worktreePath,
+      testCases,
+      plan,
+      env,
+    }),
+  });
+  return { ...outcome, reviewer: activeReviewer };
+}
+
+async function runReviewWithCapacityFallback(options, execute) {
+  const first = await execute(options);
+  if (first.ok || !reviewerCapacityUnavailable(first)) {
+    return { ...first, reviewer: options.reviewer };
+  }
+  const reviewer = alternateReviewer(options.reviewer);
+  const second = await execute({ ...options, reviewer });
+  return { ...second, reviewer };
+}
+
 // The baseline analysis exists only to produce a complexity delta, and the
 // project-wide initial analysis only to report what the repository looks like. A
 // plan that drops code analysis drops both runs, which is where most of the saved
@@ -92,6 +193,7 @@ function buildGateResult({
   security,
   humanReviewRequired = false,
   geniusGuidance = null,
+  intentReviewCompleted = false,
 }) {
   const complexityScoreDelta = baseline
     ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
@@ -106,6 +208,7 @@ function buildGateResult({
     docsOnly,
     docsOrConfigOnly,
     codeDomainRequired: classification?.codeDomainRequired ?? true,
+    domainReviewEnabled: stageEnabled(plan, "anatomia_domain_review"),
     plan,
     security,
     humanReviewRequired,
@@ -136,6 +239,7 @@ function buildGateResult({
     conclusion: reasons.length === 0 ? "success" : "action_required",
     reviewMode: request.reviewMode,
     reviewer,
+    intentReviewCompleted,
     contextSource,
     analysisSource: "anatomia-cli",
     originalHeadSha: request.headSha,
@@ -187,6 +291,112 @@ async function reviewSecurityScan({ runSecurity, worktrees, leakage, ci, setting
   });
 }
 
+function previousAnalysis(previousReview) {
+  const anatomia = previousReview?.anatomia;
+  if (!anatomia?.domain || !anatomia?.quality || !anatomia?.architecture) return null;
+  return {
+    domain: anatomia.domain,
+    quality: anatomia.quality,
+    architecture: anatomia.architecture,
+  };
+}
+
+async function runPartialVerification({
+  request,
+  submitted,
+  settings,
+  worktrees,
+  anatomiaCliPath,
+  env,
+  runSecurity,
+  complexityDropThreshold,
+}) {
+  const previous = request.previousReview;
+  const targets = new Set(request.verificationTargets ?? []);
+  let analysis = previousAnalysis(previous);
+  if (!analysis) throw new Error("Partial verification requires the previous Anatomia result.");
+  const plan = previous.reviewPlan ?? planReview({
+    classification: submitted.classification,
+    testCases: request.testCases,
+  });
+  const leakage = targets.has("leakage")
+    ? scanAddedDiffForLeaks(submitted.unifiedDiff)
+    : previous.leakage;
+  if (!leakage) throw new Error("Partial verification requires the previous leakage result.");
+  const ci = targets.has("tests")
+    ? await runPlannedTests({
+        worktreePath: worktrees.head,
+        testCases: request.testCases,
+        plan,
+        env,
+      })
+    : previous.ci;
+  if (!Array.isArray(ci)) throw new Error("Partial verification requires the previous test result.");
+  if (targets.has("anatomia")) {
+    analysis = await analyzePr({
+      cliPath: anatomiaCliPath,
+      cwd: worktrees.head,
+      base: worktrees.mergeBase,
+    });
+  }
+  const security = targets.has("security")
+    ? await reviewSecurityScan({
+        runSecurity,
+        worktrees,
+        leakage,
+        ci,
+        settings,
+        plan,
+      })
+    : previous.security;
+  const baselineScore = previous.anatomia?.baselineComplexityScore;
+  const result = buildGateResult({
+    request,
+    firstAnalysis: null,
+    finalAnalysis: analysis,
+    baseline: typeof baselineScore === "number"
+      ? { quality: { complexity: { score: baselineScore } } }
+      : null,
+    reviewer: previous.reviewer,
+    contextSource: `partial-verification:${[...targets].join(",")}`,
+    reviewedHeadSha: request.headSha,
+    complexityDropThreshold,
+    initialLeakage: leakage,
+    leakage,
+    ci,
+    docsOnly: submitted.classification.docsOnly,
+    docsOrConfigOnly: submitted.classification.docsOrConfigOnly,
+    plan,
+    classification: submitted.classification,
+    security,
+    intentReviewCompleted: previous.intentReviewCompleted === true,
+  });
+  const runtimeVerification = previous.runtimeVerification ?? result.runtimeVerification;
+  const mergeRisk = assessMergeRisk({
+    classification: submitted.classification,
+    reasons: result.reasons,
+    advisories: result.advisories,
+    analysis,
+    complexityScoreDelta: result.complexityScoreDelta,
+    leakage,
+    ci,
+    runtimeVerification,
+    plan,
+    docsOnly: submitted.classification.docsOnly,
+  });
+  return {
+    ...result,
+    runtimeVerification,
+    mergeRisk,
+    humanQuestion: needsTargetDomain(
+      analysis,
+      submitted.classification.docsOrConfigOnly,
+      submitted.classification.codeDomainRequired,
+      stageEnabled(plan, "anatomia_domain_review"),
+    ) ? targetDomainQuestion(request.repository, request.number) : null,
+  };
+}
+
 export function createPrReviewRunner({
   cwd,
   env = process.env,
@@ -194,7 +404,6 @@ export function createPrReviewRunner({
   complexityDropThreshold = 10,
   runReview = runReviewer,
   runSecurity = runSecurityScan,
-  queryGenius = queryGeniusReview,
   transport = fetch,
 } = {}) {
   return async (request) => {
@@ -202,30 +411,44 @@ export function createPrReviewRunner({
       throw new Error("Fork pull requests are not eligible for the local autofix review");
     }
     const settings = readSettings(env);
-    const anatomiaCliPath = await resolveAnatomiaCli(settings.anatomiaFolder);
     const workspaceRoot = resolveWorkspaceRoot(cwd);
     const repoPath = request.rootPath;
     const worktrees = await prepareLocalWorktrees(repoPath, request);
     try {
       // The plan is decided from the submitted diff, before any expensive stage
       // runs, so the change profile is the first thing this review establishes.
-      const submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
-      const docsOnly = submitted.classification.docsOnly;
-      const docsOrConfigOnly = submitted.classification.docsOrConfigOnly;
-      const codeDomainRequired = submitted.classification.codeDomainRequired;
-      const initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
+      let submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
+      let docsOnly = submitted.classification.docsOnly;
+      let docsOrConfigOnly = submitted.classification.docsOrConfigOnly;
+      let codeDomainRequired = submitted.classification.codeDomainRequired;
+      assertMeaningfulReviewDiff(submitted);
+      if (request.reviewMode === "verification") {
+        const partialAnatomiaCliPath = request.verificationTargets?.includes("anatomia")
+          ? await resolveAnatomiaCli(settings.anatomiaFolder)
+          : null;
+        return runPartialVerification({
+          request,
+          submitted,
+          settings,
+          worktrees,
+          anatomiaCliPath: partialAnatomiaCliPath,
+          env,
+          runSecurity,
+          complexityDropThreshold,
+        });
+      }
+      const anatomiaCliPath = await resolveAnatomiaCli(settings.anatomiaFolder);
+      let initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
       const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
-      const authorContext = request.reviewMode === "verification"
-        ? null
-        : await resolveAuthorContext({
-            settings,
-            concordiaUrl,
-            request,
-            workspaceRoot,
-            env,
-            transport,
-          });
-      const externalReviewer = reviewerForProvider(
+      const authorContext = await resolveAuthorContext({
+        settings,
+        concordiaUrl,
+        request,
+        workspaceRoot,
+        env,
+        transport,
+      });
+      let externalReviewer = reviewerForProvider(
         authorContext?.provider,
         settings.fallbackReviewer,
       );
@@ -233,13 +456,10 @@ export function createPrReviewRunner({
         classification: submitted.classification,
         testCases: request.testCases,
       });
-      const plan = await advisePlan({
-        // Verification-only runs invoke no model at all, so they stay on the
-        // deterministic plan. Genius-tier reviews also do not ask a control
-        // model: only spec autofix may pay for an external planning call.
-        advisor: request.reviewMode === "verification" || reviewTier(deterministicPlan) === "genius"
-          ? "none"
-          : settings.planAdvisor,
+      let plan = await advisePlan({
+        // The default is deterministic. An explicitly configured advisor is a
+        // separate, visible model cost and remains subject to the plan floor.
+        advisor: settings.costValidationModeEnabled ? "none" : settings.planAdvisor,
         plan: deterministicPlan,
         request,
         testCases: request.testCases,
@@ -249,8 +469,11 @@ export function createPrReviewRunner({
         runReview,
         leakageClear: initialLeakage.totalFindings === 0,
       });
+      plan = applyCostValidationMode(plan, settings.costValidationModeEnabled);
+      codeDomainRequired = submitted.classification.codeDomainRequired
+        && stageEnabled(plan, "anatomia_domain_review");
       const codeAnalysis = stageEnabled(plan, "anatomia_code_analysis");
-      const [initial, { firstAnalysis, baseline }] = await Promise.all([
+      let [initial, { firstAnalysis, baseline }] = await Promise.all([
         analyzePr({
           cliPath: anatomiaCliPath,
           cwd: worktrees.head,
@@ -264,13 +487,20 @@ export function createPrReviewRunner({
           enabled: codeAnalysis,
         }),
       ]);
-      const initialCi = await runPlannedTests({
+      let reviewStrategy = selectReviewStrategy({
+        classification: submitted.classification,
+        unifiedDiff: submitted.unifiedDiff,
+        analysis: initial,
+        settings,
+      });
+      plan = { ...plan, reviewStrategy };
+      let initialCi = await runPlannedTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan,
         env,
       });
-      const initialSecurity = await reviewSecurityScan({
+      let initialSecurity = await reviewSecurityScan({
         runSecurity,
         worktrees,
         leakage: initialLeakage,
@@ -278,7 +508,7 @@ export function createPrReviewRunner({
         settings,
         plan,
       });
-      const gateInput = {
+      let gateInput = {
         request,
         firstAnalysis,
         baseline,
@@ -288,42 +518,6 @@ export function createPrReviewRunner({
         classification: submitted.classification,
         security: initialSecurity,
       };
-      if (request.reviewMode === "verification") {
-        return {
-          ...buildGateResult({
-            ...gateInput,
-            finalAnalysis: initial,
-            reviewer: null,
-            contextSource: "verification-only",
-            reviewedHeadSha: request.headSha,
-            leakage: initialLeakage,
-            ci: initialCi,
-            docsOnly,
-            docsOrConfigOnly,
-            security: initialSecurity,
-          }),
-          humanQuestion: needsTargetDomain(initial, docsOrConfigOnly, codeDomainRequired)
-            ? targetDomainQuestion(request.repository, request.number)
-            : null,
-        };
-      }
-      if (!testsPassed(initialCi)) {
-        return {
-          ...buildGateResult({
-            ...gateInput,
-            finalAnalysis: initial,
-            reviewer: null,
-            contextSource: "registered-tests",
-            reviewedHeadSha: request.headSha,
-            leakage: initialLeakage,
-            ci: initialCi,
-            docsOnly,
-            docsOrConfigOnly,
-            security: initialSecurity,
-          }),
-          humanQuestion: "Registered tests must pass before automated review.",
-        };
-      }
       if (initialLeakage.totalFindings > 0) {
         return {
           ...buildGateResult({
@@ -341,68 +535,205 @@ export function createPrReviewRunner({
           humanQuestion: "Potential information leakage must be removed before automated review.",
         };
       }
-      const tier = reviewTier(plan);
-      if (tier === "genius") {
-        const geniusGuidance = await queryGenius({
-          cwd,
-          classification: submitted.classification,
+      if (!testsPassed(initialCi)) {
+        // Validation mode promises that no review model is invoked. A failing
+        // registered test remains blocking evidence instead of entering the
+        // model-backed repair loop.
+        if (!isTestAutofixEnabled(plan)) {
+          return {
+            ...buildGateResult({
+              ...gateInput,
+              finalAnalysis: initial,
+              reviewer: "skipped",
+              contextSource: "cost-validation-mode",
+              reviewedHeadSha: request.headSha,
+              leakage: initialLeakage,
+              ci: initialCi,
+              docsOnly,
+              docsOrConfigOnly,
+              security: initialSecurity,
+              intentReviewCompleted: true,
+            }),
+            humanQuestion: "Registered tests must pass before validation can continue.",
+          };
+        }
+        const autofix = await autofixFailingTests({
+          request,
+          reviewer: externalReviewer,
+          worktreePath: worktrees.head,
+          mergeBase: worktrees.mergeBase,
+          initialCi,
+          testCases: request.testCases,
+          plan,
+          env,
+          runReview,
+          reviewerTimeoutMs,
         });
-        const geniusQuestion = "Genius の判断カードを確認し、この変更を承認または差し戻してください。";
-        const humanQuestion = needsTargetDomain(initial, docsOrConfigOnly, codeDomainRequired)
-          ? `${targetDomainQuestion(request.repository, request.number)} ${geniusQuestion}`
-          : geniusQuestion;
+        externalReviewer = autofix.reviewer;
+        initialCi = autofix.ci;
+        if (!testsPassed(initialCi)) {
+          return {
+            ...buildGateResult({
+              ...gateInput,
+              finalAnalysis: initial,
+              reviewer: externalReviewer,
+              contextSource: "registered-test-autofix",
+              reviewedHeadSha: request.headSha,
+              leakage: initialLeakage,
+              ci: initialCi,
+              docsOnly,
+              docsOrConfigOnly,
+              security: initialSecurity,
+            }),
+            humanQuestion: autofix.status === "stalled"
+              ? "Automated test autofix made no progress; inspect the failing test or environment."
+              : "Registered tests still fail after the bounded automated autofix attempts.",
+          };
+        }
+        // Test repair happens before the single intent review. Refresh the
+        // deterministic evidence now; no reviewer has run yet.
+        const preAutofixClassification = submitted.classification;
+        submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
+        docsOnly = submitted.classification.docsOnly;
+        docsOrConfigOnly = submitted.classification.docsOrConfigOnly;
+        const reviewPlanChanged = changeKindsDiffer(
+          preAutofixClassification,
+          submitted.classification,
+        );
+        if (reviewPlanChanged) {
+          plan = applyCostValidationMode(planReview({
+            classification: submitted.classification,
+            testCases: request.testCases,
+          }), settings.costValidationModeEnabled);
+          initialCi = await verifyAutofixPlan({
+            worktreePath: worktrees.head,
+            testCases: request.testCases,
+            plan,
+            env,
+          });
+        }
+        codeDomainRequired = submitted.classification.codeDomainRequired
+          && stageEnabled(plan, "anatomia_domain_review");
+        initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
+        initial = await analyzePr({
+          cliPath: anatomiaCliPath,
+          cwd: worktrees.head,
+          base: worktrees.mergeBase,
+        });
+        reviewStrategy = selectReviewStrategy({
+          classification: submitted.classification,
+          unifiedDiff: submitted.unifiedDiff,
+          analysis: initial,
+          settings,
+        });
+        plan = { ...plan, reviewStrategy };
+        initialSecurity = await reviewSecurityScan({
+          runSecurity,
+          worktrees,
+          leakage: initialLeakage,
+          ci: initialCi,
+          settings,
+          plan,
+        });
+        gateInput = {
+          ...gateInput,
+          initialLeakage,
+          plan,
+          classification: submitted.classification,
+          security: initialSecurity,
+        };
+      }
+      if (!stageEnabled(plan, "reviewer_autofix")) {
+        const reviewed = await readChangeProfile(worktrees.head, worktrees.mergeBase);
+        const finalLeakage = scanAddedDiffForLeaks(reviewed.unifiedDiff);
+        if (finalLeakage.totalFindings > 0) {
+          throw new Error(
+            "Test autofix introduced potential information leakage; changes were discarded before commit or push.",
+          );
+        }
+        const reviewedHeadSha = await commitAndAdvanceAutofix(
+          worktrees.head,
+          repoPath,
+          request,
+        );
         return {
           ...buildGateResult({
             ...gateInput,
             finalAnalysis: initial,
-            reviewer: "genius",
-            contextSource: authorContext?.source ?? "genius",
-            reviewedHeadSha: request.headSha,
-            leakage: initialLeakage,
+            reviewer: "skipped",
+            contextSource: "cost-validation-mode",
+            reviewedHeadSha,
+            leakage: finalLeakage,
             ci: initialCi,
             docsOnly,
             docsOrConfigOnly,
+            plan,
+            classification: reviewed.classification,
             security: initialSecurity,
-            humanReviewRequired: true,
-            geniusGuidance,
+            intentReviewCompleted: true,
           }),
-          humanQuestion,
+          humanQuestion: null,
         };
       }
-      const reviewer = externalReviewer;
-      const reviewResult = await runReview({
+      reviewTier(plan);
+      let reviewer = externalReviewer;
+      let investigation = null;
+      if (reviewStrategy.mode === "multi-agent") {
+        investigation = await runReviewWithCapacityFallback({
+          reviewer,
+          cwd: worktrees.head,
+          prompt: investigationPrompt({
+            request,
+            analysis: initial,
+            unifiedDiff: submitted.unifiedDiff,
+          }),
+          timeoutMs: reviewerTimeoutMs,
+          readOnly: true,
+          ...reviewStrategy.investigator,
+        }, runReview);
+        reviewer = investigation.reviewer;
+        if (!investigation.ok) {
+          throw new Error(
+            "Review investigation failed; output was withheld from the Check Run.",
+          );
+        }
+      }
+      const baseReviewPrompt = buildReviewerPrompt({
+        request,
+        analysis: initial,
+        authorContext,
+        unifiedDiff: submitted.unifiedDiff.slice(0, 120_000),
+        leakage: initialLeakage,
+        docsOnly,
+        docsOrConfigOnly,
+        codeDomainRequired,
+        plan,
+      });
+      const reviewResult = await runReviewWithCapacityFallback({
         reviewer,
         cwd: worktrees.head,
-        prompt: buildReviewerPrompt({
-          request,
-          analysis: initial,
-          authorContext,
-          unifiedDiff: submitted.unifiedDiff.slice(0, 120_000),
-          leakage: initialLeakage,
-          docsOnly,
-          docsOrConfigOnly,
-          codeDomainRequired,
-          plan,
-        }),
+        prompt: investigation?.ok
+          ? `${baseReviewPrompt}\n\nIndependent investigation findings:\n${investigation.stdout.slice(0, 40_000)}`
+          : baseReviewPrompt,
         timeoutMs: reviewerTimeoutMs,
+        ...reviewStrategy.judge,
       });
+      reviewer = reviewResult.reviewer;
       if (!reviewResult.ok) {
         throw new Error("Opposite-model reviewer failed; output was withheld from the Check Run.");
       }
-      const [finalAnalysis, reviewed] = await Promise.all([
-        analyzePr({
-          cliPath: anatomiaCliPath,
-          cwd: worktrees.head,
-          base: worktrees.mergeBase,
-        }),
-        readChangeProfile(worktrees.head, worktrees.mergeBase),
-      ]);
+      // The expensive intent review is deliberately single-shot. Failing tests
+      // enter the narrow autofix loop and never trigger another general review.
+      // Anatomia is rerun once after all edits, below, so the final domain and
+      // architecture evidence still describes the bytes that are committed.
+      let finalAnalysis = initial;
+      let reviewed = await readChangeProfile(worktrees.head, worktrees.mergeBase);
       // The relaxation and the risk profile must follow the reviewed diff, not the
       // submitted one: an autofix that touches code makes the change no longer
       // docs/config-only, and the missing target domain has to block again.
-      const finalDocsOnly = reviewed.classification.docsOnly;
-      const finalDocsOrConfigOnly = reviewed.classification.docsOrConfigOnly;
-      const finalCodeDomainRequired = reviewed.classification.codeDomainRequired;
+      let finalDocsOnly = reviewed.classification.docsOnly;
+      let finalDocsOrConfigOnly = reviewed.classification.docsOrConfigOnly;
+      let finalCodeDomainRequired = reviewed.classification.codeDomainRequired;
       // For the same reason the plan itself has to follow the reviewed diff. A
       // plan made for a documentation edit switched the registered tests and the
       // code-analysis gating off; if the autofix introduced executable content,
@@ -410,55 +741,114 @@ export function createPrReviewRunner({
       // decided from here on re-plans deterministically from the reviewed change.
       // An advised plan is discarded here on purpose: the advisor answered a
       // question about a change that no longer exists.
-      const finalPlan = hasExecutableChange(reviewed.classification)
-        && !hasExecutableChange(submitted.classification)
+      let finalPlan = changeKindsDiffer(
+        submitted.classification,
+        reviewed.classification,
+      )
         ? planReview({
             classification: reviewed.classification,
             testCases: request.testCases,
           })
         : plan;
+      finalPlan = { ...finalPlan, reviewStrategy };
       // The scan still runs at most once per review pass — the pre-merge scan
       // covers whatever the reviewer added. But once the re-plan asks for the
       // vulnerability stage, the recorded outcome must stop claiming the plan
       // never wanted it, or the board reports a reason that is no longer true.
-      const finalSecurity = initialSecurity.status === "skipped"
+      let finalSecurity = initialSecurity.status === "skipped"
         && !stageEnabled(plan, "security_review")
         && stageEnabled(finalPlan, "security_review")
         ? skippedSecurityScan(
             "required only after the reviewer added executable content; covered by the pre-merge scan",
           )
         : initialSecurity;
-      const finalLeakage = scanAddedDiffForLeaks(reviewed.unifiedDiff);
-      if (finalLeakage.totalFindings > 0) {
-        throw new Error(
-          "Opposite-model autofix introduced potential information leakage; changes were discarded before commit or push.",
-        );
-      }
-      const finalCi = await runPlannedTests({
+      let finalCi = await runPlannedTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan: finalPlan,
         env,
       });
       if (!testsPassed(finalCi)) {
-        return {
-          ...buildGateResult({
-            ...gateInput,
-            finalAnalysis: initial,
-            reviewer,
-            contextSource: authorContext?.source ?? "pr-only",
-            reviewedHeadSha: request.headSha,
-            reviewerOutput: reviewResult.stdout,
-            leakage: initialLeakage,
-            ci: finalCi,
-            docsOnly,
-            docsOrConfigOnly,
+        const autofix = await autofixFailingTests({
+          request,
+          reviewer,
+          worktreePath: worktrees.head,
+          mergeBase: worktrees.mergeBase,
+          initialCi: finalCi,
+          testCases: request.testCases,
+          plan: finalPlan,
+          env,
+          runReview,
+          reviewerTimeoutMs,
+        });
+        reviewer = autofix.reviewer;
+        finalCi = autofix.ci;
+        if (!testsPassed(finalCi)) {
+          return {
+            ...buildGateResult({
+              ...gateInput,
+              finalAnalysis,
+              reviewer,
+              contextSource: authorContext?.source ?? "pr-only",
+              reviewedHeadSha: request.headSha,
+              reviewerOutput: reviewResult.stdout,
+              leakage: initialLeakage,
+              ci: finalCi,
+              docsOnly,
+              docsOrConfigOnly,
+              plan: finalPlan,
+              security: finalSecurity,
+              // The reviewed/autofixed worktree is discarded on this path.
+              // A later retry must not treat its judgment as evidence for the
+              // unchanged submitted head.
+              intentReviewCompleted: false,
+            }),
+            humanQuestion: autofix.status === "stalled"
+              ? "Automated test autofix made no progress; inspect the failing test or environment."
+              : "Registered tests still fail after the bounded automated autofix attempts.",
+          };
+        }
+        reviewed = await readChangeProfile(worktrees.head, worktrees.mergeBase);
+        finalDocsOnly = reviewed.classification.docsOnly;
+        finalDocsOrConfigOnly = reviewed.classification.docsOrConfigOnly;
+        finalCodeDomainRequired = reviewed.classification.codeDomainRequired;
+        const reviewPlanChanged = changeKindsDiffer(
+          submitted.classification,
+          reviewed.classification,
+        );
+        finalPlan = reviewPlanChanged
+          ? planReview({
+              classification: reviewed.classification,
+              testCases: request.testCases,
+            })
+          : plan;
+        finalPlan = { ...finalPlan, reviewStrategy };
+        if (reviewPlanChanged) {
+          finalCi = await verifyAutofixPlan({
+            worktreePath: worktrees.head,
+            testCases: request.testCases,
             plan: finalPlan,
-            security: finalSecurity,
-          }),
-          humanQuestion: "Reviewer changes were discarded because registered tests failed.",
-        };
+            env,
+          });
+          if (finalSecurity.status === "skipped"
+              && stageEnabled(finalPlan, "security_review")) {
+            finalSecurity = skippedSecurityScan(
+              "required only after autofix added executable content; covered by the pre-merge scan",
+            );
+          }
+        }
       }
+      const finalLeakage = scanAddedDiffForLeaks(reviewed.unifiedDiff);
+      if (finalLeakage.totalFindings > 0) {
+        throw new Error(
+          "Opposite-model autofix introduced potential information leakage; changes were discarded before commit or push.",
+        );
+      }
+      finalAnalysis = await analyzePr({
+        cliPath: anatomiaCliPath,
+        cwd: worktrees.head,
+        base: worktrees.mergeBase,
+      });
       const reviewedHeadSha = await commitAndAdvanceAutofix(
         worktrees.head,
         repoPath,
@@ -468,6 +858,7 @@ export function createPrReviewRunner({
         finalAnalysis,
         finalDocsOrConfigOnly,
         finalCodeDomainRequired,
+        stageEnabled(finalPlan, "anatomia_domain_review"),
       )
         || reviewResult.stdout.includes("PR_GATE_NEEDS_HUMAN");
       return {
@@ -485,6 +876,7 @@ export function createPrReviewRunner({
           plan: finalPlan,
           classification: reviewed.classification,
           security: finalSecurity,
+          intentReviewCompleted: true,
         }),
         humanQuestion: needsHuman
           ? targetDomainQuestion(request.repository, request.number)

@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
-import { findTaggedMerge } from "./git-publication.mjs";
+import {
+  findPreparedMerge,
+  forgetPreparedMerge,
+  rememberPreparedMerge,
+} from "./git-publication.mjs";
 import { assertLocalVersionUnchanged } from "./local-version.mjs";
 import { publishMergedPullRequest } from "./release-publisher.mjs";
 import {
@@ -32,7 +36,13 @@ async function configuredSecurityScan({ worktreePath, diffBase, env }) {
 
 // Runs after the squash commit exists in the integration worktree and before
 // the base branch advances, so the exact bytes about to land are scanned.
-async function assertMergeSecurityScan({ worktreePath, baseSha, env, scan }) {
+async function assertMergeSecurityScan({
+  worktreePath,
+  baseSha,
+  env,
+  scan,
+  allowSystemFailureOverride = false,
+}) {
   const security = await scan({ worktreePath, diffBase: baseSha, env }) ?? {};
   if (security.status === "findings") {
     throw new Error(
@@ -43,6 +53,7 @@ async function assertMergeSecurityScan({ worktreePath, baseSha, env, scan }) {
     );
   }
   if (security.status === "error") {
+    if (allowSystemFailureOverride) return;
     throw new Error(
       `Merge blocked: the pre-merge security scan did not complete (${security.reason}).`,
     );
@@ -51,6 +62,7 @@ async function assertMergeSecurityScan({ worktreePath, baseSha, env, scan }) {
   // unrecognised result is not a pass, and this is the last check before the
   // local base branch moves.
   if (security.status !== "passed" && security.status !== "skipped") {
+    if (allowSystemFailureOverride) return;
     throw new Error("Merge blocked: the pre-merge security scan produced no usable result.");
   }
 }
@@ -100,6 +112,7 @@ export async function squashMergeLocalPullRequest({
   env = process.env,
   scan = configuredSecurityScan,
   publish = publishMergedPullRequest,
+  allowSystemFailureOverride = false,
 }) {
   if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
     throw new Error("Only an Open / Test OK local PR can be squash merged.");
@@ -129,11 +142,10 @@ export async function squashMergeLocalPullRequest({
       baseSha,
     );
   }
-  // A process can stop after the atomic GitHub push or Release creation and
-  // before local state is marked merged. The annotated version tag keeps that
-  // prepared commit reachable, so retry completes publication instead of
-  // generating a second squash commit for the same reviewed PR.
-  const prepared = await findTaggedMerge(repository.rootPath, pullRequest.id);
+  // A process can stop after the GitHub push or Release creation and before
+  // local state is marked merged. A private recovery ref keeps both tagged
+  // Releases and ordinary untagged merges reachable for an idempotent retry.
+  const prepared = await findPreparedMerge(repository.rootPath, pullRequest.id);
   if (prepared) {
     const expectedBaseSha = await git(repository.rootPath, [
       "rev-parse",
@@ -151,6 +163,11 @@ export async function squashMergeLocalPullRequest({
       repository.rootPath,
       pullRequest.baseRef,
       baseSha,
+      prepared.mergeCommitSha,
+    );
+    await forgetPreparedMerge(
+      repository.rootPath,
+      pullRequest.id,
       prepared.mergeCommitSha,
     );
     return publication;
@@ -190,7 +207,9 @@ export async function squashMergeLocalPullRequest({
       baseSha,
       env,
       scan,
+      allowSystemFailureOverride,
     });
+    await rememberPreparedMerge(repository.rootPath, pullRequest.id, mergeCommitSha);
     const publication = await publish({
       repository,
       pullRequest,
@@ -204,6 +223,7 @@ export async function squashMergeLocalPullRequest({
       baseSha,
       mergeCommitSha,
     );
+    await forgetPreparedMerge(repository.rootPath, pullRequest.id, mergeCommitSha);
     return publication;
   } finally {
     await cleanupWorktrees(repository.rootPath, worktrees);

@@ -80,6 +80,41 @@ test("merges even after the base advanced, as long as the squash applies cleanly
   }
 });
 
+test("an explicit human override bypasses an unavailable pre-merge scanner", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const mergeCommitSha = await squashMergeLocalPullRequest({
+      ...mergeInput(fixture),
+      allowSystemFailureOverride: true,
+      scan: async () => ({ status: "error", reason: "scanner executable missing" }),
+    });
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("a human override never bypasses actual security findings", async () => {
+  const fixture = repositoryFixture();
+  try {
+    await assert.rejects(
+      squashMergeLocalPullRequest({
+        ...mergeInput(fixture),
+        allowSystemFailureOverride: true,
+        scan: async () => ({
+          status: "findings",
+          totalFindings: 1,
+          failOnSeverity: "high",
+          reason: "finding remains",
+        }),
+      }),
+      /security finding/,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("reuses a tagged prepared merge when publication is retried", async () => {
   const fixture = repositoryFixture();
   try {
@@ -121,6 +156,49 @@ test("reuses a tagged prepared merge when publication is retried", async () => {
     assert.equal(calls[0].preparedTag, "v1.2.3");
     assert.equal(publication.releaseTag, "v1.2.3");
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), preparedSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("reuses an untagged prepared merge when ordinary publication is retried", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    let attempts = 0;
+    await assert.rejects(
+      squashMergeLocalPullRequest({
+        ...input,
+        publish: async () => {
+          attempts += 1;
+          throw new Error("publication interrupted");
+        },
+      }),
+      /publication interrupted/,
+    );
+
+    const publication = await squashMergeLocalPullRequest({
+      ...input,
+      scan: async () => {
+        throw new Error("a prepared ordinary merge must not be rebuilt or rescanned");
+      },
+      publish: async (request) => {
+        attempts += 1;
+        assert.equal(request.preparedTag, null);
+        return {
+          mergeCommitSha: request.mergeCommitSha,
+          releaseTag: null,
+          releaseUrl: null,
+        };
+      },
+    });
+
+    assert.equal(attempts, 2);
+    assert.equal(publication.releaseTag, null);
+    assert.equal(
+      git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+      publication.mergeCommitSha,
+    );
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

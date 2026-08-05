@@ -37,6 +37,9 @@ test("stores settings and encrypts local workflow secrets", () => {
       fallbackReviewer: "codex-sol",
       concordiaContextEnabled: true,
       workerCount: 1,
+      largeReviewLineThreshold: 1_000,
+      multiDomainReviewThreshold: 3,
+      costValidationModeEnabled: false,
       // Automatic merging is off until a human states the risk they accept.
       autoMergeEnabled: false,
       autoMergeRiskThreshold: 15,
@@ -56,6 +59,9 @@ test("stores settings and encrypts local workflow secrets", () => {
       fallbackReviewer: "claude-opus",
       concordiaContextEnabled: false,
       workerCount: 3,
+      largeReviewLineThreshold: 750,
+      multiDomainReviewThreshold: 2,
+      costValidationModeEnabled: true,
       securityScanEnabled: false,
       securityFailOnSeverity: "medium",
       securityMaxCostUsd: 2.5,
@@ -106,6 +112,9 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.equal(rawConfig.includes("workflow-secret"), false);
     assert.equal(rawConfig.includes("revisor.example.com"), false);
     assert.equal(readSettings(state.env).workerCount, 3);
+    assert.equal(readSettings(state.env).largeReviewLineThreshold, 750);
+    assert.equal(readSettings(state.env).multiDomainReviewThreshold, 2);
+    assert.equal(readSettings(state.env).costValidationModeEnabled, true);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }
@@ -157,6 +166,27 @@ test("rejects invalid worker settings", () => {
       concordiaContextEnabled: true,
       workerCount: 0,
     }, state.env), /Worker count/);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects invalid review scale thresholds", () => {
+  const state = fixture();
+  const base = {
+    anatomiaFolder: "Anatomia",
+    fallbackReviewer: "codex-sol",
+    workerCount: 1,
+  };
+  try {
+    assert.throws(
+      () => writeSettings({ ...base, largeReviewLineThreshold: 0 }, state.env),
+      /Large review line threshold/,
+    );
+    assert.throws(
+      () => writeSettings({ ...base, multiDomainReviewThreshold: 1.5 }, state.env),
+      /Multi-domain review threshold/,
+    );
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

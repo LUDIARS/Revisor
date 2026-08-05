@@ -1,7 +1,7 @@
 ---
 type: feature
-title: "review-plan — 変更種別ごとの審査ステージ設計"
-description: "レビュー開始時に変更種別からステージ、登録テスト、レビューコスト段階を選ぶ。spec 自動対応だけ外部モデルを使い、それ以外は Genius の判断カードを人間が判断する。"
+title: "review-plan — 変更種別と規模ごとの審査ステージ設計"
+description: "レビュー開始時に変更種別からステージと登録テストを選び、差分規模とAnatomiaドメイン数からレビューモデル・effort・分業方式を決める。"
 service: revisor
 domain: review-plan
 tags:
@@ -13,15 +13,17 @@ related:
   - ../architecture.md
   - ./review-gate.md
   - ./merge-risk.md
-updated: 2026-08-03
+  - ./review-cost-control.md
+updated: 2026-08-05
 ---
 
-# review-plan — 変更種別ごとの審査ステージ設計
+# review-plan — 変更種別と規模ごとの審査ステージ設計
 
 `src/review-plan.mjs` が正本。審査の最初に**変更プロファイル**を作り、
-どのステージ、登録テスト、レビューコスト段階を使うかを決める。ドキュメント修正のたびに
-脆弱性診断とコード解析を回すのをやめ、UI を含む軽量変更に外部モデルの autofix
-コストを払わないための仕組み。
+どのステージと登録テストを使うかを決める。Anatomia の初回結果が得られた後、差分規模と
+編集ドメイン数からレビューモデル、effort、大規模差分での調査・判断分業を決める。
+ドキュメント修正では脆弱性診断とコード解析を省略するが、通常モードのモデルレビューは
+維持する。
 
 ## 変更プロファイル
 
@@ -58,17 +60,35 @@ updated: 2026-08-03
 計画は必須ステージ `reviewer_autofix` を省略しない。ただしその実行方式を変更
 プロファイルから決め、PR のレビュー計画に記録する。
 
-| tier | 条件 | 実行 | 結果 |
-|---|---|---|---|
-| `genius` | `spec/` を変更しない | Excubitor catalog から解決した Genius に、差分ではなく変更種別・規模・runtime surface だけを問い合わせる | 公開判断カードを板に表示し、必ず人間判断へ回す。autofix はしない。 |
-| `spec_autofix` | `spec/` を 1 ファイルでも変更する | 既存の相互モデルレビューを実行する | scoped autofix を許可する。必要な外部モデルコストとして扱う。 |
+| 条件 | 実行 |
+|---|---|
+| コード変更行数が設定 X を超える | Sonnet + Opus または Terra + Sol。低コスト側が read-only 調査、強い側が high effort で判断・修正。 |
+| Anatomia の編集ドメイン数が設定 Y 以上 | Opus または Sol を high effort で単独実行。 |
+| 単一ドメインの機能、またはコード以外 | Sonnet または Terra を medium effort で単独実行。 |
 
-`verification` モードは従来どおり tier に関わらずモデルも Genius も呼ばない。
-Genius のサービスが未登録・停止・応答不正の場合、相互モデルへ黙ってフォールバック
-しない。人間判断に必要なカードを出せないため、そのレビューは明示的に失敗する。
-Genius へ送るのは導出済みメタデータだけで、PR の diff、タイトル、本文、Cc 文脈は送らない。
-Genius tier は `action_required` のまま自動マージ対象外とし、板には判断カードを確認した
-人だけが押す `Genius を確認して squash merge` を表示する。
+既定値は X=1000、Y=3。設定画面から変更できる。コード変更行数は unified diff の
+うち `code` 分類ファイルの追加・削除本文だけを数え、ドキュメントや diff header を
+含めない。モデルへ渡す前に登録 base の一致、空でない changed paths と patch を確認する。
+
+同じ reviewed head の再審査で、reject 理由がモデルレビュー以外ならモデルを呼ばない。
+失敗した tests / leakage / Anatomia / security だけを再実行する。tests または leakage のため
+security が skip されていた場合は、その依存先として security も再実行する。head が変わった
+場合、またはテスト失敗で intent review 完了前の worktree が破棄された場合は、前回レビューの
+証拠を流用せず通常レビューに戻す。
+
+reviewer と限定 test autofix の編集が終わった後、コミット対象の最終差分へ Anatomia を1回
+再実行する。target domain、architecture、complexity のゲートは、この最終結果だけで判定する。
+
+### コスト・品質・速度の検証モード
+
+設定 `costValidationModeEnabled` を有効にすると、モデルレビュー、Genius judgment、
+Anatomia domain review を `status: "skipped"` として計画へ記録する。この3項目の省略は
+blocking reasonにせず、登録テスト、情報流出検査、securityなど残るゲートが通れば
+Test OK・マージ可能とする。設定は通常運用の既定では無効。
+
+Anatomia domain reviewだけを省略し、Anatomiaのquality/architecture解析は維持する。
+したがって実際のarchitecture errorやテスト失敗、情報流出、security findingまで
+検証モードが合格へ変えることはない。
 
 ### code_analysis 省略の実効
 
@@ -123,8 +143,8 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
   stdin に計画依頼 JSON を渡す。ローカル・オフラインの CLI。
 - `reviewer`: レビュアーと同じモデル CLI に JSON で答えさせる。
 
-`planAdvisor` は `spec_autofix` tier だけで使える。`genius` tier は人間判断を
-Genius に集約するため、設定が `reviewer` でも外部モデルの管制プランナーを呼ばない。
+`planAdvisor` は全レビュー計画で利用できる。ただし既定は `none` であり、`reviewer` は
+レビュー本体とは別のモデル呼び出しになるため、必要性を確認して明示設定する。
 
 **Augur をデーモン無しの CLI とする前提**の契約がこれ。Augur は目的駆動の
 テスト計画をすでに責務として持つため、同じ判断を Revisor 側で再実装しない。

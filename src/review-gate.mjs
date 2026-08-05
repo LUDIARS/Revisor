@@ -70,8 +70,10 @@ export function needsTargetDomain(
   analysis,
   docsOrConfigOnly = false,
   codeDomainRequired = true,
+  domainReviewEnabled = true,
 ) {
-  return !analysis.domain.hasTargetDomain
+  return domainReviewEnabled
+    && !analysis.domain.hasTargetDomain
     && codeDomainRequired
     && !docsOrConfigOnly
     && hasAnalyzableChangedAnchors(analysis);
@@ -99,6 +101,7 @@ export function gateOutcome({
   // still selects the relaxation for callers that only know about documentation.
   docsOrConfigOnly = docsOnly,
   codeDomainRequired = true,
+  domainReviewEnabled = true,
   plan = null,
   security,
   humanReviewRequired = false,
@@ -123,7 +126,9 @@ export function gateOutcome({
   }
   // needsTargetDomain stays the only place that decides whether the domain is
   // still owed; the gate only chooses where to record it.
-  if (needsTargetDomain(finalAnalysis, docsOrConfigOnly, codeDomainRequired)) {
+  if (!domainReviewEnabled) {
+    advisories.push("Anatomia domain review was skipped by cost validation mode");
+  } else if (needsTargetDomain(finalAnalysis, docsOrConfigOnly, codeDomainRequired)) {
     reasons.push("target domain is still missing");
   } else if (!finalAnalysis.domain.hasTargetDomain) {
     // The relaxations overlap — a docs/config-only change is also a non-code

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pushReleaseAtomically } from "../src/git-publication.mjs";
+import {
+  pushPublishedCommit,
+  pushReleaseAtomically,
+} from "../src/git-publication.mjs";
 
 const REMOTE_BASE = "1111111111111111111111111111111111111111";
 const EXPECTED_BASE = "2222222222222222222222222222222222222222";
@@ -44,6 +47,37 @@ test("publishes the reviewed base and release tag in one atomic push", async () 
     "refs/tags/v1.2.3:refs/tags/v1.2.3",
   ]);
   assert.doesNotMatch(calls[1].args.join(" "), /installation-token/);
+});
+
+test("publishes an ordinary merge without creating or pushing a tag", async () => {
+  const calls = [];
+  const runRemoteGit = async (request) => {
+    calls.push(request);
+    return request.args[0] === "ls-remote" ? lsRemote() : "";
+  };
+
+  await pushPublishedCommit({
+    repository: "LUDIARS/Product",
+    rootPath: "C:/Product",
+    baseRef: "main",
+    expectedBaseSha: EXPECTED_BASE,
+    mergeCommitSha: MERGE_COMMIT,
+    tag: null,
+    token: "installation-token",
+    runGit: async () => REMOTE_BASE,
+    runRemoteGit,
+  });
+
+  assert.deepEqual(calls[0].args, [
+    "ls-remote",
+    "https://github.com/LUDIARS/Product.git",
+    "refs/heads/main",
+  ]);
+  assert.deepEqual(calls[1].args, [
+    "push",
+    "https://github.com/LUDIARS/Product.git",
+    `${MERGE_COMMIT}:refs/heads/main`,
+  ]);
 });
 
 test("refuses to overwrite a base branch that moved independently", async () => {

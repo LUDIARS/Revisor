@@ -3,6 +3,7 @@ import test from "node:test";
 import { classifyChange } from "../src/change-classification.mjs";
 import {
   applyAdvisedPlan,
+  applyCostValidationMode,
   planReview,
   selectedTestCases,
   skippedTestOutcomes,
@@ -31,14 +32,27 @@ test("a docs-only change drops code analysis and the vulnerability pass", () => 
   assert.equal(stageEnabled(plan, "spec_requirements"), true);
   assert.equal(stageEnabled(plan, "leakage_scan"), true);
   assert.equal(stageEnabled(plan, "reviewer_autofix"), true);
-  assert.equal(plan.review.tier, "genius");
-  assert.match(plan.review.label, /Genius/);
+  assert.equal(plan.review.tier, "model_review");
+  assert.match(plan.review.label, /モデルレビュー/);
 });
 
-test("a spec change pays for the external autofix tier", () => {
+test("cost validation mode records review, Genius and domain review as skipped", () => {
+  const plan = applyCostValidationMode(planFor(["src/runner.mjs"]), true);
+  assert.equal(stageEnabled(plan, "reviewer_autofix"), false);
+  assert.equal(stageEnabled(plan, "anatomia_domain_review"), false);
+  assert.equal(stageEnabled(plan, "genius_judgment"), false);
+  assert.deepEqual(plan.validationMode.skipped, [
+    "reviewer_autofix",
+    "genius_judgment",
+    "anatomia_domain_review",
+  ]);
+  assert.equal(plan.stages.find((stage) => stage.id === "reviewer_autofix").status, "skipped");
+});
+
+test("a spec change uses the same scale-selected model review tier", () => {
   const plan = planFor(["spec/feature/review-plan.md"]);
-  assert.equal(plan.review.tier, "spec_autofix");
-  assert.match(plan.review.reason, /spec/);
+  assert.equal(plan.review.tier, "model_review");
+  assert.match(plan.review.reason, /変更行数/);
 });
 
 test("a docs-only change runs only the test cases that declare docs coverage", () => {

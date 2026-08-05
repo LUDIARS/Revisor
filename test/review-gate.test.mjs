@@ -152,6 +152,16 @@ test("blocks on failed tests, leakage, error violations and complexity drops", (
   ]);
 });
 
+test("records a skipped domain review without blocking the merge", () => {
+  const finalAnalysis = analysis();
+  finalAnalysis.domain.hasTargetDomain = false;
+  finalAnalysis.domain.targetDomains = [];
+  const outcome = evaluate(finalAnalysis, { domainReviewEnabled: false });
+  assert.deepEqual(outcome.reasons, []);
+  assert.match(outcome.advisories[0], /domain review was skipped/);
+  assert.equal(needsTargetDomain(finalAnalysis, false, true, false), false);
+});
+
 test("passes a clean analysis with no advisories", () => {
   const outcome = evaluate(analysis());
   assert.deepEqual(outcome.reasons, []);

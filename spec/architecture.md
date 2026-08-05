@@ -2,10 +2,11 @@
 
 ## Purpose
 
-Revisor owns the local PR, CI, review, merge, release publication, and
+Revisor owns the local PR, CI, review, merge, main publication, human-triggered
+release publication, and
 outgoing-main leakage-gate lifecycle. Hosted pull requests and remote feature
 branches are outside the runtime architecture. GitHub receives only the
-released base commit, its semantic version tag, and its Release Notes.
+published base commits and human-selected semantic version tags/Releases.
 
 ## Components
 
@@ -78,11 +79,11 @@ released base commit, its semantic version tag, and its Release Notes.
   after publication succeeds.
 - `github-app.mjs` owns GitHub App JWT and short-lived installation tokens.
 - `authenticated-git.mjs` owns secret-safe authenticated Git process transport.
-- `git-publication.mjs` owns local/remote release refs and atomic base-plus-tag
-  publication policy.
-- `release-version.mjs` owns the stable semantic version sequence.
+- `git-publication.mjs` owns recovery refs, remote base publication, and optional
+  atomic base-plus-tag publication policy.
+- `release-version.mjs` recognizes explicit human major/minor release intent.
 - `local-version.mjs` owns the tracked, skip-worktree local version projection.
-- `release-notes.mjs` owns the bounded local-PR-to-Release projection.
+- `release-notes.mjs` owns the previous-version-to-GitHub-Release projection.
 - `release-publisher.mjs` orchestrates one idempotent remote publication.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe
   outgoing `main` updates as `amend_required`.
@@ -206,9 +207,9 @@ See `spec/feature/pr-lifecycle-notice.md` for the `pr-notification` domain.
 ## Data boundaries
 
 - Feature branches, diffs, and matched leakage values are never sent to GitHub.
-- A merged PR title and body become GitHub Release Notes only after the same
-  high-confidence credential patterns pass; author, session, reviewer, and
-  local branch metadata remain local.
+- Release Notes are generated only for a human-selected major/minor Release.
+  They pass the same high-confidence credential patterns; author, session,
+  reviewer, and local branch metadata remain local.
 - Test stdout/stderr is process-local except for a failed case, whose output is
   kept so the board can say why it failed. It is redacted line by line with the
   leakage rules before it is stored and truncated to its last 12 KB, and the
@@ -229,14 +230,13 @@ See `spec/feature/pr-lifecycle-notice.md` for the `pr-notification` domain.
 Every review decides its own stage plan before any expensive stage runs, from
 the change profile of the submitted diff. A change with no executable content
 drops the code analysis and the vulnerability pass but never the leakage scan,
-the domain review, or the spec-requirement check. The review strategy is also
-deterministic: a change that touches `spec/` receives the opposite-provider
-autofix, while every other change receives public Genius judgment cards and is
-held for a human decision. Genius is resolved from the Excubitor catalog and a
-missing or invalid response fails explicitly rather than silently spending on an
-external reviewer. An optional control planner — a daemon-less Augur CLI or a
-control model — may adjust only the `spec_autofix` plan inside a safety floor it
-cannot cross. `spec/feature/review-plan.md` is authoritative.
+the domain review, or the spec-requirement check. The review strategy is
+deterministic: focused or non-code changes use Sonnet/Terra, multi-domain changes
+use Opus/Sol with high effort, and large code diffs split read-only investigation
+from strong-model judgment. Configurable line/domain thresholds default to
+1000/3. An optional control planner — a daemon-less Augur CLI or a control model
+— may adjust the plan inside a safety floor it cannot cross.
+`spec/feature/review-plan.md` is authoritative.
 
 ## Automatic merging
 
@@ -253,10 +253,10 @@ authoritative.
 Only `Open / Test OK` PRs can merge. Revisor verifies that both base and
 reviewed head still match their recorded SHAs, builds one squash commit in a
 disposable worktree, scans that commit against the recorded base SHA, then
-publishes the commit and its annotated semantic-version tag atomically through
-the Revisor GitHub App, creates the GitHub Release, and only then
+publishes the commit through the Revisor GitHub App and only then
 compare-and-swap advances the local base ref and records the PR as merged.
-It never publishes a feature branch.
+If a human selected a major/minor boundary, publication atomically includes its
+annotated tag and creates the GitHub Release. It never publishes a feature branch.
 
 The remote base must be contained in the local source-of-truth base; it may be
 behind, but it may not diverge. There is no force-push, PAT, anonymous, or
@@ -264,10 +264,11 @@ local-only fallback. GitHub is not used for
 hosted PRs, Actions dispatch, repository administration, or branch-protection
 configuration. See `spec/feature/remote-publication.md`.
 
-Revisor advances one latest release line. Each registered repository has a
-tracked `.revisor-version` ignored with `skip-worktree`; its initial value is
-specified separately before the first publication. Normal merges increment
-patch, while changing that local file to the next major/minor boundary declares
+Revisor advances one latest release line only on explicit human intent. Each
+registered repository has a tracked `.revisor-version` ignored with
+`skip-worktree`; its initial value is specified separately when the first
+Release is wanted. Normal merges create no patch Release, while changing that
+local file to the next major/minor boundary declares
 that transition. There are no LTS or maintenance branches.
 
 A pull request that will never merge is closed instead of being left open: the

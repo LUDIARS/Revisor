@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { RevisorError } from "./errors.mjs";
 import { git } from "./workspace.mjs";
 import { isReleaseTag } from "./release-version.mjs";
@@ -38,24 +39,47 @@ export async function listLocalReleaseTags(rootPath, baseRef) {
   return output.split(/\r?\n/).filter(isReleaseTag);
 }
 
-export async function findTaggedMerge(rootPath, localPrId) {
-  const mergeCommitSha = await git(rootPath, [
-    "log",
-    "--all",
-    "--fixed-strings",
-    `--grep=Revisor-Local-PR: ${localPrId}`,
-    "--format=%H",
-    "-1",
-  ]);
+function preparedRef(localPrId) {
+  const id = createHash("sha256").update(String(localPrId)).digest("hex");
+  return `refs/revisor/prepared/${id}`;
+}
+
+export async function rememberPreparedMerge(rootPath, localPrId, mergeCommitSha) {
+  await git(rootPath, ["update-ref", preparedRef(localPrId), mergeCommitSha]);
+}
+
+export async function forgetPreparedMerge(rootPath, localPrId, mergeCommitSha) {
+  try {
+    await git(rootPath, ["update-ref", "-d", preparedRef(localPrId), mergeCommitSha]);
+  } catch {
+    // Publication has already succeeded and the base now reaches the commit.
+    // A stale private ref is harmless and can be replaced by a later retry.
+  }
+}
+
+export async function findPreparedMerge(rootPath, localPrId) {
+  let mergeCommitSha;
+  try {
+    mergeCommitSha = await git(rootPath, ["rev-parse", "--verify", preparedRef(localPrId)]);
+  } catch {
+    // Compatibility with tagged preparations made before private recovery refs.
+    mergeCommitSha = await git(rootPath, [
+      "log",
+      "--all",
+      "--fixed-strings",
+      `--grep=Revisor-Local-PR: ${localPrId}`,
+      "--format=%H",
+      "-1",
+    ]);
+  }
   if (!mergeCommitSha) return null;
   const tags = (await git(rootPath, ["tag", "--points-at", mergeCommitSha, "--list", "v*"]))
     .split(/\r?\n/)
     .filter(isReleaseTag);
-  if (tags.length === 0) return null;
   if (tags.length > 1) {
     throw new RevisorError(`Prepared merge '${localPrId}' has multiple release tags.`);
   }
-  return { mergeCommitSha, tag: tags[0] };
+  return { mergeCommitSha, tag: tags[0] ?? null };
 }
 
 export async function createLocalReleaseTag({
@@ -99,8 +123,7 @@ async function remoteState({
       "ls-remote",
       githubRemoteUrl(repository),
       `refs/heads/${baseRef}`,
-      `refs/tags/${tag}`,
-      `refs/tags/${tag}^{}`,
+      ...(tag ? [`refs/tags/${tag}`, `refs/tags/${tag}^{}`] : []),
     ],
     token,
     env,
@@ -108,11 +131,13 @@ async function remoteState({
   const refs = refsByName(output);
   return {
     baseSha: refs.get(`refs/heads/${baseRef}`) ?? null,
-    tagSha: refs.get(`refs/tags/${tag}^{}`) ?? refs.get(`refs/tags/${tag}`) ?? null,
+    tagSha: tag
+      ? refs.get(`refs/tags/${tag}^{}`) ?? refs.get(`refs/tags/${tag}`) ?? null
+      : null,
   };
 }
 
-export async function pushReleaseAtomically({
+export async function pushPublishedCommit({
   repository,
   rootPath,
   baseRef,
@@ -151,14 +176,14 @@ export async function pushReleaseAtomically({
       );
     }
   }
-  if (remote.tagSha && remote.tagSha.toLowerCase() !== mergeCommitSha.toLowerCase()) {
+  if (tag && remote.tagSha && remote.tagSha.toLowerCase() !== mergeCommitSha.toLowerCase()) {
     throw new RevisorError(`GitHub release tag '${tag}' points to another commit.`);
   }
   const refspecs = [];
   if (remote.baseSha.toLowerCase() !== mergeCommitSha.toLowerCase()) {
     refspecs.push(`${mergeCommitSha}:refs/heads/${baseRef}`);
   }
-  if (!remote.tagSha) refspecs.push(`refs/tags/${tag}:refs/tags/${tag}`);
+  if (tag && !remote.tagSha) refspecs.push(`refs/tags/${tag}:refs/tags/${tag}`);
   if (refspecs.length === 0) return;
   await runRemoteGit({
     cwd: rootPath,
@@ -171,4 +196,9 @@ export async function pushReleaseAtomically({
     token,
     env,
   });
+}
+
+export async function pushReleaseAtomically(request) {
+  if (!request.tag) throw new TypeError("Atomic Release publication requires a tag.");
+  return pushPublishedCommit(request);
 }

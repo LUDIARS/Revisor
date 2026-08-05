@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   classifyReleaseKind,
   isReleaseTag,
-  nextPatchReleaseTag,
   selectReleaseTag,
 } from "../src/release-version.mjs";
 
@@ -18,16 +17,10 @@ test("classifies sequential release transitions, including retries", () => {
   );
 });
 
-test("requires an explicit initial version and increments patch after it", () => {
-  assert.throws(() => nextPatchReleaseTag([]), /initial release version/);
-  assert.throws(
-    () => selectReleaseTag({ releasedTags: [], localVersion: "uninitialized" }),
-    /Initial version is not set/,
-  );
-  assert.equal(nextPatchReleaseTag(["v0.1.9", "v1.2.3", "not-a-version"]), "v1.2.4");
-  assert.throws(
-    () => nextPatchReleaseTag([`v1.0.${Number.MAX_SAFE_INTEGER}`]),
-    /cannot advance/,
+test("publishes only an explicitly selected initial version", () => {
+  assert.deepEqual(
+    selectReleaseTag({ releasedTags: [], localVersion: "uninitialized" }),
+    { tag: null, kind: "none" },
   );
   assert.deepEqual(
     selectReleaseTag({ releasedTags: [], localVersion: "2.3.0" }),
@@ -35,7 +28,7 @@ test("requires an explicit initial version and increments patch after it", () =>
   );
   assert.deepEqual(
     selectReleaseTag({ releasedTags: ["v2.3.0"], localVersion: "2.3.0" }),
-    { tag: "v2.3.1", kind: "patch" },
+    { tag: null, kind: "none" },
   );
 });
 
@@ -50,7 +43,7 @@ test("accepts only the next local major or minor intent", () => {
   );
   assert.throws(
     () => selectReleaseTag({ releasedTags: ["v1.4.8"], localVersion: "1.4.9" }),
-    /next major\/minor/,
+    /Patch Releases are not created/,
   );
 });
 

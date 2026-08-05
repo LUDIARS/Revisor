@@ -17,6 +17,7 @@ export function pendingReviewProjection() {
   return {
     reviewedHeadSha: null,
     reviewer: null,
+    intentReviewCompleted: false,
     ci: [],
     anatomia: null,
     leakage: null,
@@ -97,6 +98,7 @@ export class LocalPrReporter {
       checkStatus: passed ? "test_ok" : "action_required",
       reviewedHeadSha: job.result?.reviewedHeadSha ?? job.request.headSha,
       reviewer: job.result?.reviewer ?? null,
+      intentReviewCompleted: job.result?.intentReviewCompleted === true,
       ci: job.result?.ci ?? [],
       anatomia: analysisProjection(job.result),
       leakage: job.result?.leakage ?? null,

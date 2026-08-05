@@ -4,7 +4,7 @@ import {
   createLocalReleaseTag,
   listLocalReleaseTags,
   listRemoteReleaseTags,
-  pushReleaseAtomically,
+  pushPublishedCommit,
 } from "./git-publication.mjs";
 import { composeReleaseNotes } from "./release-notes.mjs";
 import {
@@ -14,11 +14,23 @@ import {
 } from "./release-version.mjs";
 import { scanTextForLeaks } from "./leakage.mjs";
 import { RevisorError } from "./errors.mjs";
-import {
-  prepareLocalVersionFile,
-  UNINITIALIZED_VERSION,
-  writeLocalVersion,
-} from "./local-version.mjs";
+import { prepareLocalVersionFile, writeLocalVersion } from "./local-version.mjs";
+import { git } from "./workspace.mjs";
+
+async function releaseChanges(rootPath, previousTag, mergeCommitSha) {
+  const output = await git(rootPath, [
+    "log",
+    "--format=%H%x09%s",
+    `${previousTag}..${mergeCommitSha}`,
+  ]);
+  return output.split(/\r?\n/).filter(Boolean).map((line) => {
+    const separator = line.indexOf("\t");
+    return {
+      sha: separator === -1 ? line : line.slice(0, separator),
+      subject: separator === -1 ? "Untitled change" : line.slice(separator + 1),
+    };
+  });
+}
 
 export async function publishMergedPullRequest({
   repository,
@@ -30,11 +42,6 @@ export async function publishMergedPullRequest({
   createClient = (credentials) => new GitHubAppClient(credentials),
 }) {
   const localVersion = await prepareLocalVersionFile(repository.rootPath);
-  if (!preparedTag && localVersion === UNINITIALIZED_VERSION) {
-    throw new RevisorError(
-      "Initial version is not set; run 'revisor version set MAJOR.MINOR.PATCH --repo <path>' before publishing.",
-    );
-  }
   const client = createClient(readGitHubAppCredentials(env));
   const token = await client.installationToken(repository.repository);
   const remoteTags = await listRemoteReleaseTags({
@@ -53,30 +60,40 @@ export async function publishMergedPullRequest({
         releasedTags,
         localVersion,
       });
-  const tag = selection.tag;
+  let tag = selection.tag;
   const previousTag = latestReleaseTag(releasedTags.filter((candidate) => candidate !== tag));
   const releaseKind = selection.kind === "prepared"
     ? classifyReleaseKind(previousTag, tag)
     : selection.kind;
-  const releaseNotes = composeReleaseNotes(pullRequest, mergeCommitSha, {
-    repository: repository.repository,
-    tag,
-    previousTag,
-    kind: releaseKind,
-  });
+  // A patch tag prepared by an older Revisor is never promoted into a new
+  // GitHub Release under the human-only major/minor policy.
+  if (releaseKind === "patch") tag = null;
+  const releaseNotes = tag
+    ? composeReleaseNotes({
+        repository: repository.repository,
+        tag,
+        previousTag,
+        kind: releaseKind,
+        changes: releaseKind === "initial"
+          ? []
+          : await releaseChanges(repository.rootPath, previousTag, mergeCommitSha),
+      })
+    : "";
   const leakage = scanTextForLeaks(releaseNotes, "release-notes");
   if (leakage.totalFindings > 0) {
     throw new RevisorError(
       `Release Notes contain ${leakage.totalFindings} potential information leakage finding(s).`,
     );
   }
-  await createLocalReleaseTag({
-    rootPath: repository.rootPath,
-    mergeCommitSha,
-    tag,
-    message: `${tag}: ${pullRequest.title}`,
-  });
-  await pushReleaseAtomically({
+  if (tag) {
+    await createLocalReleaseTag({
+      rootPath: repository.rootPath,
+      mergeCommitSha,
+      tag,
+      message: `${tag}: human-selected ${releaseKind} release`,
+    });
+  }
+  await pushPublishedCommit({
     repository: repository.repository,
     rootPath: repository.rootPath,
     baseRef: pullRequest.baseRef,
@@ -86,12 +103,15 @@ export async function publishMergedPullRequest({
     token,
     env,
   });
+  if (!tag) {
+    return { mergeCommitSha, releaseTag: null, releaseUrl: null };
+  }
   let release = await client.releaseByTag(repository.repository, tag);
   if (!release) {
     release = await client.createRelease(repository.repository, {
       tag_name: tag,
       target_commitish: mergeCommitSha,
-      name: `${tag} — ${pullRequest.title}`,
+      name: tag,
       body: releaseNotes,
       draft: false,
       prerelease: false,

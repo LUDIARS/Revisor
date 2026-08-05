@@ -84,7 +84,7 @@ test("draft, blocking reasons and open questions each need a human", () => {
   }
 });
 
-test("only a sole Genius card hold is offered as a human-decision merge", () => {
+test("a sole Genius card hold is offered as a human-decision merge", () => {
   const hold = {
     checkStatus: "action_required",
     reviewer: "genius",
@@ -113,6 +113,30 @@ test("only a sole Genius card hold is offered as a human-decision merge", () => 
       false,
       JSON.stringify(overrides),
     );
+  }
+});
+
+test("system review failures are human-mergeable but concrete failing evidence is not", () => {
+  const workerFailure = decidePullRequest(pullRequest({
+    checkStatus: "failed",
+    error: "Anatomia executable was unavailable.",
+  }), SETTINGS);
+  assert.equal(workerFailure.decision.humanOverrideMergeable, true);
+  assert.equal(workerFailure.decision.autoMergeEligible, false);
+
+  for (const reason of [
+    "1 registered test case(s) failed",
+    "2 potential information leakage finding(s) remain",
+    "1 security finding(s) at or above 'high'",
+    "target domain is still missing",
+    "Anatomia gate(s) did not pass: rule_conformance",
+    "1 changed architecture rule violation(s) remain",
+    "complexity score dropped by 12 points",
+  ]) {
+    assert.equal(decidePullRequest(pullRequest({
+      checkStatus: "action_required",
+      reasons: [reason],
+    }), SETTINGS).decision.humanOverrideMergeable, false, reason);
   }
 });
 

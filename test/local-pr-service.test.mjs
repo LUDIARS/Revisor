@@ -315,14 +315,15 @@ test("re-reviews an unchanged head and drops the previous outcome", async () => 
   const runs = [];
   const releases = [];
   const queue = new PrReviewQueue(async (request) => {
-    runs.push(request.headSha);
+    runs.push(request);
     await new Promise((resolve) => releases.push(resolve));
     return {
       conclusion: "action_required",
       reviewedHeadSha: request.headSha,
+      intentReviewCompleted: true,
       reviewer: "codex-sol",
       ci: [{ name: "unit", status: "failed", exitCode: 1, durationMs: 12 }],
-      reasons: ["unit failed"],
+      reasons: ["1 registered test case(s) failed"],
     };
   }, { concurrency: 1, reporter: new LocalPrReporter(store) });
   const service = new LocalPrService({
@@ -363,7 +364,10 @@ test("re-reviews an unchanged head and drops the previous outcome", async () => 
 
     await releaseRun(releases);
     await waitForCheckStatus(store, submitted.id, "action_required");
-    assert.deepEqual(runs, [submitted.headSha, submitted.headSha]);
+    assert.deepEqual(runs.map((request) => request.headSha), [submitted.headSha, submitted.headSha]);
+    assert.equal(runs[1].reviewMode, "verification");
+    assert.deepEqual(runs[1].verificationTargets, ["tests"]);
+    assert.equal(runs[1].previousReview.reviewedHeadSha, submitted.headSha);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

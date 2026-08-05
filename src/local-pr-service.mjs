@@ -7,9 +7,14 @@ import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
 import { redactSecretLines } from "./leakage.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
-import { approvedPullRequestForManualMerge } from "./human-decision.mjs";
+import {
+  approvedPullRequestForManualMerge,
+  canBypassPreMergeSystemFailure,
+  isHumanOverrideableReviewHold,
+} from "./human-decision.mjs";
 import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
 import { inspectLocalPullRequest, git } from "./workspace.mjs";
+import { retryReviewScope } from "./retry-review.mjs";
 import {
   assertLocalVersionUnchanged,
   prepareLocalVersionFile,
@@ -17,7 +22,7 @@ import {
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
-function reviewRequest(repository, pullRequest) {
+function reviewRequest(repository, pullRequest, options = {}) {
   return {
     localPrId: pullRequest.id,
     repository: repository.repository,
@@ -29,7 +34,9 @@ function reviewRequest(repository, pullRequest) {
     baseSha: pullRequest.baseSha,
     rootPath: repository.rootPath,
     testCases: repository.testCases,
-    reviewMode: "full",
+    reviewMode: options.reviewMode ?? "full",
+    verificationTargets: options.verificationTargets ?? [],
+    previousReview: options.previousReview ?? null,
   };
 }
 
@@ -253,6 +260,15 @@ export class LocalPrService {
       pullRequest.baseRef,
     );
     await assertLocalVersionUnchanged(repository.rootPath, refs.baseSha, refs.headSha);
+    let scope = retryReviewScope(pullRequest, refs.headSha);
+    const previousValidationMode = pullRequest.reviewPlan?.validationMode?.enabled === true;
+    const currentValidationMode = pullRequest.reviewPlan
+      ? this.loadSettings().costValidationModeEnabled === true
+      : false;
+    if (pullRequest.reviewPlan && previousValidationMode !== currentValidationMode) {
+      scope = { reviewMode: "full", verificationTargets: [] };
+    }
+    const previousReview = scope.reviewMode === "verification" ? pullRequest : null;
     return this.#enqueue(
       repository,
       this.store.updatePullRequest(pullRequest.id, {
@@ -269,13 +285,16 @@ export class LocalPrService {
       // The refs may be unchanged, and the queue caches settled jobs by exact
       // head, so an unforced re-review would resolve to the run being retried.
       { force: true },
-      { announceFailure },
+      { announceFailure, requestOptions: { ...scope, previousReview } },
     );
   }
 
-  async #enqueue(repository, pullRequest, options, { announceFailure = true } = {}) {
+  async #enqueue(repository, pullRequest, options, {
+    announceFailure = true,
+    requestOptions = {},
+  } = {}) {
     try {
-      await this.queue.submit(reviewRequest(repository, pullRequest), options);
+      await this.queue.submit(reviewRequest(repository, pullRequest, requestOptions), options);
     } catch (error) {
       const failed = this.store.updatePullRequest(pullRequest.id, {
         checkStatus: "failed",
@@ -347,10 +366,14 @@ export class LocalPrService {
       const approvedPullRequest = humanApproved
         ? approvedPullRequestForManualMerge(pullRequest)
         : pullRequest;
+      const allowSystemFailureOverride = humanApproved
+        && (isHumanOverrideableReviewHold(pullRequest)
+          || canBypassPreMergeSystemFailure(pullRequest));
       const publication = await this.merge({
         repository,
         pullRequest: approvedPullRequest,
         env: this.env,
+        allowSystemFailureOverride,
         ...(this.securityScan ? { scan: this.securityScan } : {}),
         ...(this.publisher ? { publish: this.publisher } : {}),
       });

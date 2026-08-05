@@ -32,24 +32,15 @@ const INERT_KINDS = new Set(["docs", "asset", "generated"]);
 // Kinds whose test coverage may never be dropped by an advisor: skipping tests
 // on executable change is exactly the failure this plan must not enable.
 const EXECUTABLE_KINDS = new Set(["code", "infra", "config", "test"]);
-const REVIEW_COST_TIERS = new Set(["genius", "spec_autofix"]);
+const REVIEW_COST_TIERS = new Set(["model_review"]);
 
-// Changes to specifications may need an automated, scoped correction so they
-// retain the external reviewer. Every other change is deliberately handed to
-// Genius' local judgment cards and a human decision; treating a UI-only change
-// as an opportunity for an expensive autofix has no useful return.
-function reviewStrategy(classification) {
-  if (classification.touchesSpec) {
-    return {
-      tier: "spec_autofix",
-      label: "spec 自動対応（相互モデル）",
-      reason: "spec を含む変更は自動対応が必要なため、相互モデルでレビューします",
-    };
-  }
+// Every merge candidate receives model review. The concrete provider model and
+// effort are selected later, after Anatomia has supplied the edited-domain count.
+function reviewStrategy() {
   return {
-    tier: "genius",
-    label: "Genius 判断カード（人間判断）",
-    reason: "spec を含まない変更は Genius の判断カードを提示し、人間が判断します",
+    tier: "model_review",
+    label: "差分規模に応じたモデルレビュー",
+    reason: "変更行数・Anatomiaドメイン数・変更種別からレビューモデルを選択します",
   };
 }
 
@@ -116,7 +107,7 @@ function stageDecisions(classification, review) {
 }
 
 export function planReview({ classification, testCases = [] }) {
-  const review = reviewStrategy(classification);
+  const review = reviewStrategy();
   const decisions = stageDecisions(classification, review);
   const tests = selectTestCases(testCases, classification);
   const stages = STAGE_IDS.map((id) => {
@@ -147,6 +138,30 @@ export function planReview({ classification, testCases = [] }) {
     // Stages an advisor turned off. Kept separate from the deterministic skips
     // because reduced confidence from an advised skip is itself a risk factor.
     advisedSkips: [],
+  };
+}
+
+export function applyCostValidationMode(plan, enabled) {
+  if (!enabled) return plan;
+  const skipped = new Set(["reviewer_autofix", "anatomia_domain_review"]);
+  const reason = "コスト・品質・速度の検証モードにより skipped";
+  return {
+    ...plan,
+    validationMode: {
+      enabled: true,
+      skipped: ["reviewer_autofix", "genius_judgment", "anatomia_domain_review"],
+    },
+    review: {
+      tier: "model_review",
+      label: "検証モード（モデルレビュー skipped）",
+      reason,
+    },
+    stages: [
+      ...plan.stages.map((stage) => skipped.has(stage.id)
+        ? { ...stage, run: false, status: "skipped", reason }
+        : stage),
+      { id: "genius_judgment", run: false, status: "skipped", reason },
+    ],
   };
 }
 

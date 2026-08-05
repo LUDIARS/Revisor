@@ -21,6 +21,14 @@
     {
       "preset": "couplingCap",
       "params": {
+        "targetPattern": "src/human-decision\\.mjs$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
         "targetPattern": "closePullRequest|mergePullRequest|retryPullRequest|recoverInterruptedReviews|autoMergeIfEligible|classifyDecision|decidePullRequest|decidePullRequests|blockersOf|compareByHumanAttention",
         "by": "name",
         "maxFanOut": 9007199254740991
@@ -33,6 +41,14 @@
         "by": "name",
         "maxFanOut": 9007199254740991
       }
+    }
+  ],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:human-decision|local-pr-service|pr-disposition)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:human-decision|local-pr-service|pr-disposition)\\.test\\.mjs$"
     }
   ],
   "templateRules": [],
@@ -56,5 +72,5 @@
     "early-qa-mode — 安全境界 (マージ条件と reviewed head の意味を緩和しない)"
   ],
   "rationale": "「この PR はもう誰かを待っているか」を決めるのは status 遷移とその読み取り時の判定であり、審査の実行 (runner) やマージ可否のポリシー (review-gate) とは別の責務。遷移を持つ LocalPrService と、遷移結果を判定へ写す pr-disposition を 1 つのドメインに置き、終局の規則が両者で食い違わないようにする。実際の squash merge 手順は local-merge、リスク評価は merge-risk が担い、ここでは status だけを解釈する。",
-  "updatedAt": "2026-08-04T00:00:00.000Z"
+  "updatedAt": "2026-08-05T00:00:00.000Z"
 }

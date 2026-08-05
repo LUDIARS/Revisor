@@ -71,11 +71,12 @@ const CONTROLLER_SOURCE = `
 
   function actionsOf(pr) {
     const wrapper = element('div', 'actions');
-    const geniusHumanDecision = pr.decision?.humanDecisionMergeable === true;
-    if (pr.status === 'open' && (pr.checkStatus === 'test_ok' || geniusHumanDecision) && !pr.draft) {
+    const humanOverride = pr.decision?.humanOverrideMergeable === true
+      || pr.decision?.humanDecisionMergeable === true;
+    if (pr.status === 'open' && (pr.checkStatus === 'test_ok' || humanOverride) && !pr.draft) {
       const merge = document.createElement('button');
-      merge.textContent = geniusHumanDecision
-        ? 'Genius を確認して squash merge'
+      merge.textContent = humanOverride
+        ? '人間判断で squash merge'
         : 'squash merge';
       merge.addEventListener('click', () => runAction(merge, pr.id, 'merge'));
       wrapper.append(merge);

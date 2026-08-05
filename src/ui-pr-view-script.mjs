@@ -138,7 +138,8 @@ export const PR_VIEW_SOURCE = `
       const item = document.createElement('li');
       item.append(
         element('span', 'stage-mark ' + (stage.run === false ? 'idle' : 'ok'), stage.run === false ? '—' : '○'),
-        element('span', null, stage.id + ' : ' + stage.reason),
+        element('span', null, stage.id + ' : '
+          + (stage.run === false ? 'skipped — ' : '') + stage.reason),
       );
       stages.append(item);
     }

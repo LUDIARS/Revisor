@@ -12,13 +12,30 @@ const BODY = `
       <div class="field">
         <label for="fallback-reviewer">Cc文脈がない場合のレビュアー</label>
         <select id="fallback-reviewer">
-          <option value="codex-sol">Codex Sol</option>
-          <option value="claude-opus">Claude Opus</option>
+          <option value="codex-sol">Codex（Terra / Sol 自動選択）</option>
+          <option value="claude-opus">Claude（Sonnet / Opus 自動選択）</option>
         </select>
+      </div>
+      <div class="field">
+        <label for="large-review-line-threshold">大規模レビューに切り替えるコード変更行数 X</label>
+        <input id="large-review-line-threshold" type="number" min="1" step="1" required>
+        <span class="note">X行を超えると、Sonnet→Opus または Terra→Sol の調査・判断2エージェント構成にします。既定は1000です。</span>
+      </div>
+      <div class="field">
+        <label for="multi-domain-review-threshold">強いレビューに切り替えるAnatomiaドメイン数 Y</label>
+        <input id="multi-domain-review-threshold" type="number" min="1" step="1" required>
+        <span class="note">Yドメイン以上なら Opus / Sol を high effort で使います。既定は3です。</span>
       </div>
       <div class="field">
         <label for="worker-count">並列ワーカープロセス数（1〜8、次回起動から適用）</label>
         <input id="worker-count" type="number" min="1" max="8" step="1" required>
+      </div>
+      <div class="field">
+        <label class="check">
+          <input id="cost-validation-mode" type="checkbox">
+          コスト・品質・速度の検証モード（review / Genius / Anatomia domain を skipped）
+        </label>
+        <span class="note">省略したゲートはレビュー計画へ記録し、それ自体ではテストOK・マージをブロックしません。</span>
       </div>
       <div class="field">
         <label class="check">
@@ -174,6 +191,12 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     document.querySelector('#anatomia-folder').value = state.settings.anatomiaFolder;
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
+    document.querySelector('#large-review-line-threshold').value =
+      String(state.settings.largeReviewLineThreshold);
+    document.querySelector('#multi-domain-review-threshold').value =
+      String(state.settings.multiDomainReviewThreshold);
+    document.querySelector('#cost-validation-mode').checked =
+      state.settings.costValidationModeEnabled;
     document.querySelector('#concordia-context').checked = state.settings.concordiaContextEnabled;
     document.querySelector('#plan-advisor').value = state.settings.planAdvisor;
     document.querySelector('#augur-folder').value = state.settings.augurFolder;
@@ -191,7 +214,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
       : 'workflow token 未設定';
     document.querySelector('#github-app-status').textContent = state.githubAppConfigured
       ? 'GitHub App 設定済み'
-      : 'GitHub App 未設定（マージ時のpushとRelease作成は失敗します）';
+      : 'GitHub App 未設定（マージ時のmain公開と手動Release作成は失敗します）';
     return state;
   }
 
@@ -223,6 +246,12 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           anatomiaFolder: document.querySelector('#anatomia-folder').value,
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
           workerCount: Number(document.querySelector('#worker-count').value),
+          largeReviewLineThreshold:
+            Number(document.querySelector('#large-review-line-threshold').value),
+          multiDomainReviewThreshold:
+            Number(document.querySelector('#multi-domain-review-threshold').value),
+          costValidationModeEnabled:
+            document.querySelector('#cost-validation-mode').checked,
           concordiaContextEnabled: document.querySelector('#concordia-context').checked,
           planAdvisor: document.querySelector('#plan-advisor').value,
           augurFolder: document.querySelector('#augur-folder').value,
