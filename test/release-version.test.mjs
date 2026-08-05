@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   classifyReleaseKind,
   isReleaseTag,
+  nextManualReleaseTag,
   selectReleaseTag,
 } from "../src/release-version.mjs";
 
@@ -51,4 +52,10 @@ test("accepts only canonical release tags", () => {
   assert.equal(isReleaseTag("v2.0.1"), true);
   assert.equal(isReleaseTag("2.0.1"), false);
   assert.equal(isReleaseTag("v2.0.1-beta"), false);
+});
+
+test("calculates immediate major and minor release targets", () => {
+  assert.equal(nextManualReleaseTag("2.4.9", "major"), "v3.0.0");
+  assert.equal(nextManualReleaseTag("v2.4.9", "minor"), "v2.5.0");
+  assert.throws(() => nextManualReleaseTag("2.4.9", "patch"), /major.*minor/);
 });

@@ -267,6 +267,68 @@ test("reads without a configured workflow token", async () => {
   }
 });
 
+test("serves version state and confirmed release actions through the UI session", async () => {
+  const calls = [];
+  const handler = createRequestHandler({
+    env: {},
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {},
+    releaseService: {
+      listProjects: async () => [{
+        repository: "LUDIARS/Product",
+        version: { status: "ready", version: "1.4.8", managed: true },
+      }],
+      initialize: async (repository, version) => {
+        calls.push(["initialize", repository, version]);
+        return { repository, version };
+      },
+      release: async (repository, release) => {
+        calls.push(["release", repository, release]);
+        return { repository, tag: "v2.0.0" };
+      },
+    },
+  });
+  const headers = { "x-revisor-session": "ui-token" };
+  const list = response();
+  await handler(request({ method: "GET", url: "/api/releases", headers }), list);
+  assert.equal(list.status, 200);
+  assert.equal(JSON.parse(list.body).projects[0].version.version, "1.4.8");
+
+  const initialize = response();
+  await handler(request({
+    method: "POST",
+    url: "/api/releases/LUDIARS%2FProduct/initialize",
+    headers,
+    body: JSON.stringify({ version: "1.4.8", confirm: true }),
+  }), initialize);
+  assert.equal(initialize.status, 200);
+
+  const publish = response();
+  await handler(request({
+    method: "POST",
+    url: "/api/releases/LUDIARS%2FProduct/publish",
+    headers,
+    body: JSON.stringify({
+      kind: "major",
+      expectedVersion: "1.4.8",
+      title: "Product 2",
+      notes: "Breaking changes.",
+      confirm: true,
+    }),
+  }), publish);
+  assert.equal(publish.status, 200);
+  assert.deepEqual(calls, [
+    ["initialize", "LUDIARS/Product", "1.4.8"],
+    ["release", "LUDIARS/Product", {
+      kind: "major",
+      expectedVersion: "1.4.8",
+      title: "Product 2",
+      notes: "Breaking changes.",
+    }],
+  ]);
+});
+
 test("rejects non-loopback clients before reading credentials", async () => {
   const handler = createRequestHandler({
     env: {},

@@ -165,7 +165,7 @@ const BODY = `
     <h3>登録済み</h3>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>repository</th><th>root path</th><th>base</th><th>テストケース</th></tr></thead>
+        <thead><tr><th>repository</th><th>version</th><th>root path</th><th>base</th><th>テストケース</th></tr></thead>
         <tbody id="repository-rows"></tbody>
       </table>
     </div>
@@ -219,11 +219,17 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
   }
 
   async function refreshRepositories() {
-    const state = await request('/api/repositories');
+    const [state, releases] = await Promise.all([
+      request('/api/repositories'),
+      request('/api/releases'),
+    ]);
     repositoryRows.replaceChildren(...state.repositories.map((repository) => {
+      const releaseProject = releases.projects.find((candidate) =>
+        candidate.repository.toLowerCase() === repository.repository.toLowerCase());
       const row = document.createElement('tr');
       row.append(
         cell(repository.repository),
+        cell(releaseProject?.version.version || '未登録'),
         cell(repository.rootPath),
         cell(repository.baseRef),
         cell(repository.testCases.map((entry) => {

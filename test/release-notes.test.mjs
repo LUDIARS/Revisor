@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { composeReleaseNotes } from "../src/release-notes.mjs";
+import {
+  composeManualReleaseNotes,
+  composeReleaseNotes,
+} from "../src/release-notes.mjs";
 
 test("leaves the first human-selected Release without notes", () => {
   assert.equal(composeReleaseNotes({
@@ -38,4 +41,22 @@ test("refuses patch Release notes", () => {
     () => composeReleaseNotes({ kind: "patch" }),
     /only for initial, major, or minor/,
   );
+});
+
+test("composes operator-authored immediate Release Notes", () => {
+  const notes = composeManualReleaseNotes({
+    title: "Operator release",
+    body: "Migration guidance.",
+    repository: "LUDIARS/Product",
+    currentVersion: "1.8.4",
+    tag: "v2.0.0",
+    previousTag: "v1.8.4",
+    kind: "major",
+    commitSha: "abc123",
+  });
+  assert.match(notes, /# Operator release/);
+  assert.match(notes, /Migration guidance/);
+  assert.match(notes, /Version transition: `v1\.8\.4` → `v2\.0\.0`/);
+  assert.match(notes, /compare\/v1\.8\.4\.\.\.v2\.0\.0/);
+  assert.match(notes, /Published from the Revisor Releases tab/);
 });

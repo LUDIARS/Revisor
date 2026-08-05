@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   assertLocalVersionUnchanged,
+  initializeLocalVersion,
+  inspectLocalVersionState,
   LOCAL_VERSION_FILE,
   prepareLocalVersionFile,
   readLocalVersion,
@@ -57,6 +59,43 @@ test("writes the explicitly selected version and retains local management", asyn
   } finally {
     rmSync(repoPath, { recursive: true, force: true });
   }
+});
+
+test("bootstraps a missing registered version on the checked-out base only", async () => {
+  const repoPath = mkdtempSync(join(tmpdir(), "revisor-version-bootstrap-"));
+  try {
+    git(repoPath, "init");
+    git(repoPath, "checkout", "-b", "main");
+    git(repoPath, "config", "user.name", "Test");
+    git(repoPath, "config", "user.email", "test@example.invalid");
+    writeFileSync(join(repoPath, "product.txt"), "base\n", "utf8");
+    git(repoPath, "add", "product.txt");
+    git(repoPath, "commit", "-m", "base");
+    assert.deepEqual(await inspectLocalVersionState(repoPath), {
+      status: "missing",
+      version: null,
+      managed: false,
+    });
+    assert.equal(await initializeLocalVersion(repoPath, "main", "2.4.0"), "2.4.0");
+    assert.equal(git(repoPath, "show", `HEAD:${LOCAL_VERSION_FILE}`), UNINITIALIZED_VERSION);
+    assert.equal(await readLocalVersion(repoPath), "2.4.0");
+    assert.match(git(repoPath, "ls-files", "-t", "--", LOCAL_VERSION_FILE), /^S /);
+    assert.equal(git(repoPath, "log", "-1", "--format=%s"), "chore: bootstrap Revisor version state");
+  } finally {
+    rmSync(repoPath, { recursive: true, force: true });
+  }
+});
+
+test("reports an unreachable registration instead of rejecting the projection", async () => {
+  const missingPath = join(tmpdir(), "revisor-version-absent-root");
+  rmSync(missingPath, { recursive: true, force: true });
+  // The Releases, dashboard, and settings tables project every registration at
+  // once, so a root path that moved away has to stay one bad row.
+  const state = await inspectLocalVersionState(missingPath);
+  assert.equal(state.status, "invalid");
+  assert.equal(state.version, null);
+  assert.equal(state.managed, false);
+  assert.equal(typeof state.error, "string");
 });
 
 test("rejects a version-file change from a feature branch", async () => {

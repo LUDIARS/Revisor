@@ -13,11 +13,12 @@ import {
   isHumanOverrideableReviewHold,
 } from "./human-decision.mjs";
 import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
+import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { inspectLocalPullRequest, git } from "./workspace.mjs";
 import { retryReviewScope } from "./retry-review.mjs";
 import {
   assertLocalVersionUnchanged,
-  prepareLocalVersionFile,
+  prepareRegisteredVersionFile,
 } from "./local-version.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
@@ -48,11 +49,12 @@ export class LocalPrService {
     merge = squashMergeLocalPullRequest,
     securityScan,
     publisher,
-    prepareVersionFile = prepareLocalVersionFile,
+    prepareVersionFile = prepareRegisteredVersionFile,
     cliPath = CLI_PATH,
     env = process.env,
     loadSettings = () => readSettings(env),
     notifyLifecycle = null,
+    publicationCoordinator = new PublicationCoordinator(),
   }) {
     if (!store || !queue) {
       throw new TypeError("Local PR service requires a state store and review queue.");
@@ -70,16 +72,11 @@ export class LocalPrService {
     this.env = env;
     this.cliPath = cliPath;
     this.notifyLifecycle = notifyLifecycle;
+    this.publicationCoordinator = publicationCoordinator;
     // Read on every decision, not cached: moving the accepted risk threshold has
     // to re-colour and re-sort the dashboard without restarting the service.
     this.loadSettings = loadSettings;
   }
-
-  // squash マージは base ref を前進させる。 定期スイープ・レビュー完了時の自動マージ
-  // ・UI からの手動マージは互いを知らないので、 直列化しないと同じ baseSha から 2 本
-  // 作って後の 1 本が必ず「base が動いた」で落ちる (実際にはマージ可能な PR が失敗
-  // 扱いになる)。 マージは常に 1 本ずつ通す。
-  #mergeChain = Promise.resolve();
 
   // 1 周の所要時間はマージ前セキュリティスキャン次第で interval を超える。 前周が
   // まだ走っているうちに次を重ねると、同じ候補を二重に処理しにいく。
@@ -330,17 +327,14 @@ export class LocalPrService {
     return this.store.testWorkflowProducts();
   }
 
+  // squash マージは base ref を前進させる。定期スイープ・レビュー完了時の自動マージ・
+  // UI からの手動マージ・Releases タブの即時公開を publicationCoordinator が直列化し、
+  // 同じ baseSha / version を同時に選ばせない。
   // `humanApproved` はボードの明示操作かどうか。 既定を true にしているのは、
   // 呼び出し元が HTTP の merge エンドポイント (token / セッション必須) だから。
   // 自動マージ経路だけが false を渡し、 Genius の判断保留を勝手に解けなくする。
   async mergePullRequest(id, { humanApproved = true } = {}) {
-    const merge = this.#mergeChain.then(
-      () => this.#mergeOnce(id, humanApproved),
-      () => this.#mergeOnce(id, humanApproved),
-    );
-    // 失敗した 1 件で後続を止めない。 チェーンは順番だけを保証する。
-    this.#mergeChain = merge.then(() => undefined, () => undefined);
-    return merge;
+    return this.publicationCoordinator.run(() => this.#mergeOnce(id, humanApproved));
   }
 
   async #mergeOnce(id, humanApproved) {

@@ -17,6 +17,8 @@ import { notifyPullRequestLifecycle } from "./pr-lifecycle-notice.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
 import { LocalPrService } from "./local-pr-service.mjs";
 import { PrReviewQueue } from "./queue.mjs";
+import { PublicationCoordinator } from "./publication-coordinator.mjs";
+import { ReleaseService } from "./release-service.mjs";
 import { LocalPrStore, resolveStatePath } from "./state-store.mjs";
 import { createUiRequestHandler, readJsonBody, sendJson } from "./ui-server.mjs";
 import { PrReviewWorkerPool } from "./worker-pool.mjs";
@@ -40,8 +42,15 @@ export function createRequestHandler({
   sessionToken,
   queue,
   localPrService,
+  releaseService,
 }) {
-  const ui = createUiRequestHandler({ env, sessionToken, queue, localPrService });
+  const ui = createUiRequestHandler({
+    env,
+    sessionToken,
+    queue,
+    localPrService,
+    releaseService,
+  });
   return async (request, response) => {
     const host = request.headers.host ?? "127.0.0.1";
     const url = new URL(request.url ?? "/", `http://${host}`);
@@ -161,12 +170,14 @@ export async function startRevisor({
   createWorkerPool = (options) => new PrReviewWorkerPool(options),
   stateStore,
   createLocalPrService = (options) => new LocalPrService(options),
+  createReleaseService = (options) => new ReleaseService(options),
 } = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("Revisor port must be an integer from 1 to 65535.");
   }
   const settings = readSettings(env);
   const store = stateStore ?? new LocalPrStore({ path: resolveStatePath(env) });
+  const publicationCoordinator = new PublicationCoordinator();
   // Late-bound on purpose: the reporter is constructed before the service that
   // owns merging, and the automatic merge has to run the moment a review lands.
   let localPrService;
@@ -209,6 +220,12 @@ export async function startRevisor({
     queue,
     env,
     notifyLifecycle: announceLifecycle,
+    publicationCoordinator,
+  });
+  const releaseService = createReleaseService({
+    store,
+    env,
+    publicationCoordinator,
   });
   const sessionToken = randomBytes(24).toString("base64url");
   const server = createServer(createRequestHandler({
@@ -216,6 +233,7 @@ export async function startRevisor({
     sessionToken,
     queue,
     localPrService,
+    releaseService,
   }));
   try {
     await new Promise((resolve, reject) => {
@@ -294,6 +312,7 @@ export async function startRevisor({
     queue,
     store,
     localPrService,
+    releaseService,
     recovery,
     workerCount: settings.workerCount,
     close: async () => {

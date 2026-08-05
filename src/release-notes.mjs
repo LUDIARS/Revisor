@@ -37,3 +37,34 @@ export function composeReleaseNotes({ repository, tag, previousTag, kind, change
   );
   return notes.join("\n");
 }
+
+export function composeManualReleaseNotes({
+  title,
+  body,
+  repository,
+  currentVersion,
+  tag,
+  previousTag,
+  kind,
+  commitSha,
+}) {
+  if (kind !== "major" && kind !== "minor") {
+    throw new TypeError("Manual Release Notes require a major or minor kind.");
+  }
+  const label = kind === "major" ? "Major" : "Minor";
+  const currentTag = String(currentVersion).startsWith("v")
+    ? String(currentVersion)
+    : `v${currentVersion}`;
+  const notes = [
+    `# ${title}`,
+    String(body).trim(),
+    "",
+    `## ${label} version release`,
+    `Version transition: \`${currentTag}\` → \`${tag}\`.`,
+  ];
+  if (previousTag) {
+    notes.push(`[Compare ${previousTag}...${tag}](${compareUrl(repository, previousTag, tag)})`);
+  }
+  notes.push("", `Commit: ${commitSha}`, "Published from the Revisor Releases tab.");
+  return notes.join("\n");
+}

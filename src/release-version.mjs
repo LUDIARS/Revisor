@@ -21,6 +21,22 @@ export function latestReleaseTag(tags) {
   return `v${major}.${minor}.${patch}`;
 }
 
+export function nextManualReleaseTag(currentVersion, kind) {
+  if (kind !== "major" && kind !== "minor") {
+    throw new Error("Manual release kind must be 'major' or 'minor'.");
+  }
+  const currentTag = String(currentVersion).startsWith("v")
+    ? String(currentVersion)
+    : `v${currentVersion}`;
+  const current = parse(currentTag);
+  if (!current) throw new Error(`Current version '${currentVersion}' is not canonical.`);
+  const nextMajor = kind === "major" ? current[0] + 1 : current[0];
+  const nextMinor = kind === "major" ? 0 : current[1] + 1;
+  if (!Number.isSafeInteger(nextMajor) || !Number.isSafeInteger(nextMinor)) {
+    throw new Error(`Version cannot advance beyond '${currentTag}'.`);
+  }
+  return `v${nextMajor}.${nextMinor}.0`;
+}
 export function classifyReleaseKind(previousTag, nextTag) {
   const next = parse(nextTag);
   if (!next) throw new Error(`Release tag '${nextTag}' is not canonical.`);

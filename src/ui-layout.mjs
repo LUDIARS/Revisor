@@ -4,6 +4,7 @@ function navigation(activeNav) {
   return [
     { href: "/", label: "PR", key: "prs" },
     { href: "/dashboard", label: "ダッシュボード", key: "dashboard" },
+    { href: "/releases", label: "リリース", key: "releases" },
     { href: "/settings", label: "設定", key: "settings" },
   ]
     .map((item) =>

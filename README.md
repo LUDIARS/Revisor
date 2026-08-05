@@ -42,8 +42,8 @@ leaves the workstation.
    automatically; everything else waits for a person. Revisor creates one squash
    commit, runs the final Codex Security scan against the exact squashed diff,
    and pushes the base with the Revisor GitHub App before fast-forwarding the
-   local base branch. If a human selected the next major/minor version, the same
-   publication also creates its annotated tag and GitHub Release.
+   local base branch. Normal merges create no tag or Release. A human publishes
+   the next major/minor version immediately from the Releases page.
 
 A merge is attempted when the review completes and again on a sweep every 60
 seconds, because a pull request that was not mergeable at the moment its review
@@ -111,13 +111,20 @@ usage starts the Revisor UI; managed operation still starts the `revisor`
 service through Excubitor.
 
 Versioning has one current line and no LTS branches. Each repository tracks an
-`uninitialized` `.revisor-version`; registration marks it `skip-worktree`.
-Ordinary merges never change this value and never create patch tags or Releases.
-A human starts the first Release, or selects the next `X.0.0` / `X.Y.0` Release,
-with `revisor version set`; the next merge publishes that explicit version.
-The first human-selected Release has an empty notes body. Later major/minor
-GitHub Release bodies list every commit since the previous version and link its
-comparison. GitHub Releases are the only release-note source of truth.
+The dashboard, settings,
+and Releases page show each registered repository's local version. Each
+repository tracks an `uninitialized` `.revisor-version`; registration marks an
+existing file `skip-worktree`, while the Releases page can explicitly create
+the bootstrap commit and set an initial version for older registrations that
+have no file. Ordinary merges never change the version and never create patch
+tags or Releases. The Releases page advances major or minor immediately: it tags the currently
+checked-out registered base, atomically publishes base and tag with the GitHub
+App, creates the operator-authored GitHub Release, and updates the local version
+only after every remote step succeeds.
+Older tags and Releases remain immutable history only.
+GitHub Release bodies are the release-note source of truth. Major and minor
+Releases also state the version transition and link the previous-tag comparison;
+release notes are not duplicated into the repository Wiki.
 
 `guard-push` is an internal command used only by Revisor-managed Git hooks.
 
@@ -137,6 +144,12 @@ and a decision can be made without a desktop.
 
 `/dashboard` holds the operational view: registered repositories, local PR
 creation, the test workflow, and the review queue.
+
+`/releases` lists every registered project's version state. Missing and
+uninitialized projects can be given an initial version there. Configured
+projects expose confirmed major/minor publication forms; these are immediate
+external operations against the current registered base HEAD, not a pending
+setting for the next pull request.
 
 Selecting a pull request opens its detail: the decision with the itemised risk
 and runtime-verification factors, the review plan with each stage and why it ran

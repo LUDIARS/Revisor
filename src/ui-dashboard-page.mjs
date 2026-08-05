@@ -10,7 +10,7 @@ const BODY = `
     <p class="note">登録済みのローカルリポジトリです。追加は<a href="/settings">設定</a>から行います。</p>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>repository</th><th>root path</th><th>base</th><th>テストケース</th><th>push guard</th><th>Open PR</th></tr></thead>
+        <thead><tr><th>repository</th><th>version</th><th>root path</th><th>base</th><th>テストケース</th><th>push guard</th><th>Open PR</th></tr></thead>
         <tbody id="repository-rows"></tbody>
       </table>
     </div>
@@ -47,15 +47,19 @@ const CONTROLLER_SOURCE = `
   const queue = document.querySelector('#queue');
   const prMessage = document.querySelector('#pr-message');
 
-  function renderRepositories(repositories, pullRequests) {
+  function renderRepositories(repositories, pullRequests, releaseProjects) {
     repositoryEmpty.hidden = repositories.length > 0;
     repositoryRows.replaceChildren(...repositories.map((repository) => {
       const openCount = pullRequests.filter((pr) =>
         pr.status === 'open'
         && pr.repository.toLowerCase() === repository.repository.toLowerCase()).length;
       const row = document.createElement('tr');
+      const releaseProject = releaseProjects.find((candidate) =>
+        candidate.repository.toLowerCase() === repository.repository.toLowerCase());
       row.append(
         cell(repository.repository),
+        cell(releaseProject?.version.version || '未登録',
+          releaseProject?.version.status === 'ready' ? 'ok' : 'warn'),
         cell(repository.rootPath),
         cell(repository.baseRef),
         cell(repository.testCases.map((entry) => entry.name).join(', ')),
@@ -78,11 +82,12 @@ const CONTROLLER_SOURCE = `
 
   async function refresh() {
     try {
-      const [jobs, repositories, prs, workflow] = await Promise.all([
+      const [jobs, repositories, prs, workflow, releases] = await Promise.all([
         request('/api/jobs'),
         request('/api/repositories'),
         request('/api/local-prs'),
         request('/api/test-workflow'),
+        request('/api/releases'),
       ]);
       queue.textContent = [
         'running: ' + jobs.running,
@@ -91,7 +96,7 @@ const CONTROLLER_SOURCE = `
         ...jobs.jobs.slice(0, 20).map((job) =>
           job.status + '  ' + job.request.repository + '#' + job.request.number + '  ' + job.id),
       ].join('\\n');
-      renderRepositories(repositories.repositories, prs.pullRequests);
+      renderRepositories(repositories.repositories, prs.pullRequests, releases.projects);
       const products = document.querySelector('#test-products');
       products.replaceChildren(...workflow.products.map((product) =>
         element('li', 'ok', product.repository + ' #' + product.number + ' — ' + product.status)));

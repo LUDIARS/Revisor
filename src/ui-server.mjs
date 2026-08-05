@@ -14,14 +14,20 @@ import {
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
+import {
+  validateManualRelease,
+  validateVersionInitialization,
+} from "./release-contracts.mjs";
 import { renderDashboardPage } from "./ui-dashboard-page.mjs";
 import { renderPrBoardPage } from "./ui-pr-board-page.mjs";
+import { renderReleasePage } from "./ui-release-page.mjs";
 import { renderSettingsPage } from "./ui-settings-page.mjs";
 import { isAllowedHost, isAuthorizedSession } from "./ui-security.mjs";
 
 const PAGES = new Map([
   ["/", renderPrBoardPage],
   ["/dashboard", renderDashboardPage],
+  ["/releases", renderReleasePage],
   ["/settings", renderSettingsPage],
 ]);
 
@@ -62,6 +68,7 @@ export function createUiRequestHandler({
   sessionToken,
   queue,
   localPrService,
+  releaseService,
 }) {
   let allowedHosts = readAllowedHosts(env);
   return async (request, response) => {
@@ -166,6 +173,33 @@ export function createUiRequestHandler({
       if (request.method === "GET" && url.pathname === "/api/repositories") {
         sendJson(response, 200, {
           repositories: localPrService.listRepositories(),
+        });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/releases") {
+        sendJson(response, 200, {
+          projects: await releaseService.listProjects(),
+        });
+        return;
+      }
+      const initializeRelease = /^\/api\/releases\/([^/]+)\/initialize$/.exec(url.pathname);
+      if (request.method === "POST" && initializeRelease) {
+        const input = validateVersionInitialization(await readJsonBody(request));
+        sendJson(response, 200, {
+          project: await releaseService.initialize(
+            decodeURIComponent(initializeRelease[1]),
+            input.version,
+          ),
+        });
+        return;
+      }
+      const publishRelease = /^\/api\/releases\/([^/]+)\/publish$/.exec(url.pathname);
+      if (request.method === "POST" && publishRelease) {
+        sendJson(response, 200, {
+          release: await releaseService.release(
+            decodeURIComponent(publishRelease[1]),
+            validateManualRelease(await readJsonBody(request)),
+          ),
         });
         return;
       }

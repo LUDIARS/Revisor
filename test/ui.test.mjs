@@ -3,6 +3,7 @@ import test from "node:test";
 import { renderDashboardPage } from "../src/ui-dashboard-page.mjs";
 import { PR_FILTER_SOURCE, renderPrBoardPage } from "../src/ui-pr-board-page.mjs";
 import { renderSettingsPage } from "../src/ui-settings-page.mjs";
+import { renderReleasePage } from "../src/ui-release-page.mjs";
 import { PR_VIEW_SOURCE } from "../src/ui-pr-view-script.mjs";
 import {
   isAllowedHost,
@@ -160,6 +161,21 @@ test("the dashboard keeps the operational panels and hands PR triage to the top 
   assert.match(page, /<h2>ローカル PR 作成<\/h2>/);
   assert.doesNotMatch(page, /class="cards" id="pr-cards"/);
   assert.match(page, /href="\/dashboard" class="active"/);
+  assert.match(page, /<th>version<\/th>/);
+  assert.match(page, /request\('\/api\/releases'\)/);
+});
+
+test("the Releases tab exposes initialization and confirmed immediate publication", () => {
+  const page = renderReleasePage("session-nonce");
+  assert.match(page, /href="\/releases" class="active"/);
+  assert.match(page, /初期version登録/);
+  assert.match(page, /major \/ minor 即時release/);
+  assert.match(page, /現在のbase HEADをGitHubへ即時公開することを確認しました/);
+  assert.match(page, /\/api\/releases\/.*\/initialize/);
+  assert.match(page, /\/api\/releases\/.*\/publish/);
+  const script = page.match(/<script nonce="session-nonce">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  assert.doesNotThrow(() => new Function(script));
 });
 
 test("the dashboard keeps configuration on the settings page", () => {

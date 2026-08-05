@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { access, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RevisorError } from "./errors.mjs";
 import { git } from "./workspace.mjs";
@@ -24,16 +24,24 @@ export function normalizeLocalVersion(value, { allowUninitialized = false } = {}
   return version;
 }
 
+async function isTracked(rootPath) {
+  const tracked = await git(rootPath, ["ls-files", "--", LOCAL_VERSION_FILE]);
+  return tracked === LOCAL_VERSION_FILE;
+}
+
 async function assertTracked(rootPath) {
+  if (await isTracked(rootPath)) return;
+  throw new RevisorError(
+    `${LOCAL_VERSION_FILE} must be committed on the base branch before publishing.`,
+  );
+}
+
+async function pathExists(path) {
   try {
-    await git(rootPath, ["ls-files", "--error-unmatch", "--", LOCAL_VERSION_FILE]);
-  } catch (error) {
-    throw new RevisorError(
-      // A local PR may never touch this path (assertLocalVersionUnchanged), so
-      // the bootstrap commit has to be on the base branch before registration.
-      `${LOCAL_VERSION_FILE} must be committed on the base branch before repository registration.`,
-      { cause: error },
-    );
+    await access(path);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -45,6 +53,108 @@ export async function prepareLocalVersionFile(rootPath) {
   );
   await git(rootPath, ["update-index", "--skip-worktree", "--", LOCAL_VERSION_FILE]);
   return version;
+}
+
+// This projection feeds the Releases, dashboard, and settings tables, so every
+// failure has to become that one project's state. A registration whose root
+// path moved away or stopped being a repository would otherwise reject the
+// whole /api/releases response and blank the repository table on three pages.
+export async function inspectLocalVersionState(rootPath) {
+  try {
+    if (!await isTracked(rootPath)) {
+      return {
+        status: "missing",
+        version: null,
+        managed: false,
+      };
+    }
+    const version = normalizeLocalVersion(
+      await readFile(versionPath(rootPath), "utf8"),
+      { allowUninitialized: true },
+    );
+    const flag = await git(rootPath, ["ls-files", "-t", "--", LOCAL_VERSION_FILE]);
+    return {
+      status: version === UNINITIALIZED_VERSION ? "uninitialized" : "ready",
+      version,
+      managed: flag.startsWith("S "),
+    };
+  } catch (error) {
+    return {
+      status: "invalid",
+      version: null,
+      managed: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+// Repository registration must remain possible for installations created
+// before the version contract. A missing file is projected to the Releases UI;
+// tracked files are made local-only immediately.
+export async function prepareRegisteredVersionFile(rootPath) {
+  const state = await inspectLocalVersionState(rootPath);
+  if (state.status === "missing") return state;
+  if (state.status === "invalid") throw new RevisorError(state.error);
+  const version = await prepareLocalVersionFile(rootPath);
+  return {
+    status: version === UNINITIALIZED_VERSION ? "uninitialized" : "ready",
+    version,
+    managed: true,
+  };
+}
+
+export async function initializeLocalVersion(rootPath, baseRef, initialVersion) {
+  const version = normalizeLocalVersion(initialVersion);
+  const state = await inspectLocalVersionState(rootPath);
+  if (state.status === "ready") {
+    throw new RevisorError(`Version is already registered as '${state.version}'.`);
+  }
+  if (state.status === "invalid") throw new RevisorError(state.error);
+  if (state.status === "uninitialized") {
+    return writeLocalVersion(rootPath, version);
+  }
+
+  const branch = await git(rootPath, ["symbolic-ref", "--short", "HEAD"]);
+  if (branch !== baseRef) {
+    throw new RevisorError(
+      `Version bootstrap requires '${baseRef}' to be checked out (found '${branch}').`,
+    );
+  }
+  const path = versionPath(rootPath);
+  if (await pathExists(path)) {
+    throw new RevisorError(
+      `${LOCAL_VERSION_FILE} exists but is not tracked; preserve or remove it before registration.`,
+    );
+  }
+  let committed = false;
+  try {
+    await writeFile(path, `${UNINITIALIZED_VERSION}\n`, "utf8");
+    await git(rootPath, ["add", "--", LOCAL_VERSION_FILE]);
+    await git(rootPath, [
+      "-c",
+      "user.name=LUDIARS Revisor",
+      "-c",
+      "user.email=revisor@localhost",
+      "commit",
+      "--no-verify",
+      "--only",
+      "-m",
+      "chore: bootstrap Revisor version state",
+      "--",
+      LOCAL_VERSION_FILE,
+    ]);
+    committed = true;
+  } finally {
+    if (!committed) {
+      try {
+        await git(rootPath, ["reset", "HEAD", "--", LOCAL_VERSION_FILE]);
+      } catch {
+        // The index may not contain the new path; cleanup remains best-effort.
+      }
+      await unlink(path).catch(() => undefined);
+    }
+  }
+  return writeLocalVersion(rootPath, version);
 }
 
 export async function readLocalVersion(rootPath, { allowUninitialized = false } = {}) {

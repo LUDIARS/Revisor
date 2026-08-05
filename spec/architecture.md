@@ -30,6 +30,8 @@ published base commits and human-selected semantic version tags/Releases.
   without CORS. Reads through a configured non-loopback host, and every mutation,
   still require the workflow token — it stays where it actually matters.
 - `local-contracts.mjs` validates repository, test-case, and PR inputs.
+- `release-contracts.mjs` validates version-initialization and immediate-release
+  inputs, including the explicit confirmation every Releases-tab action needs.
 - `catalog.mjs` owns managed-service bootstrap location resolution. Excubitor
   injects `REVISOR_PORT` from its aggregated catalog; direct CLI starts fall back
   to the central catalog. See `spec/feature/service-bootstrap.md`.
@@ -85,6 +87,11 @@ published base commits and human-selected semantic version tags/Releases.
 - `local-version.mjs` owns the tracked, skip-worktree local version projection.
 - `release-notes.mjs` owns the previous-version-to-GitHub-Release projection.
 - `release-publisher.mjs` orchestrates one idempotent remote publication.
+- `manual-release.mjs` owns an operator-confirmed major/minor publication of the
+  current registered base HEAD.
+- `release-service.mjs` projects registered version state and coordinates
+  initialization and manual release requests.
+- `publication-coordinator.mjs` serializes pull-request and manual publication.
 - `push-guard.mjs` installs a repository-scoped hook chain and blocks unsafe
   outgoing `main` updates as `amend_required`.
 - `concordia-context.mjs` owns optional live and persisted author context, the
@@ -102,8 +109,9 @@ published base commits and human-selected semantic version tags/Releases.
   configured local reverse proxy. `ui-styles.mjs` owns the responsive stylesheet,
   `ui-layout.mjs` the shared shell, `ui-pr-view-script.mjs` the client-side card
   and detail rendering, `ui-pr-board-page.mjs` the `/` triage board and its
-  controller, `ui-dashboard-page.mjs` the `/dashboard` operational panels, and
-  the settings page every configuration form.
+  controller, `ui-dashboard-page.mjs` the `/dashboard` operational panels,
+  `ui-release-page.mjs` the `/releases` version projection and its two confirmed
+  publication forms, and the settings page every configuration form.
 
 Allowed-host registration is an independent settings boundary. Its dedicated
 UI-session-protected endpoint does not require the Anatomia folder or workflow
@@ -258,6 +266,14 @@ compare-and-swap advances the local base ref and records the PR as merged.
 If a human selected a major/minor boundary, publication atomically includes its
 annotated tag and creates the GitHub Release. It never publishes a feature branch.
 
+The Releases tab is the second explicit publication entrypoint. An operator
+chooses major or minor, supplies Release Notes, and confirms immediate external
+publication. Revisor requires the registered base branch to be checked out,
+tags its current HEAD, atomically publishes that base and tag, creates the
+GitHub Release, and only then updates local version state. It does not construct
+or publish a feature branch. Manual release and PR merge share one publication
+coordinator, so they cannot choose or push versions concurrently.
+
 The remote base must be contained in the local source-of-truth base; it may be
 behind, but it may not diverge. There is no force-push, PAT, anonymous, or
 local-only fallback. GitHub is not used for
@@ -267,9 +283,12 @@ configuration. See `spec/feature/remote-publication.md`.
 Revisor advances one latest release line only on explicit human intent. Each
 registered repository has a tracked `.revisor-version` ignored with
 `skip-worktree`; its initial value is specified separately when the first
-Release is wanted. Normal merges create no patch Release, while changing that
-local file to the next major/minor boundary declares
-that transition. There are no LTS or maintenance branches.
+Release is wanted. Legacy registrations with
+no file remain visible as missing: an explicit Releases-tab action commits the
+`uninitialized` bootstrap on the checked-out base and then records the selected
+initial version locally. Normal merges create no patch Release. Major and minor
+transitions are immediate, explicitly confirmed Releases-tab operations. There
+are no LTS or maintenance branches.
 
 A pull request that will never merge is closed instead of being left open: the
 status moves `open → merged` or `open → closed`, never back, and a terminal pull
