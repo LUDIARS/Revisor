@@ -29,7 +29,7 @@ test("records every commit since the previous major or minor Release", () => {
   assert.match(notes, /## Major version release/);
   assert.match(notes, /Version transition: `v1\.8\.0` → `v2\.0\.0`/);
   assert.match(notes, /Add public API \(`abc123456789`\)/);
-  assert.match(notes, /Tighten \\[validation\\]/);
+  assert.match(notes, /Tighten \\\[validation\\\]/);
   assert.match(
     notes,
     /https:\/\/github\.com\/LUDIARS\/Product\/compare\/v1\.8\.0\.\.\.v2\.0\.0/,

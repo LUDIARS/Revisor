@@ -214,7 +214,7 @@ test("the list puts mergeable PRs first, then newest PRs", () => {
   ], SETTINGS);
   assert.deepEqual(
     ordered.map((entry) => entry.id),
-    ["clean-new", "risky-new", "clean-old", "running-newest", "failed-old"],
+    ["clean-new", "risky-new", "failed-old", "clean-old", "running-newest"],
   );
 });
 

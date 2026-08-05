@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isGitCommand, managedGitInvocation } from "./git-runtime.mjs";
 
 export async function runProcess({
   command,
@@ -12,9 +13,16 @@ export async function runProcess({
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const child = spawn(command, args, {
+    let invocation = { command, args, env };
+    try {
+      if (isGitCommand(command)) invocation = managedGitInvocation(args, { env });
+    } catch (error) {
+      resolve({ ok: false, stdout, stderr: error.message, exitCode: null });
+      return;
+    }
+    const child = spawn(invocation.command, invocation.args, {
       cwd,
-      env,
+      env: invocation.env,
       windowsHide: true,
       shell: false,
     });

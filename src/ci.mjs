@@ -1,4 +1,5 @@
 import { resolve, relative } from "node:path";
+import { isGitCommand } from "./git-runtime.mjs";
 import { runProcess } from "./process.mjs";
 import { selectedTestCases, skippedTestOutcomes } from "./review-plan.mjs";
 import { captureFailedTestOutput } from "./test-output.mjs";
@@ -14,8 +15,8 @@ function testCwd(worktreePath, configuredCwd) {
   return path;
 }
 
-function configuredProcess(test, cwd, env) {
-  if (process.platform !== "win32") {
+export function configuredProcess(test, cwd, env, platform = process.platform) {
+  if (platform !== "win32" || isGitCommand(test.command, { platform })) {
     return {
       command: test.command,
       args: test.args,

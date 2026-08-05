@@ -1,6 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runRegisteredTests, testsPassed } from "../src/ci.mjs";
+import { configuredProcess, runRegisteredTests, testsPassed } from "../src/ci.mjs";
+
+test("keeps registered Git tests on the managed process boundary on Windows", () => {
+  const options = configuredProcess(
+    { command: "git", args: ["submodule", "update"], timeoutMs: 1_000 },
+    "C:\\review",
+    { ComSpec: "C:\\Windows\\cmd.exe" },
+    "win32",
+  );
+  assert.equal(options.command, "git");
+  assert.deepEqual(options.args, ["submodule", "update"]);
+
+  const explicitPath = configuredProcess(
+    { command: "C:\\desktop-client\\git.exe", args: ["status"], timeoutMs: 1_000 },
+    "C:\\review",
+    { ComSpec: "C:\\Windows\\cmd.exe" },
+    "win32",
+  );
+  assert.equal(explicitPath.command, "C:\\desktop-client\\git.exe");
+  assert.deepEqual(explicitPath.args, ["status"]);
+});
 
 test("keeps the output of a failed case and none of a passing one", async () => {
   const invocations = [];

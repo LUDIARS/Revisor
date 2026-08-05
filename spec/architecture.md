@@ -64,6 +64,11 @@ published base commits and human-selected semantic version tags/Releases.
   `runtime-execution` domain and carries no caller policy — what a variable means
   is decided by the adapter that adds it (`security-scan.mjs` for the scanner
   state directory).
+- `git-runtime.mjs` owns deterministic Git executable selection. On Windows it
+  requires a complete Revisor-managed Git for Windows distribution, refuses
+  SourceTree paths, and supplies the matching shell and `git-core` helpers to
+  internal and registered-test Git commands. See
+  `feature/managed-git-runtime.md`.
 - `ci.mjs` runs registered argv test cases and retains outcome metadata, plus the
   captured output of the cases that failed. Cases the plan did not select are
   recorded as `skipped` with the reason.
