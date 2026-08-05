@@ -27,6 +27,13 @@ export function isLoopbackHost(value) {
   return LOOPBACK_HOSTS.has(hostName(value));
 }
 
+export function isLoopbackAddress(address) {
+  return !address
+    || address === "::1"
+    || address === "127.0.0.1"
+    || address.startsWith("::ffff:127.");
+}
+
 export function normalizeAllowedHosts(values) {
   if (!Array.isArray(values)) {
     throw new TypeError("Allowed hosts must be an array.");

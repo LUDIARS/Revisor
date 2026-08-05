@@ -3,14 +3,15 @@ import { renderPage } from "./ui-layout.mjs";
 import { PR_VIEW_SOURCE } from "./ui-pr-view-script.mjs";
 
 // PR のトリアージはトップページ (2 ペイン) が担う。 ここは運用の俯瞰 —
-// 登録リポジトリ・PR 作成・テストワークフロー・キュー — だけを持つ。
+// 登録リポジトリ・PR 作成・キュー — だけを持つ。テストワークフローは PR の
+// 判断と同時に読めるようトップページの先頭へ移した。
 const BODY = `
   <section>
     <h2>登録プロジェクト</h2>
     <p class="note">登録済みのローカルリポジトリです。追加は<a href="/settings">設定</a>から行います。</p>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>repository</th><th>version</th><th>root path</th><th>base</th><th>テストケース</th><th>push guard</th><th>Open PR</th></tr></thead>
+        <thead><tr><th>repository</th><th>version</th><th>root path</th><th>base</th><th>テストケース</th><th>Open PR</th></tr></thead>
         <tbody id="repository-rows"></tbody>
       </table>
     </div>
@@ -33,10 +34,7 @@ const BODY = `
       </form>
     </section>
     <section>
-      <h2>テストワークフロー</h2>
-      <p class="note">審査中は先行QA、審査通過後は確定QAとして、人間が同じ変更を早期に確認できます。</p>
-      <ul id="test-products"></ul>
-      <h3>キュー</h3><pre id="queue">確認中…</pre>
+      <h2>キュー</h2><pre id="queue">確認中…</pre>
     </section>
   </div>
 `;
@@ -63,8 +61,6 @@ const CONTROLLER_SOURCE = `
         cell(repository.rootPath),
         cell(repository.baseRef),
         cell(repository.testCases.map((entry) => entry.name).join(', ')),
-        cell(repository.pushGuard ? repository.pushGuard.status : '未実行',
-          repository.pushGuard && repository.pushGuard.status !== 'safe' ? 'warn' : 'idle'),
         cell(openCount),
       );
       return row;
@@ -82,11 +78,10 @@ const CONTROLLER_SOURCE = `
 
   async function refresh() {
     try {
-      const [jobs, repositories, prs, workflow, releases] = await Promise.all([
+      const [jobs, repositories, prs, releases] = await Promise.all([
         request('/api/jobs'),
         request('/api/repositories'),
         request('/api/local-prs'),
-        request('/api/test-workflow'),
         request('/api/releases'),
       ]);
       queue.textContent = [
@@ -97,9 +92,6 @@ const CONTROLLER_SOURCE = `
           job.status + '  ' + job.request.repository + '#' + job.request.number + '  ' + job.id),
       ].join('\\n');
       renderRepositories(repositories.repositories, prs.pullRequests, releases.projects);
-      const products = document.querySelector('#test-products');
-      products.replaceChildren(...workflow.products.map((product) =>
-        element('li', 'ok', product.repository + ' #' + product.number + ' — ' + product.status)));
     } catch (error) {
       queue.textContent = error.message;
     }

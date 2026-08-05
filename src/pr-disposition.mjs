@@ -76,6 +76,10 @@ export function decidePullRequest(pullRequest, {
   const state = classifyDecision(pullRequest, blockers);
   const score = pullRequest.mergeRisk?.score ?? null;
   const band = typeof score === "number" ? riskBandOf(score) : null;
+  const humanOverrideMergeable = isHumanOverrideableReviewHold(pullRequest);
+  const mergeable = pullRequest.status === "open"
+    && pullRequest.draft !== true
+    && (pullRequest.checkStatus === "test_ok" || humanOverrideMergeable);
   return {
     ...pullRequest,
     decision: {
@@ -98,25 +102,29 @@ export function decidePullRequest(pullRequest, {
       // 明示操作でだけ解ける Genius の判断保留。 ボードのマージ操作はこの派生値を
       // そのまま使う: 表示条件をクライアント側で書き直すと、 マージ経路の前提と
       // ずれた瞬間に「押せるのに必ず失敗するボタン」が戻ってくる。
-      humanDecisionMergeable: isHumanOverrideableReviewHold(pullRequest),
-      humanOverrideMergeable: isHumanOverrideableReviewHold(pullRequest),
+      humanDecisionMergeable: humanOverrideMergeable,
+      humanOverrideMergeable,
+      mergeable,
     },
   };
 }
 
-// Human attention first, then the riskiest, then the most recently updated. A
-// queue that buries the one PR needing a decision under twenty green ones is the
-// problem this ordering exists to remove.
-export function compareByHumanAttention(left, right) {
-  const byState = left.decision.order - right.decision.order;
-  if (byState !== 0) return byState;
-  const byRisk = (right.decision.riskScore ?? -1) - (left.decision.riskScore ?? -1);
-  if (byRisk !== 0) return byRisk;
-  return String(right.updatedAt).localeCompare(String(left.updatedAt));
+// Ready-to-merge work is actionable immediately, so it stays above reviews that
+// are still running or blocked. Within each group the newest PR wins; updatedAt
+// is only a stable fallback because a status transition must not make an old PR
+// masquerade as newly submitted.
+export function compareByBoardPriority(left, right) {
+  const byMergeable = Number(right.decision.mergeable) - Number(left.decision.mergeable);
+  if (byMergeable !== 0) return byMergeable;
+  const byCreated = String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? ""));
+  if (byCreated !== 0) return byCreated;
+  const byUpdated = String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
+  if (byUpdated !== 0) return byUpdated;
+  return (right.number ?? 0) - (left.number ?? 0);
 }
 
 export function decidePullRequests(pullRequests, settings) {
   return pullRequests
     .map((pullRequest) => decidePullRequest(pullRequest, settings))
-    .sort(compareByHumanAttention);
+    .sort(compareByBoardPriority);
 }

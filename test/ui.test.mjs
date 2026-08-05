@@ -18,6 +18,7 @@ test("the top page is a two-pane PR board: list left, detail right", () => {
   assert.match(page, /class="pr-board"/);
   assert.match(page, /class="pr-list-pane"/);
   assert.match(page, /class="pr-detail-pane"/);
+  assert.ok(page.indexOf('class="test-workflow-summary"') < page.indexOf('class="pr-board"'));
   assert.ok(page.indexOf('class="pr-list-pane"') < page.indexOf('class="pr-detail-pane"'));
   assert.match(page, /判断が必要なものだけ表示/);
   assert.match(page, /id="filter-projects" multiple/);
@@ -38,7 +39,7 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /Genius の判断カード/);
   assert.match(page, /selectedPrId = id/);
   assert.match(page, /runAction\(retry, pr\.id, 'retry'\)/);
-  assert.match(page, /Genius を確認して squash merge/);
+  assert.match(page, /人間判断で squash merge/);
   // ボタンの表示条件はサービス側の述語 (decision.humanDecisionMergeable) をそのまま
   // 読む。 ここで条件を書き直すと、 マージ経路の前提とずれたボタンが復活する。
   assert.match(page, /pr\.decision\?\.humanDecisionMergeable === true/);
@@ -47,10 +48,11 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /close\.textContent = '取り下げ'/);
 });
 
-test("the dashboard explains early QA while automated review is running", () => {
-  const page = renderDashboardPage("session-nonce");
+test("the PR page explains early QA above the board", () => {
+  const page = renderPrBoardPage("session-nonce");
   assert.match(page, /審査中は先行QA/);
   assert.match(page, /審査通過後は確定QA/);
+  assert.match(page, /request\('\/api\/test-workflow'\)/);
 });
 
 test("the compact PR menu puts the number before the review state and omits merge risk", () => {
@@ -142,7 +144,7 @@ test("a project that no longer has an open PR drops out of the selection", () =>
   );
 });
 
-test("the board wires the pure filters into its polling render", () => {
+test("the board wires the pure filters into its event-driven render", () => {
   const page = renderPrBoardPage("session-nonce");
   assert.match(page, /selectedProjects = keepKnownProjects\(selectedProjects, projects\)/);
   assert.match(page, /sameProjectOptions\(filterProjects\.options, projects\)/);
@@ -163,6 +165,19 @@ test("the dashboard keeps the operational panels and hands PR triage to the top 
   assert.match(page, /href="\/dashboard" class="active"/);
   assert.match(page, /<th>version<\/th>/);
   assert.match(page, /request\('\/api\/releases'\)/);
+  assert.doesNotMatch(page, /push guard/i);
+  assert.doesNotMatch(page, /<h2>テストワークフロー<\/h2>/);
+});
+
+test("the PR board receives realtime status events and logs them below the detail", () => {
+  const page = renderPrBoardPage("session-nonce");
+  assert.match(page, /id="pr-event-entries"/);
+  assert.ok(page.indexOf('id="pr-detail"') < page.indexOf('class="pr-event-log"'));
+  assert.match(page, /new WebSocket\(url, 'revisor-session\.' \+ sessionToken\)/);
+  assert.match(page, /await refresh\(\)/);
+  assert.doesNotMatch(page, /setInterval\(refresh, 3000\)/);
+  assert.match(page, /main \{ width: calc\(100% - 32px\)/);
+  assert.match(page, /grid-template-columns: minmax\(340px, 2fr\) minmax\(0, 3fr\)/);
 });
 
 test("the Releases tab exposes initialization and confirmed immediate publication", () => {

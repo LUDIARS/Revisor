@@ -8,7 +8,7 @@ export const STYLES = `
     :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; background: #10141c; color: #edf1f7; }
-    main { width: min(1180px, calc(100% - 32px)); margin: 32px auto; display: grid; gap: 20px; }
+    main { width: calc(100% - 32px); margin: 32px auto; display: grid; gap: 20px; }
     section { background: #19202c; border: 1px solid #2d394a; border-radius: 14px; padding: 24px; }
     h1 { margin: 0; font-size: 1.5rem; } h2 { margin-top: 0; } h3 { margin: 24px 0 8px; font-size: 1rem; }
     header.bar { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; }
@@ -72,9 +72,16 @@ export const STYLES = `
     .test-output > summary { cursor: pointer; color: #ff7d8d; font-size: .9rem; }
     .test-output > pre { margin: 8px 0 0; max-height: 420px; font-size: .8rem; }
 
-    .pr-board { display: grid; grid-template-columns: minmax(340px, 460px) 1fr; gap: 20px; align-items: start; }
+    .pr-board { display: grid; grid-template-columns: minmax(340px, 2fr) minmax(0, 3fr); gap: 20px; align-items: start; }
     .pr-list-pane .cards { grid-template-columns: 1fr; max-height: calc(100vh - 260px); overflow-y: auto; padding-right: 4px; }
     .pr-detail-pane { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; }
+    .test-workflow-summary ul { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 0; }
+    .test-workflow-summary li { cursor: pointer; }
+    .pr-event-log { margin-top: 24px; border-top: 1px solid #2d394a; padding-top: 4px; }
+    .pr-event-log-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .pr-event-log ol { display: grid; gap: 6px; max-height: 220px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+    .pr-event-log li { display: grid; grid-template-columns: max-content 1fr; gap: 10px; font-size: .85rem; }
+    .pr-event-log time { color: #aebbd0; font-variant-numeric: tabular-nums; }
 
     @media (max-width: 960px) {
       .pr-board { grid-template-columns: 1fr; }

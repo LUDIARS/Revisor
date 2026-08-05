@@ -317,8 +317,9 @@ export class LocalPrService {
     return pullRequest ? decidePullRequest(pullRequest, this.loadSettings()) : null;
   }
 
-  // Ordered so the pull requests that need a human decision come first. Everything
-  // else is a queue that hides the one row a person actually has to look at.
+  // Board order is derived from current mergeability and creation time. Keeping
+  // it at read time makes a just-approved PR move immediately without rewriting
+  // stored records.
   listPullRequests() {
     return decidePullRequests(this.store.listPullRequests(), this.loadSettings());
   }

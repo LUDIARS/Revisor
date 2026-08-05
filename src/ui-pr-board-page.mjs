@@ -1,5 +1,6 @@
 import { CLIENT_REQUEST_SOURCE } from "./ui-client-request.mjs";
 import { renderPage } from "./ui-layout.mjs";
+import { PR_EVENTS_SOURCE } from "./ui-pr-events.mjs";
 import { PR_VIEW_SOURCE } from "./ui-pr-view-script.mjs";
 
 // トップページは PR のトリアージ専用。 PC 幅では左にリスト・右に選択した PR の
@@ -7,10 +8,16 @@ import { PR_VIEW_SOURCE } from "./ui-pr-view-script.mjs";
 // ペインが縦に積まれ、 従来どおりカード → 詳細の順で読める。 運用系のパネル
 // (登録リポジトリ・PR 作成・キュー) はダッシュボードページへ分離した。
 const BODY = `
+  <section class="test-workflow-summary">
+    <h2>テストワークフロー</h2>
+    <p class="note">審査中は先行QA、審査通過後は確定QAとして、人間が同じ変更を早期に確認できます。</p>
+    <ul id="test-products"></ul>
+    <p id="test-products-empty" class="empty">確認できる PR はありません。</p>
+  </section>
   <div class="pr-board">
     <section class="pr-list-pane">
       <h2>PR の判断待ち</h2>
-      <p class="note">人間の判断が必要な PR を先頭に並べます。</p>
+      <p class="note">マージ可能な PR を先頭にし、それぞれ新しい順で並べます。</p>
       <div class="filter-bar">
         <label class="check"><input id="filter-human" type="checkbox">判断が必要なものだけ表示</label>
         <div class="field filter-projects">
@@ -26,6 +33,13 @@ const BODY = `
       <h2>選択した PR の詳細</h2>
       <div id="pr-detail"><p class="empty">PR を選択してください。</p></div>
       <p id="pr-action-message" role="status"></p>
+      <div class="pr-event-log">
+        <div class="pr-event-log-head">
+          <h3>PR 更新ログ</h3>
+          <span id="pr-event-status" class="note">接続準備中…</span>
+        </div>
+        <ol id="pr-event-entries"></ol>
+      </div>
     </section>
   </div>
 `;
@@ -65,6 +79,8 @@ const CONTROLLER_SOURCE = `
   const prActionMessage = document.querySelector('#pr-action-message');
   const filterHuman = document.querySelector('#filter-human');
   const filterProjects = document.querySelector('#filter-projects');
+  const testProducts = document.querySelector('#test-products');
+  const testProductsEmpty = document.querySelector('#test-products-empty');
   let selectedPrId = null;
   let openPullRequests = [];
   let selectedProjects = new Set();
@@ -129,6 +145,17 @@ const CONTROLLER_SOURCE = `
     selectedPrId = id;
     prActionMessage.textContent = '';
     renderBoard();
+    renderPrEventLog();
+  }
+
+  function renderTestWorkflow(products) {
+    testProductsEmpty.hidden = products.length > 0;
+    testProducts.replaceChildren(...products.map((product) => {
+      const item = element('li', product.checkStatus === 'test_ok' ? 'ok' : 'warn');
+      item.textContent = product.repository + ' #' + product.number + ' — ' + product.status;
+      item.addEventListener('click', () => selectPullRequest(product.pullRequestId));
+      return item;
+    }));
   }
 
   function renderProjectFilter() {
@@ -171,8 +198,12 @@ const CONTROLLER_SOURCE = `
 
   async function refresh() {
     try {
-      const prs = await request('/api/local-prs');
+      const [prs, workflow] = await Promise.all([
+        request('/api/local-prs'),
+        request('/api/test-workflow'),
+      ]);
       renderPullRequests(prs.pullRequests);
+      renderTestWorkflow(workflow.products);
     } catch (error) {
       prActionMessage.textContent = error.message;
     }
@@ -183,11 +214,10 @@ const CONTROLLER_SOURCE = `
     selectedProjects = new Set([...filterProjects.selectedOptions].map((option) => option.value));
     renderBoard();
   });
-  refresh();
-  setInterval(refresh, 3000);
+  refresh().finally(connectPrEvents);
 `;
 
-const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_FILTER_SOURCE}${CONTROLLER_SOURCE}`;
+const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_FILTER_SOURCE}${PR_EVENTS_SOURCE}${CONTROLLER_SOURCE}`;
 
 export function renderPrBoardPage(sessionToken) {
   return renderPage({

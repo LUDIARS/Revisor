@@ -32,6 +32,12 @@ test("manual approval pins the current head after a system review failure", () =
   });
 });
 
+test("an internal TypeError is classified as an overrideable system failure", () => {
+  assert.equal(isHumanOverrideableReviewHold(pullRequest({
+    error: "execute is not a function",
+  })), true);
+});
+
 test("pre-merge environment failure becomes bypassable only after it is recorded", () => {
   assert.equal(canBypassPreMergeSystemFailure(pullRequest({
     checkStatus: "test_ok",

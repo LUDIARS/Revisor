@@ -17,6 +17,7 @@ function pullRequest(overrides = {}) {
     humanQuestion: null,
     mergeRisk: { score: 8, band: "low", bandLabel: "低", factors: [] },
     runtimeVerification: { required: false, score: 0, factors: [], evidence: [] },
+    createdAt: "2026-07-30T00:00:00.000Z",
     updatedAt: "2026-07-30T00:00:00.000Z",
     ...overrides,
   };
@@ -177,23 +178,43 @@ test("a running review is neither a decision nor a failure", () => {
   }
 });
 
-test("the list puts human decisions first, then the riskiest", () => {
+test("the list puts mergeable PRs first, then newest PRs", () => {
   const ordered = decidePullRequests([
-    pullRequest({ id: "clean", checkStatus: "test_ok" }),
-    pullRequest({ id: "running", checkStatus: "running" }),
     pullRequest({
-      id: "risky",
+      id: "clean-new",
+      number: 5,
+      checkStatus: "test_ok",
+      createdAt: "2026-08-05T05:00:00.000Z",
+    }),
+    pullRequest({
+      id: "running-newest",
+      number: 6,
+      checkStatus: "running",
+      createdAt: "2026-08-05T06:00:00.000Z",
+    }),
+    pullRequest({
+      id: "risky-new",
+      number: 4,
+      createdAt: "2026-08-05T04:00:00.000Z",
       mergeRisk: { score: 60, band: "high", bandLabel: "高", factors: [] },
     }),
     pullRequest({
-      id: "riskiest",
-      mergeRisk: { score: 90, band: "critical", bandLabel: "重大", factors: [] },
+      id: "clean-old",
+      number: 1,
+      checkStatus: "test_ok",
+      createdAt: "2026-08-05T01:00:00.000Z",
     }),
-    pullRequest({ id: "failed", checkStatus: "failed" }),
+    pullRequest({
+      id: "failed-old",
+      number: 2,
+      checkStatus: "failed",
+      error: "reviewer unavailable",
+      createdAt: "2026-08-05T02:00:00.000Z",
+    }),
   ], SETTINGS);
   assert.deepEqual(
     ordered.map((entry) => entry.id),
-    ["riskiest", "risky", "failed", "running", "clean"],
+    ["clean-new", "risky-new", "clean-old", "running-newest", "failed-old"],
   );
 });
 

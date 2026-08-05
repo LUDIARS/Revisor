@@ -91,10 +91,28 @@ export class LocalPrStore {
     path = resolveStatePath(),
     now = () => new Date().toISOString(),
     createId = randomUUID,
+    onEvent = () => {},
   } = {}) {
     this.path = path;
     this.now = now;
     this.createId = createId;
+    this.onEvent = onEvent;
+  }
+
+  emitPullRequest(type, record) {
+    try {
+      this.onEvent({
+        type,
+        pullRequestId: record.id,
+        repository: record.repository,
+        number: record.number,
+        status: record.status,
+        checkStatus: record.checkStatus,
+        updatedAt: record.updatedAt,
+      });
+    } catch {
+      // Persistence succeeded already; an observer is never allowed to undo it.
+    }
   }
 
   registerRepository(repository) {
@@ -163,7 +181,9 @@ export class LocalPrStore {
     };
     state.pullRequests.push(record);
     writeState(this.path, state);
-    return structuredClone(record);
+    const created = structuredClone(record);
+    this.emitPullRequest("pull_request.created", created);
+    return created;
   }
 
   getPullRequest(id) {
@@ -190,7 +210,9 @@ export class LocalPrStore {
     if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
     Object.assign(record, patch, { id: record.id, updatedAt: this.now() });
     writeState(this.path, state);
-    return structuredClone(record);
+    const updated = structuredClone(record);
+    this.emitPullRequest("pull_request.updated", updated);
+    return updated;
   }
 
   updatePushGuard(repository, pushGuard) {

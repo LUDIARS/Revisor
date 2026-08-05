@@ -25,6 +25,8 @@ to the ordinary single-review route.
 - Fail with a precise type error if the low-level helper is called without an
   executor.
 - Cover primary and capacity-fallback execution with a focused unit test.
+- Classify an internal `is not a function` TypeError as a system failure so the
+  documented human override remains reachable during a similar bootstrap fault.
 
 ## Verification
 

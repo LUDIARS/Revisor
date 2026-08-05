@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { bearerToken, tokenMatches } from "./auth.mjs";
-import { readSettings, readWorkflowToken } from "./config.mjs";
+import { readAllowedHosts, readSettings, readWorkflowToken } from "./config.mjs";
 import {
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
-import { isLoopbackHost } from "./host-policy.mjs";
+import { isLoopbackAddress, isLoopbackHost } from "./host-policy.mjs";
 import {
   notifyConcordia,
   notifyConcordiaChat,
@@ -18,6 +18,8 @@ import { notifyReviewCompletion } from "./review-completion-notice.mjs";
 import { LocalPrService } from "./local-pr-service.mjs";
 import { PrReviewQueue } from "./queue.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
+import { PrEventStream } from "./pr-event-stream.mjs";
+import { attachPrWebSocket } from "./pr-websocket.mjs";
 import { ReleaseService } from "./release-service.mjs";
 import { LocalPrStore, resolveStatePath } from "./state-store.mjs";
 import { createUiRequestHandler, readJsonBody, sendJson } from "./ui-server.mjs";
@@ -28,13 +30,6 @@ function isLocalApi(pathname) {
     || pathname === "/v1/local-prs"
     || pathname.startsWith("/v1/local-prs/")
     || pathname === "/v1/test-workflow";
-}
-
-function isLoopbackAddress(address) {
-  return !address
-    || address === "::1"
-    || address === "127.0.0.1"
-    || address.startsWith("::ffff:127.");
 }
 
 export function createRequestHandler({
@@ -176,7 +171,11 @@ export async function startRevisor({
     throw new Error("Revisor port must be an integer from 1 to 65535.");
   }
   const settings = readSettings(env);
-  const store = stateStore ?? new LocalPrStore({ path: resolveStatePath(env) });
+  const eventStream = new PrEventStream();
+  const store = stateStore ?? new LocalPrStore({
+    path: resolveStatePath(env),
+    onEvent: eventStream.publish,
+  });
   const publicationCoordinator = new PublicationCoordinator();
   // Late-bound on purpose: the reporter is constructed before the service that
   // owns merging, and the automatic merge has to run the moment a review lands.
@@ -235,6 +234,12 @@ export async function startRevisor({
     localPrService,
     releaseService,
   }));
+  const prWebSocket = attachPrWebSocket({
+    server,
+    eventStream,
+    sessionToken,
+    allowedHosts: () => readAllowedHosts(env),
+  });
   try {
     await new Promise((resolve, reject) => {
       const onError = (error) => reject(error);
@@ -245,11 +250,13 @@ export async function startRevisor({
       });
     });
   } catch (error) {
+    prWebSocket.close();
     await workerPool?.close();
     throw error;
   }
   const address = server.address();
   if (!address || typeof address === "string") {
+    prWebSocket.close();
     await workerPool?.close();
     server.close();
     throw new Error("Could not resolve the Revisor address.");
@@ -263,6 +270,7 @@ export async function startRevisor({
   try {
     recovery = await localPrService.recoverInterruptedReviews();
   } catch (error) {
+    prWebSocket.close();
     await workerPool?.close();
     server.close();
     throw error;
@@ -311,12 +319,14 @@ export async function startRevisor({
     url: `http://127.0.0.1:${address.port}/`,
     queue,
     store,
+    eventStream,
     localPrService,
     releaseService,
     recovery,
     workerCount: settings.workerCount,
     close: async () => {
       clearInterval(autoMergeSweepTimer);
+      prWebSocket.close();
       await new Promise((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });

@@ -187,3 +187,41 @@ test("migrates a v1 per-repository numbered state to the global sequence", () =>
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("emits identifier-only events after persisted PR changes", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-state-"));
+  const path = join(directory, "state.json");
+  const events = [];
+  const store = new LocalPrStore({
+    path,
+    createId: () => "pr-event",
+    now: () => "2026-08-05T00:00:00.000Z",
+    onEvent: (event) => events.push(event),
+  });
+  try {
+    const pullRequest = store.createPullRequest({
+      repository: "LUDIARS/Revisor",
+      title: "realtime status", body: "must not enter the event", author: "neco",
+      headRef: "feat/realtime", baseRef: "main",
+      headSha: "a".repeat(40), baseSha: "b".repeat(40),
+    });
+    store.updatePullRequest(pullRequest.id, { checkStatus: "running", error: "private output" });
+    assert.deepEqual(events.map((event) => event.type), [
+      "pull_request.created",
+      "pull_request.updated",
+    ]);
+    assert.deepEqual(events.at(-1), {
+      type: "pull_request.updated",
+      pullRequestId: "pr-event",
+      repository: "LUDIARS/Revisor",
+      number: 1,
+      status: "open",
+      checkStatus: "running",
+      updatedAt: "2026-08-05T00:00:00.000Z",
+    });
+    assert.equal("body" in events.at(-1), false);
+    assert.equal("error" in events.at(-1), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
