@@ -51,7 +51,7 @@ test("scans a detached commit refspec, blocks leakage, then accepts the amended 
   try {
     writeFileSync(
       join(state.repoPath, "config.js"),
-      "const token = \"ghp_abcdefghijklmnopqrstuvwxyz123456\";\n",
+      `const token = "${"gh" + "p_"}abcdefghijklmnopqrstuvwxyz123456";\n`,
       "utf8",
     );
     git(state.repoPath, "add", "config.js");
