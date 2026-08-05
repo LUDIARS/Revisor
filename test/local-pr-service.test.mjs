@@ -14,6 +14,7 @@ import { LocalPrReporter } from "../src/local-reporter.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
 import { PrReviewQueue } from "../src/queue.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
+import { GENIUS_HUMAN_DECISION_REASON } from "../src/human-decision.mjs";
 
 async function waitForCheckStatus(store, id, checkStatus) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -157,6 +158,96 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
       ["created", "open"],
       ["merged", "merged"],
     ]);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("an explicit merge acknowledges the sole Genius human-decision hold", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const service = await registeredService(fixture, store);
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Genius-reviewed change",
+      body: "",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "action_required",
+      reviewedHeadSha: pullRequest.headSha,
+      reviewer: "genius",
+      reasons: [GENIUS_HUMAN_DECISION_REASON],
+      geniusGuidance: { cards: [{ id: "public-card" }] },
+    });
+
+    const merged = await service.mergePullRequest(pullRequest.id);
+
+    assert.equal(merged.status, "merged");
+    assert.equal(merged.checkStatus, "test_ok");
+    assert.deepEqual(merged.reasons, []);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("an automatic merge never acknowledges the Genius human-decision hold", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const service = await registeredService(fixture, store);
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Genius-reviewed change",
+      body: "",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "action_required",
+      reviewedHeadSha: pullRequest.headSha,
+      reviewer: "genius",
+      reasons: [GENIUS_HUMAN_DECISION_REASON],
+      geniusGuidance: { cards: [{ id: "public-card" }] },
+    });
+
+    await assert.rejects(
+      () => service.mergePullRequest(pullRequest.id, { humanApproved: false }),
+      /Only an Open \/ Test OK local PR can be squash merged/,
+    );
+    assert.equal(store.getPullRequest(pullRequest.id).status, "open");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("a Genius decision cannot acknowledge an additional merge blocker", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const service = await registeredService(fixture, store);
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Still blocked change",
+      body: "",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "action_required",
+      reviewedHeadSha: pullRequest.headSha,
+      reviewer: "genius",
+      reasons: [GENIUS_HUMAN_DECISION_REASON, "registered tests failed"],
+      geniusGuidance: { cards: [{ id: "public-card" }] },
+    });
+
+    await assert.rejects(
+      () => service.mergePullRequest(pullRequest.id),
+      /Only an Open \/ Test OK local PR can be squash merged/,
+    );
+    assert.equal(store.getPullRequest(pullRequest.id).status, "open");
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

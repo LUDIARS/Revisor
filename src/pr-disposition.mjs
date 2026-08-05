@@ -1,3 +1,4 @@
+import { isSoleGeniusHumanDecisionHold } from "./human-decision.mjs";
 import { riskBandOf } from "./merge-risk.mjs";
 
 // The dashboard's central question is "which of these needs me?". That answer is
@@ -94,6 +95,10 @@ export function decidePullRequest(pullRequest, {
       autoMergeEligible: autoMergeEnabled
         && state === "auto_ok"
         && pullRequest.status === "open",
+      // 明示操作でだけ解ける Genius の判断保留。 ボードのマージ操作はこの派生値を
+      // そのまま使う: 表示条件をクライアント側で書き直すと、 マージ経路の前提と
+      // ずれた瞬間に「押せるのに必ず失敗するボタン」が戻ってくる。
+      humanDecisionMergeable: isSoleGeniusHumanDecisionHold(pullRequest),
     },
   };
 }

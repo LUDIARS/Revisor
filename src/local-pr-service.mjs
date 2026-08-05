@@ -7,6 +7,7 @@ import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
 import { redactSecretLines } from "./leakage.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
+import { approvedPullRequestForManualMerge } from "./human-decision.mjs";
 import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
 import { inspectLocalPullRequest, git } from "./workspace.mjs";
 import {
@@ -310,17 +311,20 @@ export class LocalPrService {
     return this.store.testWorkflowProducts();
   }
 
-  async mergePullRequest(id) {
+  // `humanApproved` はボードの明示操作かどうか。 既定を true にしているのは、
+  // 呼び出し元が HTTP の merge エンドポイント (token / セッション必須) だから。
+  // 自動マージ経路だけが false を渡し、 Genius の判断保留を勝手に解けなくする。
+  async mergePullRequest(id, { humanApproved = true } = {}) {
     const merge = this.#mergeChain.then(
-      () => this.#mergeOnce(id),
-      () => this.#mergeOnce(id),
+      () => this.#mergeOnce(id, humanApproved),
+      () => this.#mergeOnce(id, humanApproved),
     );
     // 失敗した 1 件で後続を止めない。 チェーンは順番だけを保証する。
     this.#mergeChain = merge.then(() => undefined, () => undefined);
     return merge;
   }
 
-  async #mergeOnce(id) {
+  async #mergeOnce(id, humanApproved) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
     // 終局済み (merged / closed) を再びマージしない。 closed を通すと、 取り下げた
@@ -337,9 +341,15 @@ export class LocalPrService {
     // board から消え、 記録と Git が食い違う。
     this.#merging.add(id);
     try {
+      // The merge endpoint is the board's explicit human action. Genius reviews
+      // stay action_required for auto-merge, but the sole card-confirmation hold
+      // may be acknowledged here without weakening any other blocker.
+      const approvedPullRequest = humanApproved
+        ? approvedPullRequestForManualMerge(pullRequest)
+        : pullRequest;
       const publication = await this.merge({
         repository,
-        pullRequest,
+        pullRequest: approvedPullRequest,
         env: this.env,
         ...(this.securityScan ? { scan: this.securityScan } : {}),
         ...(this.publisher ? { publish: this.publisher } : {}),
@@ -350,6 +360,7 @@ export class LocalPrService {
       const merged = this.store.updatePullRequest(id, {
         status: "merged",
         checkStatus: "test_ok",
+        reasons: [],
         mergeCommitSha,
         mergeError: null,
         releaseTag: typeof publication === "object" ? publication.releaseTag ?? null : null,
@@ -417,7 +428,7 @@ export class LocalPrService {
         if (!decision.merge) continue;
         summary.attempted += 1;
         try {
-          await this.mergePullRequest(pullRequest.id);
+          await this.mergePullRequest(pullRequest.id, { humanApproved: false });
           this.store.updatePullRequest(pullRequest.id, {
             autoMerge: autoMergeRecord({ merged: true, reason: decision.reason }),
           });
@@ -459,7 +470,7 @@ export class LocalPrService {
       });
     }
     try {
-      await this.mergePullRequest(id);
+      await this.mergePullRequest(id, { humanApproved: false });
       return this.store.updatePullRequest(id, {
         autoMerge: autoMergeRecord({ merged: true, reason: decision.reason }),
       });

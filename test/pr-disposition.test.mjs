@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { autoMergeDecision } from "../src/auto-merge.mjs";
+import { GENIUS_HUMAN_DECISION_REASON } from "../src/human-decision.mjs";
 import { decidePullRequest, decidePullRequests } from "../src/pr-disposition.mjs";
 
 function pullRequest(overrides = {}) {
@@ -80,6 +81,38 @@ test("draft, blocking reasons and open questions each need a human", () => {
     const decided = decidePullRequest(pullRequest(overrides), SETTINGS);
     assert.notEqual(decided.decision.state, "auto_ok", JSON.stringify(overrides));
     assert.equal(decided.decision.autoMergeEligible, false);
+  }
+});
+
+test("only a sole Genius card hold is offered as a human-decision merge", () => {
+  const hold = {
+    checkStatus: "action_required",
+    reviewer: "genius",
+    reasons: [GENIUS_HUMAN_DECISION_REASON],
+    geniusGuidance: { cards: [{ id: "public-card" }] },
+  };
+  const offered = decidePullRequest(pullRequest(hold), SETTINGS);
+  assert.equal(offered.decision.humanDecisionMergeable, true);
+  // 保留を解けるのは人間の明示操作だけで、オートマージ対象にはならない。
+  assert.equal(offered.decision.state, "needs_human");
+  assert.equal(offered.decision.autoMergeEligible, false);
+
+  for (const overrides of [
+    { reasons: [GENIUS_HUMAN_DECISION_REASON, "registered test case(s) failed"] },
+    { reasons: [] },
+    { geniusGuidance: { cards: [] } },
+    { geniusGuidance: null },
+    { reviewer: "codex" },
+    { draft: true },
+    { checkStatus: "test_ok" },
+    { status: "closed" },
+  ]) {
+    assert.equal(
+      decidePullRequest(pullRequest({ ...hold, ...overrides }), SETTINGS)
+        .decision.humanDecisionMergeable,
+      false,
+      JSON.stringify(overrides),
+    );
   }
 });
 

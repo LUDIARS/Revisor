@@ -38,6 +38,9 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /selectedPrId = id/);
   assert.match(page, /runAction\(retry, pr\.id, 'retry'\)/);
   assert.match(page, /Genius を確認して squash merge/);
+  // ボタンの表示条件はサービス側の述語 (decision.humanDecisionMergeable) をそのまま
+  // 読む。 ここで条件を書き直すと、 マージ経路の前提とずれたボタンが復活する。
+  assert.match(page, /pr\.decision\?\.humanDecisionMergeable === true/);
   // 審査が終わっている open な PR は、 マージせずに取り下げられる。
   assert.match(page, /runAction\(close, pr\.id, 'close'\)/);
   assert.match(page, /close\.textContent = '取り下げ'/);

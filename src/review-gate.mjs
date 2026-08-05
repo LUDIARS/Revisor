@@ -1,5 +1,6 @@
 import { isDocsOnlyChange, isDocsOrConfigOnlyChange } from "./change-classification.mjs";
 import { codeAnalysisGating } from "./review-plan.mjs";
+import { GENIUS_HUMAN_DECISION_REASON } from "./human-decision.mjs";
 
 // Re-exported because the gate, the reviewer prompt and the human question all
 // reach for them through this module; the classification itself lives with the rest
@@ -172,7 +173,7 @@ export function gateOutcome({
     reasons.push(`complexity score dropped by ${Math.abs(complexityScoreDelta)} points`);
   }
   if (humanReviewRequired) {
-    reasons.push("Genius judgment cards require a human decision");
+    reasons.push(GENIUS_HUMAN_DECISION_REASON);
   } else if (reviewerOutput.includes("PR_GATE_NEEDS_HUMAN")) {
     reasons.push("reviewer reported insufficient information for a safe domain/spec definition");
   }

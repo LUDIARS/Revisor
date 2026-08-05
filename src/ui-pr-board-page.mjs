@@ -71,7 +71,7 @@ const CONTROLLER_SOURCE = `
 
   function actionsOf(pr) {
     const wrapper = element('div', 'actions');
-    const geniusHumanDecision = pr.checkStatus === 'action_required' && pr.reviewer === 'genius';
+    const geniusHumanDecision = pr.decision?.humanDecisionMergeable === true;
     if (pr.status === 'open' && (pr.checkStatus === 'test_ok' || geniusHumanDecision) && !pr.draft) {
       const merge = document.createElement('button');
       merge.textContent = geniusHumanDecision
