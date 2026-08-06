@@ -71,9 +71,8 @@ test("a required human run blocks auto-merge while the operator asks for it", ()
   );
 });
 
-test("draft, blocking reasons and open questions each need a human", () => {
+test("blocking reasons and open questions each need a human", () => {
   for (const overrides of [
-    { draft: true },
     { reasons: ["target domain is still missing"] },
     { humanQuestion: "どのドメインに属しますか?" },
     { checkStatus: "action_required" },
@@ -83,6 +82,13 @@ test("draft, blocking reasons and open questions each need a human", () => {
     assert.notEqual(decided.decision.state, "auto_ok", JSON.stringify(overrides));
     assert.equal(decided.decision.autoMergeEligible, false);
   }
+});
+
+test("legacy draft metadata does not block a reviewed PR", () => {
+  const decided = decidePullRequest(pullRequest({ draft: true }), SETTINGS);
+  assert.equal(decided.decision.state, "auto_ok");
+  assert.deepEqual(decided.decision.blockers, []);
+  assert.equal(decided.decision.autoMergeEligible, true);
 });
 
 test("a sole Genius card hold is offered as a human-decision merge", () => {
@@ -104,7 +110,6 @@ test("a sole Genius card hold is offered as a human-decision merge", () => {
     { geniusGuidance: { cards: [] } },
     { geniusGuidance: null },
     { reviewer: "codex" },
-    { draft: true },
     { checkStatus: "test_ok" },
     { status: "closed" },
   ]) {
@@ -115,6 +120,12 @@ test("a sole Genius card hold is offered as a human-decision merge", () => {
       JSON.stringify(overrides),
     );
   }
+
+  assert.equal(
+    decidePullRequest(pullRequest({ ...hold, draft: true }), SETTINGS)
+      .decision.humanDecisionMergeable,
+    true,
+  );
 });
 
 test("system review failures are human-mergeable but concrete failing evidence is not", () => {

@@ -117,7 +117,6 @@ export async function squashMergeLocalPullRequest({
   if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
     throw new Error("Only an Open / Test OK local PR can be squash merged.");
   }
-  if (pullRequest.draft) throw new Error("A draft local PR cannot be merged.");
   // ベースは審査時の SHA に固定しない。 他 PR のマージで base は常に前進するので、
   // 固定すると 1 本マージするたびに残り全部がマージ不能になる。 進んだ base とは
   // squash 適用時のコンフリクトだけを判定に使う。

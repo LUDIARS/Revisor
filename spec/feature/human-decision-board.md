@@ -13,7 +13,7 @@ related:
   - ../architecture.md
   - ./merge-risk.md
   - ./pr-lifecycle.md
-updated: 2026-08-03
+updated: 2026-08-06
 ---
 
 # human-decision-board — 判断待ちを先頭に出すダッシュボード
@@ -42,7 +42,7 @@ updated: 2026-08-03
 | `merged` | `status: merged` | マージ済み (idle) |
 | `closed` | `status: closed` | 取り下げ (idle) |
 
-ブロッカーは draft、マージブロック理由、人間への確認、閾値超過のマージリスク、
+ブロッカーはマージブロック理由、人間への確認、閾値超過のマージリスク、
 必要な動作確認、そしてワーカー失敗時の `error`。すべて右ペインの詳細に文言として出す。
 左ペインは対象を素早く選ぶための 3 項目に絞り、詳細では「なぜ止まっているか」が
 隠れないようにする。

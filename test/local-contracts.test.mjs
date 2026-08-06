@@ -41,6 +41,7 @@ test("normalizes argv test cases and local PR metadata", () => {
     repository: "LUDIARS/Revisor",
     title: "Local PR",
     head_ref: "feat/local-pr",
+    draft: true,
   }), {
     repository: "LUDIARS/Revisor",
     title: "Local PR",

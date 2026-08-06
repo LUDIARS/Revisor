@@ -139,14 +139,14 @@ A repository test case may additionally declare the change kinds it covers
 check (`runtime`). All three are optional; a case that declares nothing covers
 executable change only.
 
-A local PR records title, body, author, draft, labels, assignees, reviewers,
+A local PR records title, body, author, labels, assignees, reviewers,
 the submitting Concordia session (optional), a sequential number drawn from one
 sequence shared by every registered repository, base/head refs, exact original
 SHAs, workflow status, CI outcomes, projected Anatomia data, leakage locations,
 the security scan outcome and its finding locations, the review plan, the
 merge-risk and runtime-verification assessments, the automatic merge outcome,
 and the final reviewed SHA. The test workflow is a derived view containing the
-latest non-draft Open PR per repository while it is `queued`, `running`, or
+latest Open PR per repository while it is `queued`, `running`, or
 `test_ok`. The first two states are early-QA candidates for the current head;
 only `Open / Test OK` means the review gate has passed.
 
@@ -173,11 +173,10 @@ either burn a session waiting or walk away and miss the verdict. A submission ma
 name the Concordia session that made it, and every terminal outcome — merged,
 merge-ready, blocked, or a failed run — sends that session exactly one message
 through Concordia, after any automatic merge so the reported state is final.
-A non-draft PR appears in the TestWorkflow forum from `queued` onward, for as
+A PR appears in the TestWorkflow forum from `queued` onward, for as
 long as it is its repository's latest candidate, so a person may start QA before
 review settles. The terminal notice points to that forum thread when the PR is
-left at `Open / Test OK`; an automatically merged one reports the merge instead,
-and a draft is told to leave draft rather than sent to a thread it never gets.
+left at `Open / Test OK`; an automatically merged one reports the merge instead.
 
 Resubmitting the same head joins the review already running for it, so a
 submission that names a session adopts it as the notice target when the review
@@ -256,7 +255,7 @@ from strong-model judgment. Configurable line/domain thresholds default to
 A reviewed pull request carries an itemised merge-risk score and a
 runtime-verification judgement. The operator states the risk they accept; a pull
 request at or below that threshold, with no blocking reason, no open question,
-not a draft, and — unless the operator says otherwise — no outstanding runtime
+and — unless the operator says otherwise — no outstanding runtime
 verification, merges automatically once, and records the outcome either way.
 Automatic merging is off by default. `spec/feature/merge-risk.md` is
 authoritative.

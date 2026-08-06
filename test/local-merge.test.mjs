@@ -80,6 +80,18 @@ test("merges even after the base advanced, as long as the squash applies cleanly
   }
 });
 
+test("legacy draft metadata does not block a Test OK merge", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const mergeCommitSha = await squashMergeLocalPullRequest(
+      mergeInput(fixture, { draft: true }),
+    );
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("an explicit human override bypasses an unavailable pre-merge scanner", async () => {
   const fixture = repositoryFixture();
   try {

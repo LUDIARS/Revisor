@@ -27,7 +27,6 @@ const BODY = `
         <div class="field"><label for="pr-head">head branch</label><input id="pr-head" required placeholder="feat/local-change"></div>
         <div class="field"><label for="pr-author">author</label><input id="pr-author" required value="local"></div>
         <div class="field"><label for="pr-labels">labels (comma separated)</label><input id="pr-labels"></div>
-        <div class="field"><label class="check"><input id="pr-draft" type="checkbox">draft</label></div>
         <div class="field"><label for="pr-body">body</label><textarea id="pr-body"></textarea></div>
         <button type="submit">PR を登録して審査開始</button>
         <p id="pr-message" role="status"></p>
@@ -109,7 +108,6 @@ const CONTROLLER_SOURCE = `
           title: document.querySelector('#pr-title').value,
           body: document.querySelector('#pr-body').value,
           author: document.querySelector('#pr-author').value,
-          draft: document.querySelector('#pr-draft').checked,
           labels: document.querySelector('#pr-labels').value
             .split(',').map((label) => label.trim()).filter(Boolean),
           head_ref: document.querySelector('#pr-head').value,

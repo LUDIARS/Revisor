@@ -915,7 +915,7 @@ test("a stale review is re-queued automatically on merge", async () => {
   }
 });
 
-test("the auto-merge sweep merges eligible Test OK PRs and skips drafts", async () => {
+test("the auto-merge sweep ignores legacy draft metadata", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
   const mergedIds = [];
@@ -951,7 +951,7 @@ test("the auto-merge sweep merges eligible Test OK PRs and skips drafts", async 
       mergeRisk: { score: 5, factors: [] },
       reasons: [],
     });
-    // 同一 head の再投稿は既存 PR に相乗りするので、draft には別ブランチを使う。
+    // 同一 head の再投稿は既存 PR に相乗りするので、legacy PR には別ブランチを使う。
     git(fixture.repoPath, "checkout", "-b", "feat/draft", "feat/local");
     writeFileSync(join(fixture.repoPath, "draft.txt"), "draft\n", "utf8");
     git(fixture.repoPath, "add", "draft.txt");
@@ -963,15 +963,22 @@ test("the auto-merge sweep merges eligible Test OK PRs and skips drafts", async 
       headRef: "feat/draft",
       draft: true,
     });
+    store.updatePullRequest(draft.id, {
+      draft: true,
+      checkStatus: "test_ok",
+      reviewedHeadSha: draft.headSha,
+      mergeRisk: { score: 5, factors: [] },
+      reasons: [],
+    });
 
     const summary = await service.sweepAutoMerge();
 
-    assert.deepEqual(summary, { attempted: 1, merged: 1, failed: 0 });
-    assert.deepEqual(mergedIds, [eligible.id]);
+    assert.deepEqual(summary, { attempted: 2, merged: 2, failed: 0 });
+    assert.deepEqual(mergedIds, [eligible.id, draft.id]);
     const after = store.getPullRequest(eligible.id);
     assert.equal(after.status, "merged");
     assert.equal(after.autoMerge.merged, true);
-    assert.equal(store.getPullRequest(draft.id).status, "open");
+    assert.equal(store.getPullRequest(draft.id).status, "merged");
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

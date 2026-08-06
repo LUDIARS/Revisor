@@ -233,7 +233,6 @@ export class LocalPrStore {
         .filter((pullRequest) =>
           pullRequest.repository.toLowerCase() === repository.repository.toLowerCase()
           && pullRequest.status === "open"
-          && pullRequest.draft !== true
           && QA_ELIGIBLE_CHECK_STATUSES.has(pullRequest.checkStatus))
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
       if (!latest) return [];

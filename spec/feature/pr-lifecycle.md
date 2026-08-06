@@ -14,7 +14,7 @@ related:
   - ./human-decision-board.md
   - ./crash-recovery.md
   - ./review-gate.md
-updated: 2026-08-04
+updated: 2026-08-06
 ---
 
 # pr-lifecycle — ローカル PR の終局 (マージ / 取り下げ)
@@ -76,7 +76,7 @@ Genius 階層のレビューは意図的に `action_required` で止まる。自
 `src/human-decision.mjs` が保留の判定と解除を持つ。
 
 - `isSoleGeniusHumanDecisionHold` — `open` かつ `action_required` かつ
-  `reviewer: "genius"`、draft でなく、`reasons` が**その 1 件だけ**で、公開された
+  `reviewer: "genius"`、`reasons` が**その 1 件だけ**で、公開された
   判断カード (`geniusGuidance.cards`) が 1 枚以上あるときだけ true。他のブロッカーが
   1 つでも残っていれば false (fail-closed)
 - `approvedPullRequestForManualMerge` — 上が true のときに限り `test_ok` /
@@ -136,7 +136,8 @@ POST /api/local-prs/:id/close  UI セッション
 `test/pr-disposition.test.mjs`: `closed` は判定状態 `closed`・blockers 空・
 オートマージ対象外であること (審査が `action_required` で終わっていても同じ)。
 `humanDecisionMergeable` が唯一の Genius 保留でだけ true になり、追加のブロッカー・
-カード無し・draft・別 reviewer・終局済みでは false になること。
+カード無し・別 reviewer・終局済みでは false になること。旧 `draft` メタデータは
+判定に影響しないこと。
 
 `test/server.test.mjs`: close が token / セッションを要求すること、両 API が id を
 デコードして理由を渡すこと、本文なしでも取り下げられること。

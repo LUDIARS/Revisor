@@ -68,13 +68,11 @@ test("reports an automatic merge instead of pointing at a forum thread", () => {
   assert.doesNotMatch(merged, /マージ可能/);
 });
 
-test("does not send a draft to a TestWorkflow thread it never gets", () => {
-  // TestWorkflow の一覧は draft !== true で絞られるので、draft の Test OK に
-  // 「そのスレッドで動作確認を記録して」と言うと存在しない場所を指す。
+test("legacy draft metadata still points to the TestWorkflow thread", () => {
   const draft = reviewCompletionMessage(pr({ draft: true }));
   assert.match(draft, /Test OK/);
-  assert.match(draft, /draft を外して/);
-  assert.doesNotMatch(draft, /フォーラムのスレッドで記録/);
+  assert.match(draft, /フォーラムのスレッドで記録/);
+  assert.doesNotMatch(draft, /draft を外して/);
 });
 
 test("lists advisories and the human question without hiding the verdict", () => {

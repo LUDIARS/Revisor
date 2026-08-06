@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "early-qa-mode — 審査中から回せる先行QA"
-description: "非 draft の Open PR を審査中 (queued / running) から test workflow に出し、人間の製品確認を自動審査と並行させる。先行QAはマージ条件と reviewed head の意味を緩和しない。"
+description: "Open PR を審査中 (queued / running) から test workflow に出し、人間の製品確認を自動審査と並行させる。先行QAはマージ条件と reviewed head の意味を緩和しない。"
 service: revisor
 domain: local-pr-lifecycle
 tags:
@@ -13,7 +13,7 @@ related:
   - ../architecture.md
   - ./pr-lifecycle.md
   - ./human-decision-board.md
-updated: 2026-08-04
+updated: 2026-08-06
 ---
 
 # early-qa-mode — 審査中から回せる先行QA
@@ -30,7 +30,6 @@ updated: 2026-08-04
 1件返す。
 
 - `status === "open"`
-- `draft !== true`
 - `checkStatus` が `queued`、`running`、`test_ok` のいずれか
 
 `queued` / `running` は `qaMode: "early"` と `Open / In Review`、`test_ok` は
@@ -62,6 +61,6 @@ updated: 2026-08-04
 
 - 先行QAの結果は Revisor の `checkStatus` を変更しない。
 - squash merge は従来どおり `Open / Test OK` だけを許可する。
-- draft は明示的に外すまで公開しない。
+- 旧データに `draft: true` が残っていても、公開・審査・マージの判定には使わない。
 - Ccなどの利用側は `Open / In Review` と `Open / Test OK` の両方を受理し、表示上も
   区別する。

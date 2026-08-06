@@ -38,11 +38,7 @@ export function reviewCompletionMessage(pullRequest) {
     } else {
       lines.push(`✅ Revisor レビュー完了: ${label} は Open / Test OK です (マージ可能)。`);
       // Test OK のまま open な PR は Concordia の TestWorkflow フォーラムに載る。
-      // ただし draft は載らない (state store は status === "open" かつ draft !== true
-      // で絞る) ので、存在しないスレッドへ投稿者を誘導しない。
-      lines.push(pullRequest.draft === true
-        ? "draft の間は TestWorkflow 一覧に載りません。動作確認を回すには draft を外してください。"
-        : "動作確認は Discord の TestWorkflow フォーラムのスレッドで記録してください。");
+      lines.push("動作確認は Discord の TestWorkflow フォーラムのスレッドで記録してください。");
     }
   } else if (pullRequest.checkStatus === "failed") {
     lines.push(`⚠️ Revisor レビュー失敗: ${label} は審査を完了できませんでした。`);

@@ -139,7 +139,9 @@ export function validatePullRequestSubmission(body) {
     title: text(body.title, "title", 256),
     body: typeof body.body === "string" && body.body.length <= 65_536 ? body.body : "",
     author: text(body.author ?? "local", "author", 100),
-    draft: body.draft === true,
+    // `draft` is accepted for compatibility with older clients, but local PRs
+    // no longer have a draft lifecycle state.
+    draft: false,
     labels: stringList(body.labels, "labels"),
     assignees: stringList(body.assignees, "assignees"),
     reviewers: stringList(body.reviewers, "reviewers"),

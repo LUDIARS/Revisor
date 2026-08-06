@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { LocalPrStore } from "../src/state-store.mjs";
 
-test("projects a non-draft PR for early QA while review is queued", () => {
+test("projects an open PR for early QA while review is queued", () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-state-"));
   const path = join(directory, "state.json");
   let id = 0;
@@ -68,7 +68,7 @@ test("projects a non-draft PR for early QA while review is queued", () => {
   }
 });
 
-test("early QA excludes drafts and settled reviews that still need action", () => {
+test("early QA ignores legacy draft metadata but excludes settled reviews that need action", () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-state-"));
   const path = join(directory, "state.json");
   let id = 0;
@@ -90,8 +90,8 @@ test("early QA excludes drafts and settled reviews that still need action", () =
       draft: true,
       headSha: "a".repeat(40),
     });
-    assert.deepEqual(store.testWorkflowProducts(), []);
-    store.updatePullRequest(draft.id, { draft: false, checkStatus: "action_required" });
+    assert.equal(store.testWorkflowProducts()[0].pullRequestId, draft.id);
+    store.updatePullRequest(draft.id, { checkStatus: "action_required" });
     assert.deepEqual(store.testWorkflowProducts(), []);
   } finally {
     rmSync(directory, { recursive: true, force: true });

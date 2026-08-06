@@ -32,6 +32,10 @@ test("manual approval pins the current head after a system review failure", () =
   });
 });
 
+test("legacy draft metadata does not block a human override", () => {
+  assert.equal(isHumanOverrideableReviewHold(pullRequest({ draft: true })), true);
+});
+
 test("an internal TypeError is classified as an overrideable system failure", () => {
   assert.equal(isHumanOverrideableReviewHold(pullRequest({
     error: "execute is not a function",

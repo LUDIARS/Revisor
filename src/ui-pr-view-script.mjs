@@ -156,7 +156,7 @@ export const PR_VIEW_SOURCE = `
     const list = element('dl', 'meta');
     definition(list, 'PR', pr.repository + ' #' + pr.number);
     definition(list, 'title', pr.title);
-    definition(list, '状態', (pr.draft ? 'draft / ' : '') + pr.status + ' / ' + pr.checkStatus);
+    definition(list, '状態', pr.status + ' / ' + pr.checkStatus);
     definition(list, 'author', pr.author);
     definition(list, 'branch', pr.headRef + ' → ' + pr.baseRef);
     definition(list, 'head SHA', pr.headSha);

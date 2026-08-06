@@ -35,8 +35,8 @@ leaves the workstation.
    local head branch.
 6. Revisor scores the merge risk and whether a human still has to run the
    product, both itemised.
-7. The UI leads with the pull requests that need a human decision. Non-draft
-   open PRs appear in the test workflow while queued or running as
+7. The UI leads with the pull requests that need a human decision. Open PRs
+   appear in the test workflow while queued or running as
    `Open / In Review` (early QA), then become `Open / Test OK` after review.
 8. A pull request at or below the risk threshold the operator accepted merges
    automatically; everything else waits for a person. Revisor creates one squash
@@ -274,7 +274,6 @@ are resolved by Revisor from local refs:
   "title": "Add local workflow",
   "body": "Feature branch remains local.",
   "author": "neco",
-  "draft": false,
   "labels": ["workflow"],
   "assignees": ["neco"],
   "reviewers": ["revisor"],

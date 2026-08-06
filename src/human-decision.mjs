@@ -28,7 +28,6 @@ export function isSoleGeniusHumanDecisionHold(pullRequest) {
   return pullRequest?.status === "open"
     && pullRequest?.checkStatus === "action_required"
     && pullRequest?.reviewer === "genius"
-    && pullRequest?.draft !== true
     && reasons.length === 1
     && reasons[0] === GENIUS_HUMAN_DECISION_REASON
     && Array.isArray(cards)
@@ -43,7 +42,7 @@ export function isSoleGeniusHumanDecisionHold(pullRequest) {
  */
 export function isHumanOverrideableReviewHold(pullRequest) {
   if (isSoleGeniusHumanDecisionHold(pullRequest)) return true;
-  if (pullRequest?.status !== "open" || pullRequest?.draft === true) return false;
+  if (pullRequest?.status !== "open") return false;
   const reasons = Array.isArray(pullRequest.reasons) ? pullRequest.reasons : [];
   if (pullRequest.checkStatus === "failed") {
     const error = typeof pullRequest.error === "string" ? pullRequest.error.trim() : "";
@@ -60,7 +59,6 @@ export function isHumanOverrideableReviewHold(pullRequest) {
 
 export function canBypassPreMergeSystemFailure(pullRequest) {
   return pullRequest?.status === "open"
-    && pullRequest?.draft !== true
     && typeof pullRequest?.mergeError === "string"
     && PRE_MERGE_SYSTEM_FAILURE_PATTERN.test(pullRequest.mergeError);
 }

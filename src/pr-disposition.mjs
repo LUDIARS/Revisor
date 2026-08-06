@@ -37,7 +37,6 @@ function blockersOf(pullRequest, thresholds) {
     blockers.push(String(pullRequest.error));
   }
   if (pullRequest.mergeError) blockers.push(String(pullRequest.mergeError));
-  if (pullRequest.draft === true) blockers.push("draft のままです");
   for (const reason of pullRequest.reasons ?? []) blockers.push(reason);
   if (pullRequest.humanQuestion) blockers.push(pullRequest.humanQuestion);
   const risk = pullRequest.mergeRisk;
@@ -78,7 +77,6 @@ export function decidePullRequest(pullRequest, {
   const band = typeof score === "number" ? riskBandOf(score) : null;
   const humanOverrideMergeable = isHumanOverrideableReviewHold(pullRequest);
   const mergeable = pullRequest.status === "open"
-    && pullRequest.draft !== true
     && (pullRequest.checkStatus === "test_ok" || humanOverrideMergeable);
   return {
     ...pullRequest,

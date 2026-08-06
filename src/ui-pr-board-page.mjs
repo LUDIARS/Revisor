@@ -89,7 +89,7 @@ const CONTROLLER_SOURCE = `
     const wrapper = element('div', 'actions');
     const humanOverride = pr.decision?.humanOverrideMergeable === true
       || pr.decision?.humanDecisionMergeable === true;
-    if (pr.status === 'open' && (pr.checkStatus === 'test_ok' || humanOverride) && !pr.draft) {
+    if (pr.status === 'open' && (pr.checkStatus === 'test_ok' || humanOverride)) {
       const merge = document.createElement('button');
       merge.textContent = humanOverride
         ? '人間判断で squash merge'

@@ -154,7 +154,7 @@ export class LocalPrService {
       title: submission.title,
       body: submission.body,
       author: submission.author,
-      draft: submission.draft === true,
+      draft: false,
       labels: submission.labels ?? [],
       assignees: submission.assignees ?? [],
       reviewers: submission.reviewers ?? [],
@@ -429,8 +429,7 @@ export class LocalPrService {
       if (!settings.autoMergeEnabled) return summary;
       const candidates = this.store.listPullRequests().filter((pullRequest) =>
         pullRequest.status === "open"
-        && pullRequest.checkStatus === "test_ok"
-        && pullRequest.draft !== true);
+        && pullRequest.checkStatus === "test_ok");
       for (const candidate of candidates) {
         // 1 件マージするたびに base は進み、レビュー完了や手動マージも並行して状態を
         // 動かす。 候補一覧は周回の開始時点のスナップショットなので、判定は必ず最新の
@@ -440,7 +439,6 @@ export class LocalPrService {
           !pullRequest
           || pullRequest.status !== "open"
           || pullRequest.checkStatus !== "test_ok"
-          || pullRequest.draft === true
         ) continue;
         const decision = autoMergeDecision(pullRequest, settings);
         if (!decision.merge) continue;
