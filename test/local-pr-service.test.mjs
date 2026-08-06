@@ -482,15 +482,54 @@ test("adopts the session of a resubmission that joins an in-flight review", asyn
     const second = await service.submitPullRequest({
       ...submission(),
       sessionId: "lictor-abc",
+      sourceLinks: [{
+        platform: "discord",
+        label: "Discord セッション投稿",
+        url: "https://discord.com/channels/1/2/3",
+      }],
     });
     assert.equal(second.id, first.id);
     assert.equal(second.sessionId, "lictor-abc");
+    assert.equal(second.sourceLinks.length, 1);
+    assert.match(second.body, /discord\.com\/channels\/1\/2\/3/);
     // 既に宛先がある相乗りは奪わない (1 レビュー 1 通)。
     const third = await service.submitPullRequest({
       ...submission(),
       sessionId: "lictor-xyz",
+      sourceLinks: [{
+        platform: "slack",
+        label: "Slack セッション投稿",
+        url: "https://workspace.slack.com/archives/C1/p123",
+      }],
     });
     assert.equal(third.sessionId, "lictor-abc");
+    assert.equal(third.sourceLinks.length, 2);
+    assert.match(third.body, /workspace\.slack\.com\/archives\/C1\/p123/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("stores source links and adds them to the PR description", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  try {
+    const service = await registeredService(fixture, store);
+    const pullRequest = await service.submitPullRequest({
+      ...submission(),
+      body: "Original description",
+      sourceLinks: [{
+        platform: "discord",
+        label: "Discord セッション投稿",
+        url: "https://discord.com/channels/1/2/3",
+      }],
+    });
+    assert.deepEqual(pullRequest.sourceLinks, [{
+      platform: "discord",
+      label: "Discord セッション投稿",
+      url: "https://discord.com/channels/1/2/3",
+    }]);
+    assert.match(pullRequest.body, /関連メッセージ:[\s\S]*discord\.com\/channels\/1\/2\/3/);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

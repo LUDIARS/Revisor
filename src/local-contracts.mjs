@@ -4,6 +4,8 @@ import { CHANGE_KINDS } from "./change-classification.mjs";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
 const SAFE_COMMAND_PART = /^[^\0\r\n"&|<>^%!]*$/;
+const SENSITIVE_URL_PARAMETER =
+  /^(?:access_?)?token$|^(?:api_?)?key$|^auth(?:orization)?$|^credential$|^password$|^secret$|^(?:sig|signature)$/i;
 
 function object(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -36,6 +38,48 @@ function stringList(value, label) {
     throw new Error(`${label} is invalid.`);
   }
   return [...new Set(value.map((item) => item.trim()))];
+}
+
+function sourceLink(value, index) {
+  object(value, `source_links[${index}]`);
+  const platform = text(value.platform, `source_links[${index}].platform`, 20);
+  if (platform !== "discord" && platform !== "slack") {
+    throw new Error(`source_links[${index}].platform is invalid.`);
+  }
+  const label = text(value.label, `source_links[${index}].label`, 100);
+  const url = text(value.url, `source_links[${index}].url`, 2_048);
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`source_links[${index}].url is invalid.`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`source_links[${index}].url must not contain credentials.`);
+  }
+  const hasSensitiveParameter = [...parsed.searchParams.keys()]
+    .some((key) => SENSITIVE_URL_PARAMETER.test(key));
+  if (parsed.hash || hasSensitiveParameter) {
+    throw new Error(`source_links[${index}].url must not contain credentials.`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  const isSourceMessage = platform === "discord"
+    ? host === "discord.com" && /^\/channels\/(?:@me|\d+)\/\d+\/\d+$/.test(parsed.pathname)
+    : host.endsWith(".slack.com") && /^\/archives\/[A-Z0-9]+\/p\d+$/.test(parsed.pathname);
+  if (parsed.protocol !== "https:" || !isSourceMessage) {
+    throw new Error(`source_links[${index}].url does not identify a source message.`);
+  }
+  return { platform, label, url: parsed.toString() };
+}
+
+function sourceLinks(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 8) {
+    throw new Error("source_links is invalid.");
+  }
+  const links = value.map(sourceLink);
+  return links.filter((link, index) =>
+    links.findIndex((candidate) => candidate.url === link.url) === index);
 }
 
 function testCase(value, index) {
@@ -138,6 +182,7 @@ export function validatePullRequestSubmission(body) {
     repository,
     title: text(body.title, "title", 256),
     body: typeof body.body === "string" && body.body.length <= 65_536 ? body.body : "",
+    sourceLinks: sourceLinks(body.source_links),
     author: text(body.author ?? "local", "author", 100),
     // `draft` is accepted for compatibility with older clients, but local PRs
     // no longer have a draft lifecycle state.

@@ -46,6 +46,7 @@ test("normalizes argv test cases and local PR metadata", () => {
     repository: "LUDIARS/Revisor",
     title: "Local PR",
     body: "",
+    sourceLinks: [],
     author: "local",
     draft: false,
     labels: [],
@@ -56,6 +57,63 @@ test("normalizes argv test cases and local PR metadata", () => {
     // 投稿元セッション未指定 = 完了通知の宛先なし (CLI / スクリプト投稿)。
     sessionId: null,
   });
+});
+
+test("validates Discord and Slack source links", () => {
+  const submission = validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    source_links: [
+      {
+        platform: "discord",
+        label: "Discord セッション投稿",
+        url: "https://discord.com/channels/1/2/3",
+      },
+      {
+        platform: "slack",
+        label: "Slack セッション投稿",
+        url: "https://workspace.slack.com/archives/C1/p123",
+      },
+    ],
+  });
+  assert.equal(submission.sourceLinks.length, 2);
+  assert.throws(() => validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    source_links: [{ platform: "discord", label: "wrong", url: "https://example.com/1" }],
+  }), /does not identify a source message/);
+  assert.throws(() => validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    source_links: [{
+      platform: "discord",
+      label: "credential-bearing link",
+      url: "https://token@discord.com/channels/1/2/3",
+    }],
+  }), /must not contain credentials/);
+  assert.throws(() => validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    source_links: [{
+      platform: "slack",
+      label: "token in query",
+      url: "https://workspace.slack.com/archives/C1/p123?access_token=value",
+    }],
+  }), /must not contain credentials/);
+  assert.throws(() => validatePullRequestSubmission({
+    repository: "LUDIARS/Revisor",
+    title: "Local PR",
+    head_ref: "feat/local-pr",
+    source_links: [{
+      platform: "slack",
+      label: "redirect endpoint",
+      url: "https://workspace.slack.com/redirect?url=https://example.com",
+    }],
+  }), /does not identify a source message/);
 });
 
 test("keeps the submitting session so the review verdict can reach it", () => {

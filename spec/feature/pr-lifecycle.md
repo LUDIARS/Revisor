@@ -145,3 +145,22 @@ POST /api/local-prs/:id/close  UI セッション
 `test/ui.test.mjs`: board のカードに「取り下げ」ボタンが出て `close` を叩くこと。
 UI は生成した client script の文字列でしか検証できないので、ボタンの表示条件
 (`open` かつ `queued` / `running` 以外) は本体の分岐と合わせて読む必要がある。
+
+## SPEC-LOCAL-PR-SOURCE-LINKS: 投稿元メッセージの保持
+
+ローカル PR の投稿は任意の `source_links` を最大 8 件受け取る。各リンクは
+正規の Discord / Slack メッセージ permalink の HTTPS URL に限定する。URL の
+userinfo (username/password)、fragment、credential-like query parameter は拒否する。
+これにより、会話の出所を PR 記録と board から辿れる一方、認証情報を state や
+squash-merge のコミット本文へ保存せず、allowlisted platform 上の redirect endpoint
+を外部リンクとして使うことも防ぐ。
+
+`src/source-links.mjs` はリンクを durable な PR 本文へ追記する。Markdown の URL
+destination は `<...>` で囲み、正当な permalink に含まれる括弧でリンク構文が
+閉じないようにする。同一 head の審査中再投稿は、既存 URL と重複しないリンクを
+記録と本文の両方に追加する。board は構造化した `sourceLinks` を `textContent` と
+`noopener noreferrer` のリンクとして表示する。
+
+`test/local-contracts.test.mjs` はホスト許可と credential rejection、
+`test/source-links.test.mjs` は Markdown destination、
+`test/local-pr-service.test.mjs` は再投稿時の累積を検証する。

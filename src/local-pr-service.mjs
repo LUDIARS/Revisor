@@ -16,6 +16,7 @@ import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { inspectLocalPullRequest, git } from "./workspace.mjs";
 import { retryReviewScope } from "./retry-review.mjs";
+import { appendSourceLinks } from "./source-links.mjs";
 import {
   assertLocalVersionUnchanged,
   prepareRegisteredVersionFile,
@@ -142,17 +143,29 @@ export class LocalPrService {
       // 投げ直した側は永久に来ない完了通知を待つことになるので、ここで宛先を
       // 引き継ぐ。 既に宛先がある場合は奪わない (通知は 1 レビュー 1 通)。
       const inFlight = existing.checkStatus === "queued" || existing.checkStatus === "running";
-      if (inFlight && submission.sessionId && !existing.sessionId) {
-        return this.store.updatePullRequest(existing.id, {
-          sessionId: submission.sessionId,
-        });
+      if (inFlight) {
+        const patch = {};
+        if (submission.sessionId && !existing.sessionId) patch.sessionId = submission.sessionId;
+        const knownSourceUrls = new Set(
+          (existing.sourceLinks ?? []).map((link) => link.url),
+        );
+        const newSourceLinks = (submission.sourceLinks ?? []).filter((link) =>
+          !knownSourceUrls.has(link.url));
+        if (newSourceLinks.length > 0) {
+          patch.sourceLinks = [...(existing.sourceLinks ?? []), ...newSourceLinks];
+          patch.body = appendSourceLinks(existing.body, newSourceLinks);
+        }
+        if (Object.keys(patch).length > 0) {
+          return this.store.updatePullRequest(existing.id, patch);
+        }
       }
       return existing;
     }
     const pullRequest = this.store.createPullRequest({
       repository: repository.repository,
       title: submission.title,
-      body: submission.body,
+      body: appendSourceLinks(submission.body, submission.sourceLinks),
+      sourceLinks: submission.sourceLinks ?? [],
       author: submission.author,
       draft: false,
       labels: submission.labels ?? [],

@@ -40,6 +40,22 @@ export const PR_VIEW_SOURCE = `
     return list;
   }
 
+  function sourceLinksOf(values) {
+    if (!values || values.length === 0) return paragraph('関連メッセージはありません。');
+    const list = document.createElement('ul');
+    for (const value of values) {
+      const link = document.createElement('a');
+      link.href = value.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = text(value.label);
+      const item = document.createElement('li');
+      item.append(link);
+      list.append(item);
+    }
+    return list;
+  }
+
   function badge(label, tone) {
     return element('span', 'badge ' + (tone || 'idle'), label);
   }
@@ -153,6 +169,7 @@ export const PR_VIEW_SOURCE = `
   }
 
   function overviewOf(pr) {
+    const wrapper = document.createElement('div');
     const list = element('dl', 'meta');
     definition(list, 'PR', pr.repository + ' #' + pr.number);
     definition(list, 'title', pr.title);
@@ -165,7 +182,11 @@ export const PR_VIEW_SOURCE = `
     definition(list, 'labels', pr.labels.join(', ') || '—');
     definition(list, '更新', pr.updatedAt);
     if (pr.body) definition(list, 'body', pr.body);
-    return list;
+    wrapper.append(list);
+    if (pr.sourceLinks && pr.sourceLinks.length > 0) {
+      wrapper.append(block('関連メッセージ', sourceLinksOf(pr.sourceLinks)));
+    }
+    return wrapper;
   }
 
   // Failed cases only, and only when the record carries output: a review stored

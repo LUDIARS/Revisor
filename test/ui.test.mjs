@@ -321,9 +321,19 @@ function renderCard(pr) {
   return view(fakeDocument())(pr, null, () => {});
 }
 
+function renderOverview(pr) {
+  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn overviewOf;`);
+  return view(fakeDocument())(pr);
+}
+
 function flatten(node) {
   const own = node.textContent ? [node.textContent] : [];
   return [...own, ...(node.children ?? []).flatMap(flatten)];
+}
+
+function firstNode(node, predicate) {
+  if (predicate(node)) return node;
+  return (node.children ?? []).map((child) => firstNode(child, predicate)).find(Boolean) ?? null;
 }
 
 test("the test panel shows the output of failed cases only", () => {
@@ -385,6 +395,34 @@ test("the menu card keeps the plain decision label for states other than needs_h
   });
   assert.deepEqual(flatten(card), ["#7", "自動マージ可", "Revisor", "自動マージ可の PR"]);
   assert.equal(card.dataset.tone, "ok");
+});
+
+test("the PR detail renders structured source links safely", () => {
+  const rendered = renderOverview({
+    repository: "LUDIARS/Revisor",
+    number: 261,
+    title: "Keep source links",
+    status: "open",
+    checkStatus: "queued",
+    author: "local",
+    headRef: "feat/source-links",
+    baseRef: "main",
+    headSha: "a".repeat(40),
+    reviewedHeadSha: null,
+    baseSha: "b".repeat(40),
+    labels: [],
+    updatedAt: "2026-08-06T00:00:00.000Z",
+    body: "",
+    sourceLinks: [{
+      label: "Discord セッション投稿",
+      url: "https://discord.com/channels/1/2/3",
+    }],
+  });
+  const link = firstNode(rendered, (node) => node.tag === "a");
+  assert.equal(link?.href, "https://discord.com/channels/1/2/3");
+  assert.equal(link?.target, "_blank");
+  assert.equal(link?.rel, "noopener noreferrer");
+  assert.equal(flatten(rendered).includes("Discord セッション投稿"), true);
 });
 
 test("a review recorded before test output was kept still renders its table", () => {
