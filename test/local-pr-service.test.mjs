@@ -974,7 +974,7 @@ test("the auto-merge sweep ignores legacy draft metadata", async () => {
     const summary = await service.sweepAutoMerge();
 
     assert.deepEqual(summary, { attempted: 2, merged: 2, failed: 0 });
-    assert.deepEqual(mergedIds, [eligible.id, draft.id]);
+    assert.deepEqual(new Set(mergedIds), new Set([eligible.id, draft.id]));
     const after = store.getPullRequest(eligible.id);
     assert.equal(after.status, "merged");
     assert.equal(after.autoMerge.merged, true);

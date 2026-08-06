@@ -3,7 +3,7 @@
 ## 概要
 
 - 発生日: 2026-08-06
-- 状態: 調査中
+- 状態: 作業ツリーで修正済み
 - 対象: Revisor の local PR opposite-model review runner
 - 重要度: 中（審査を停止し、人手による override 判断を必要とした）
 
@@ -25,20 +25,19 @@ PR には `humanDecisionMergeable: true` および `humanOverrideMergeable: true
 
 ## 原因
 
-未特定。Check Run と local PR の保持情報には opposite-model 呼び出しの例外分類、provider/model、終了状態、内部相関情報がなく、reviewer 出力も意図的に秘匿されていた。確認できる証拠だけでは、一時的な provider/model 障害、review runner の障害、reviewer 応答契約違反のいずれかを判別できない。
+Claude reviewer のレートリミット。PR #246 の reviewer セッションログには `error: rate_limit`、`apiErrorStatus: 429` が記録されていた。一方、Claude CLI はこの構造化エラーを Revisor が判定していた stdout/stderr に含めなかったため、既存の capacity fallback が発火せず、利用可能な Codex reviewer を試さずに審査全体が失敗した。
 
 ## 改善要件
 
-1. reviewer の本文や秘匿対象出力を Check Run に漏らさず、内部診断用に job ID、対象 head SHA、provider/model、失敗段階、例外分類を保存する。
-2. 一時的な provider/model 障害などの再試行可能エラーと、応答契約違反などの決定的エラーを区別する。
-3. 再試行は冪等に行い、元の対象 head SHA を保持・検証する。head が変わった場合は同一審査の再試行として扱わない。
-4. 利用者向け通知には、秘匿情報を含めずに再試行可否の分類と問い合わせ用の相関 ID を含める。
+1. Claude reviewer を Revisor 管理の session ID で起動し、そのセッションの構造化エラーだけを照合する。
+2. `rate_limit` / HTTP 429 を capacity failure に分類し、別 provider の reviewer が利用可能なら既存の一回限定 fallback を実行する。
+3. reviewer の本文、credential、他セッションのログを Check Run や通知へ漏らさない。
+4. 通常の prompt / review failure は capacity fallback の対象にしない。
 
 ## 検証方針
 
-- opposite-model 呼び出し失敗を模擬する unit/integration test を追加する。
-- 内部には redacted diagnostic と対象 head SHA が保存されることを検証する。
-- Check Run と利用者通知には reviewer 本文・例外本文・credential が漏れないことを検証する。
-- 再試行可能エラーでは同一 head に対して冪等に再試行され、決定的エラーでは自動再試行されないことを検証する。
+- Revisor 管理の Claude session log に `error: rate_limit` / HTTP 429 がある場合だけ capacity failure と判定する unit test を追加する。
+- 構造化 rate-limit を既存の alternate reviewer fallback signal に変換することを検証する。
+- セッションログが存在しない場合や通常の reviewer failure では従来の判定を維持する。
 
-この記録追加は文書のみの変更であり、サービス再起動・起動テスト・コードテストは実施していない。
+対象 unit test 9 件を実行し、すべて成功した。サービス再起動・起動テストは local PR のマージ後に Excubitor 経由で行う。

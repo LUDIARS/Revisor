@@ -4,6 +4,7 @@ import {
   alternateReviewer,
   reviewerCapacityUnavailable,
   reviewerInvocation,
+  runReviewer,
 } from "../src/reviewer.mjs";
 
 test("uses the lower-cost model tier for both reviewer providers", () => {
@@ -57,4 +58,29 @@ test("uses Opus or Sol with high effort for the strong tier", () => {
     reviewerInvocation("codex-sol", { tier: "strong", effort: "high" }).args,
     ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high", "--sandbox", "workspace-write", "-"],
   );
+});
+
+test("promotes a structured Claude rate limit to the capacity fallback signal", async () => {
+  const sessionId = "4750bf36-ad78-48b3-9299-dbab7717bf9d";
+  let invocation = null;
+  const result = await runReviewer({
+    reviewer: "claude-opus",
+    cwd: "C:/work/review-head",
+    prompt: "review",
+    timeoutMs: 1000,
+  }, {
+    sessionIdFactory: () => sessionId,
+    runCli: async (options) => {
+      invocation = options;
+      return { ok: false, stdout: "", stderr: "", exitCode: 1 };
+    },
+    detectClaudeCapacity: async (options) => {
+      assert.deepEqual(options, { cwd: "C:/work/review-head", sessionId });
+      return true;
+    },
+  });
+
+  assert.deepEqual(invocation.args.slice(-3), ["--session-id", sessionId, "--print"]);
+  assert.equal(reviewerCapacityUnavailable(result), true);
+  assert.match(result.stderr, /rate_limit.*429/);
 });

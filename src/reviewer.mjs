@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { claudeSessionCapacityUnavailable } from "./claude-capacity.mjs";
 import { runNamedCli } from "./process.mjs";
 
 // Persisted reviewer ids identify a provider family for config compatibility.
@@ -8,6 +10,7 @@ export function reviewerInvocation(reviewer, {
   readOnly = false,
   tier = "economy",
   effort = "medium",
+  sessionId = null,
 } = {}) {
   if (reviewer === "claude-opus") {
     return {
@@ -19,6 +22,7 @@ export function reviewerInvocation(reviewer, {
         effort,
         "--permission-mode",
         readOnly ? "plan" : "acceptEdits",
+        ...(sessionId ? ["--session-id", sessionId] : []),
         "--print",
       ],
     };
@@ -59,14 +63,31 @@ export async function runReviewer({
   readOnly = false,
   tier = "economy",
   effort = "medium",
-}) {
-  const invocation = reviewerInvocation(reviewer, { readOnly, tier, effort });
-  return runNamedCli({
+}, {
+  runCli = runNamedCli,
+  sessionIdFactory = randomUUID,
+  detectClaudeCapacity = claudeSessionCapacityUnavailable,
+} = {}) {
+  const sessionId = reviewer === "claude-opus" ? sessionIdFactory() : null;
+  const invocation = reviewerInvocation(reviewer, {
+    readOnly,
+    tier,
+    effort,
+    sessionId,
+  });
+  const result = await runCli({
     ...invocation,
     cwd,
     stdin: prompt,
     timeoutMs,
   });
+  if (result.ok || reviewer !== "claude-opus") return result;
+  const unavailable = await detectClaudeCapacity({ cwd, sessionId });
+  if (!unavailable) return result;
+  return {
+    ...result,
+    stderr: `${result.stderr ?? ""}\nClaude capacity unavailable: rate_limit (HTTP 429)`.trim(),
+  };
 }
 
 export function alternateReviewer(reviewer) {
