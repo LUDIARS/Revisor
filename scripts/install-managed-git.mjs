@@ -16,7 +16,7 @@ function defaultTarget() {
 
 function assertComplete(root, label) {
   const paths = managedGitPaths(root);
-  const missing = [paths.git, paths.shell, paths.setup].filter((path) => !existsSync(path));
+  const missing = [paths.git].filter((path) => !existsSync(path));
   if (missing.length > 0) {
     throw new Error(`${label} is not a complete Git for Windows runtime; missing: ${missing.join(", ")}`);
   }

@@ -33,17 +33,16 @@ unchanged.
 
 Every process request whose executable name is `git` or Windows `git.exe` is
 replaced at the process boundary with the managed runtime, including requests
-that supplied an explicit desktop-client path. Revisor launches `cmd\git.exe` through
-the `usr\bin\sh.exe` from the same installation and puts its POSIX tools and
-`git-core` helpers first on `PATH`. This keeps `git submodule` and other shell
-commands inside one coherent distribution while retaining the caller's remaining
-environment for hooks and authenticated publication.
+that supplied an explicit desktop-client path. Revisor launches its owned
+`cmd\git.exe` directly. Git for Windows resolves its bundled helpers relative to
+that executable; Revisor does not add a separate shell process or rewrite `PATH`.
+The caller's environment remains available for hooks and authenticated
+publication.
 
-The installation must contain:
-
-- `cmd\git.exe`
-- `usr\bin\sh.exe`
-- `mingw64\libexec\git-core\git-sh-setup`
+The installation must contain `cmd\git.exe`. Provisioning still copies the whole
+Git for Windows distribution so commands that need bundled helpers retain them,
+but Revisor's process boundary depends only on and directly launches the Git
+executable.
 
 Revisor fails closed when the runtime is absent or incomplete. SourceTree paths
 are refused even when supplied through `REVISOR_GIT_ROOT`.

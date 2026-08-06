@@ -13,12 +13,10 @@ const ENV = { LOCALAPPDATA: "C:\\managed", REVISOR_GIT_ROOT: ROOT, AUTH_HEADER: 
 
 function completeRuntime(path) {
   const portable = path.replaceAll("\\", "/");
-  return portable.endsWith("cmd/git.exe")
-    || portable.endsWith("usr/bin/sh.exe")
-    || portable.endsWith("mingw64/libexec/git-core/git-sh-setup");
+  return portable.endsWith("cmd/git.exe");
 }
 
-test("wraps Windows Git with the Revisor-owned shell and preserves argv and env", () => {
+test("launches the Revisor-owned Windows Git directly and preserves argv and env", () => {
   const invocation = managedGitInvocation(["-C", "repo with spaces", "status"], {
     cwd: "C:\\review worktree",
     env: ENV,
@@ -27,14 +25,12 @@ test("wraps Windows Git with the Revisor-owned shell and preserves argv and env"
   });
 
   const paths = managedGitPaths(ROOT);
-  assert.equal(invocation.command, paths.shell);
-  assert.deepEqual(invocation.args.slice(-3), ["-C", "repo with spaces", "status"]);
-  assert.equal(invocation.args[2], paths.git);
-  assert.deepEqual(invocation.args.slice(3, 5), [
+  assert.equal(invocation.command, paths.git);
+  assert.deepEqual(invocation.args.slice(0, 2), [
     "-c",
     `safe.directory=${resolve("C:\\review worktree").replaceAll("\\", "/")}`,
   ]);
-  assert.match(invocation.args[1], /mingw64\/libexec\/git-core/);
+  assert.deepEqual(invocation.args.slice(2), ["-C", "repo with spaces", "status"]);
   assert.equal(invocation.env, ENV);
 });
 

@@ -1,11 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, normalize, resolve } from "node:path";
 
-const WINDOWS_GIT_SCRIPT = [
-  "export PATH=/usr/bin:/mingw64/bin:/mingw64/libexec/git-core:\"$PATH\"",
-  "exec \"$0\" \"$@\"",
-].join("; ");
-
 function defaultWindowsGitRoot(env) {
   if (!env.LOCALAPPDATA) {
     throw new Error(
@@ -37,8 +32,6 @@ export function managedGitPaths(root) {
   return {
     root,
     git: join(root, "cmd", "git.exe"),
-    shell: join(root, "usr", "bin", "sh.exe"),
-    setup: join(root, "mingw64", "libexec", "git-core", "git-sh-setup"),
   };
 }
 
@@ -53,7 +46,7 @@ export function resolveManagedGitRoot({
   assertSupportedGitRoot(root);
 
   const paths = managedGitPaths(root);
-  const missing = [paths.git, paths.shell, paths.setup].filter((path) => !fileExists(path));
+  const missing = [paths.git].filter((path) => !fileExists(path));
   if (missing.length > 0) {
     throw new Error(
       `Revisor managed Git is incomplete at ${root}; missing: ${missing.join(", ")}. `
@@ -82,8 +75,8 @@ export function managedGitInvocation(args, {
 
   const paths = resolveManagedGitRoot({ env, platform, fileExists });
   return {
-    command: paths.shell,
-    args: ["-c", WINDOWS_GIT_SCRIPT, paths.git, ...managedArgs],
+    command: paths.git,
+    args: managedArgs,
     env,
   };
 }
