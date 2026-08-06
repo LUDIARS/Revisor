@@ -464,7 +464,9 @@ export function createPrReviewRunner({
         const partialAnatomiaCliPath = request.verificationTargets?.includes("anatomia")
           ? await resolveAnatomiaCli(settings.anatomiaFolder)
           : null;
-        return runPartialVerification({
+        // Await inside the try block so finally cannot remove the disposable
+        // worktrees while partial verification is still using them.
+        return await runPartialVerification({
           request,
           submitted,
           settings,
