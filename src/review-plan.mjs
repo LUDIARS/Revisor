@@ -165,6 +165,20 @@ export function applyCostValidationMode(plan, enabled) {
   };
 }
 
+// Verification never reuses model-advised stage skips. The current diff may
+// have changed kinds since the intent review, so derive the deterministic plan
+// from the bytes being verified and apply only the current validation policy.
+export function planVerification({
+  classification,
+  testCases = [],
+  validationModeEnabled = false,
+}) {
+  return applyCostValidationMode(
+    planReview({ classification, testCases }),
+    validationModeEnabled,
+  );
+}
+
 // `review` is persisted as part of every plan shown on the PR board. Refusing
 // an unknown tier is intentional: a malformed plan must not silently turn a
 // required human decision into an external autofix (or the reverse).

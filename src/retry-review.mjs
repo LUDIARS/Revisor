@@ -1,5 +1,6 @@
 const REVIEW_REASON = /reviewer reported|Genius decision/i;
 const REVIEW_ERROR = /(?:opposite-model|reviewer) review(?:er)? failed/i;
+const ALL_DETERMINISTIC_TARGETS = ["leakage", "tests", "anatomia", "security"];
 
 export function failedVerificationTargets(pullRequest) {
   const reasons = Array.isArray(pullRequest?.reasons) ? pullRequest.reasons : [];
@@ -29,13 +30,20 @@ export function retryReviewScope(pullRequest, currentHeadSha) {
   const reasons = Array.isArray(pullRequest?.reasons) ? pullRequest.reasons : [];
   const sameReviewedHead = typeof pullRequest?.reviewedHeadSha === "string"
     && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase();
-  if (!sameReviewedHead || pullRequest?.intentReviewCompleted !== true
+  if (pullRequest?.intentReviewCompleted !== true
       || reasons.some((reason) => REVIEW_REASON.test(reason))
       || REVIEW_ERROR.test(String(pullRequest?.error ?? ""))) {
     return { reviewMode: "full", verificationTargets: [] };
   }
   const verificationTargets = failedVerificationTargets(pullRequest);
-  return verificationTargets.length > 0
-    ? { reviewMode: "verification", verificationTargets }
-    : { reviewMode: "full", verificationTargets: [] };
+  const previousPlanWasAdvised = pullRequest?.reviewPlan?.source === "advised";
+  const reuseFailedTargets = sameReviewedHead
+    && !previousPlanWasAdvised
+    && verificationTargets.length > 0;
+  return {
+    reviewMode: "verification",
+    verificationTargets: reuseFailedTargets
+      ? verificationTargets
+      : [...ALL_DETERMINISTIC_TARGETS],
+  };
 }

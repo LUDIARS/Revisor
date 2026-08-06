@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "review-cost-control — review model cost and retry control"
-description: "差分規模とドメイン数に応じたモデル選択、bounded test autofix、同一headの限定再検証、モデルを呼ばない比較検証モードを定義する。"
+description: "差分規模とドメイン数に応じたモデル選択、bounded test autofix、head更新後もモデルを呼ばない決定的再検証、比較検証モードを定義する。"
 service: revisor
 domain: review-plan
 tags:
@@ -13,7 +13,7 @@ related:
   - ../architecture.md
   - ./review-plan.md
   - ../plan/problem_logs/2026-08-05-revisor-review-token-amplification.md
-updated: 2026-08-05
+updated: 2026-08-06
 ---
 
 # Review cost control
@@ -37,7 +37,9 @@ worktree に一致するセッションを集計した。
 - 差分規模とドメイン数による Sonnet/Terra と Opus/Sol の選択。
 - 大規模時だけ2エージェント。調査側は read-only、判断側だけが編集可能。
 - review後は一般レビューを繰り返さず、テスト失敗だけを低 effort の限定 prompt で修復。
-- 同一headの非レビューrejectは失敗ゲートだけ再実行。
+- 方針レビューは1 PRにつき1回とし、同一headの非レビューrejectは原則として失敗ゲートだけ
+  再実行する。前回が model-advised plan の場合は助言済み skip を捨てて全決定的ゲートを実行する。
+- head更新後も一般レビューは繰り返さず、新しいheadで決定的ゲートをすべて再実行する。
 - autofix は3回上限と無変更停止を持つ。無限ループ・同一失敗への課金継続を防ぐ。
 - システム/環境ゲートは人間判断で上書き可能にするが、テスト失敗、情報漏えい、実 finding
   は上書きしない。

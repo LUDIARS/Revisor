@@ -35,6 +35,7 @@ import {
   codeAnalysisGating,
   applyCostValidationMode,
   planReview,
+  planVerification,
   reviewTier,
   stageEnabled,
 } from "./review-plan.mjs";
@@ -314,7 +315,7 @@ function previousAnalysis(previousReview) {
   };
 }
 
-async function runPartialVerification({
+export async function runPartialVerification({
   request,
   submitted,
   settings,
@@ -323,14 +324,20 @@ async function runPartialVerification({
   env,
   runSecurity,
   complexityDropThreshold,
+  analyze = analyzePr,
 }) {
   const previous = request.previousReview;
   const targets = new Set(request.verificationTargets ?? []);
-  let analysis = previousAnalysis(previous);
-  if (!analysis) throw new Error("Partial verification requires the previous Anatomia result.");
-  const plan = previous.reviewPlan ?? planReview({
+  const sameReviewedHead = typeof previous.reviewedHeadSha === "string"
+    && previous.reviewedHeadSha.toLowerCase() === request.headSha.toLowerCase();
+  let analysis = targets.has("anatomia") ? null : previousAnalysis(previous);
+  if (!targets.has("anatomia") && !analysis) {
+    throw new Error("Partial verification requires the previous Anatomia result.");
+  }
+  const plan = planVerification({
     classification: submitted.classification,
     testCases: request.testCases,
+    validationModeEnabled: settings.costValidationModeEnabled,
   });
   const leakage = targets.has("leakage")
     ? scanAddedDiffForLeaks(submitted.unifiedDiff)
@@ -345,13 +352,26 @@ async function runPartialVerification({
       })
     : previous.ci;
   if (!Array.isArray(ci)) throw new Error("Partial verification requires the previous test result.");
+  let baselineScore = previous.anatomia?.baselineComplexityScore;
   if (targets.has("anatomia")) {
-    analysis = await analyzePr({
-      cliPath: anatomiaCliPath,
-      cwd: worktrees.head,
-      base: worktrees.mergeBase,
-    });
+    const [currentAnalysis, baseline] = await Promise.all([
+      analyze({
+        cliPath: anatomiaCliPath,
+        cwd: worktrees.head,
+        base: worktrees.mergeBase,
+      }),
+      stageEnabled(plan, "anatomia_code_analysis")
+        ? analyze({
+            cliPath: anatomiaCliPath,
+            cwd: worktrees.base,
+            base: "HEAD",
+          })
+        : null,
+    ]);
+    analysis = currentAnalysis;
+    baselineScore = baseline?.quality?.complexity?.score ?? null;
   }
+  if (!analysis) throw new Error("Partial verification requires an Anatomia result.");
   const security = targets.has("security")
     ? await reviewSecurityScan({
         runSecurity,
@@ -362,7 +382,6 @@ async function runPartialVerification({
         plan,
       })
     : previous.security;
-  const baselineScore = previous.anatomia?.baselineComplexityScore;
   const result = buildGateResult({
     request,
     firstAnalysis: null,
@@ -384,7 +403,9 @@ async function runPartialVerification({
     security,
     intentReviewCompleted: previous.intentReviewCompleted === true,
   });
-  const runtimeVerification = previous.runtimeVerification ?? result.runtimeVerification;
+  const runtimeVerification = sameReviewedHead
+    ? (previous.runtimeVerification ?? result.runtimeVerification)
+    : result.runtimeVerification;
   const mergeRisk = assessMergeRisk({
     classification: submitted.classification,
     reasons: result.reasons,

@@ -14,7 +14,7 @@ related:
   - ./review-gate.md
   - ./merge-risk.md
   - ./review-cost-control.md
-updated: 2026-08-05
+updated: 2026-08-06
 ---
 
 # review-plan — 変更種別と規模ごとの審査ステージ設計
@@ -70,11 +70,17 @@ updated: 2026-08-05
 うち `code` 分類ファイルの追加・削除本文だけを数え、ドキュメントや diff header を
 含めない。モデルへ渡す前に登録 base の一致、空でない changed paths と patch を確認する。
 
-同じ reviewed head の再審査で、reject 理由がモデルレビュー以外ならモデルを呼ばない。
-失敗した tests / leakage / Anatomia / security だけを再実行する。tests または leakage のため
-security が skip されていた場合は、その依存先として security も再実行する。head が変わった
-場合、またはテスト失敗で intent review 完了前の worktree が破棄された場合は、前回レビューの
-証拠を流用せず通常レビューに戻す。
+`intentReviewCompleted=true` の PR は、head SHA が変わっても同じ方針のモデルレビューを
+繰り返さない。同じ reviewed head の再審査では失敗した tests / leakage / Anatomia / security
+だけを再実行する。ただし前回の計画が model-advised なら、検証のみモードへ助言済み skip を
+持ち込まないため全決定的ゲートを再実行する。tests または leakage のため security が skip
+されていた場合は、その依存先として security も再実行する。head が変わった場合もモデルを
+呼ばず、leakage・登録テスト・Anatomia・security の決定的ゲートをすべて新しい head で
+再実行する。このとき前回の助言済み計画は流用せず、現在差分の変更種別から決定的に再計画し、
+complexity baseline と動作確認判定も現在の merge-base と head に対して更新する。
+
+通常レビューへ戻すのは、intent review がまだ完了していない、reviewer が方針判断に必要な情報
+不足を返した、または validation mode 設定が変わって review policy 自体が変化した場合だけとする。
 
 reviewer と限定 test autofix の編集が終わった後、コミット対象の最終差分へ Anatomia を1回
 再実行する。target domain、architecture、complexity のゲートは、この最終結果だけで判定する。

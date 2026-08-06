@@ -13,7 +13,7 @@ related:
   - ../architecture.md
   - ./review-plan.md
   - ./human-decision-board.md
-updated: 2026-07-30
+updated: 2026-08-06
 ---
 
 # merge-risk — マージリスクと動作確認要否のスコア化
@@ -112,9 +112,10 @@ base は審査時の SHA に固定しない。固定すると 1 本マージす�
   直らずブランチ側の rebase が要るので、`action_required` に落として人間の
   判断待ちにする (Test OK から外れ、テストワークフローの候補からも消える)。
 - `StaleReviewError` — 審査済みヘッドと現在ヘッドの差分内容が違う
-  (`git patch-id --stable` で比較)。未審査のコードなので `force` 付きで再審査へ
-  戻す。比較できない場合 (審査済み SHA が GC 済み等) も同じ扱いで、未知の内容を
-  マージしない側に倒す。rebase で SHA だけが変わったヘッドは patch-id が一致
+  (`git patch-id --stable` で比較)。`force` 付きで再検証へ戻し、方針レビュー済みなら
+  モデルは再起動せず、leakage・登録テスト・Anatomia・security を新しい head で
+  再実行する。比較できない場合 (審査済み SHA が GC 済み等) も同じ扱いで、未知の
+  内容を無検証でマージしない。rebase で SHA だけが変わったヘッドは patch-id が一致
   するので審査結果を引き継ぐ。
 
 どちらも状態そのものが理由を語るので、`autoMerge` に重ねて失敗理由を書かない

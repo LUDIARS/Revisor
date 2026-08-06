@@ -253,7 +253,7 @@ test("a Genius decision cannot acknowledge an additional merge blocker", async (
   }
 });
 
-test("re-queues a failed local PR against the current branch heads", async () => {
+test("re-queues a reviewed local PR against a moved head without repeating intent review", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
   const submitted = [];
@@ -287,8 +287,11 @@ test("re-queues a failed local PR against the current branch heads", async () =>
       headRef: "feat/local",
     });
     store.updatePullRequest(pullRequest.id, {
-      checkStatus: "failed",
-      error: "Anatomia PR analysis failed",
+      checkStatus: "action_required",
+      reviewedHeadSha: pullRequest.headSha,
+      intentReviewCompleted: true,
+      reviewer: "codex-sol",
+      reasons: ["1 changed architecture rule violation(s) remain"],
     });
 
     git(fixture.repoPath, "checkout", "feat/local");
@@ -301,6 +304,12 @@ test("re-queues a failed local PR against the current branch heads", async () =>
     const retried = await service.retryPullRequest(pullRequest.id);
     assert.equal(submitted.length, 2);
     assert.equal(submitted[1].headSha, movedHead);
+    assert.equal(submitted[1].reviewMode, "verification");
+    assert.deepEqual(
+      submitted[1].verificationTargets,
+      ["leakage", "tests", "anatomia", "security"],
+    );
+    assert.equal(submitted[1].previousReview.reviewedHeadSha, pullRequest.headSha);
     assert.equal(retried.headSha, movedHead);
     assert.equal(retried.checkStatus, "queued");
     assert.equal(retried.error, null);

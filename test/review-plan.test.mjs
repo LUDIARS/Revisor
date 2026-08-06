@@ -5,6 +5,7 @@ import {
   applyAdvisedPlan,
   applyCostValidationMode,
   planReview,
+  planVerification,
   selectedTestCases,
   skippedTestOutcomes,
   stageEnabled,
@@ -47,6 +48,21 @@ test("cost validation mode records review, Genius and domain review as skipped",
     "anatomia_domain_review",
   ]);
   assert.equal(plan.stages.find((stage) => stage.id === "reviewer_autofix").status, "skipped");
+});
+
+test("verification derives a deterministic plan from the current head", () => {
+  const plan = planVerification({
+    classification: classifyChange({
+      changedPaths: ["src/runner.mjs"],
+      unifiedDiff: "",
+    }),
+    testCases: TEST_CASES,
+  });
+  assert.equal(plan.source, "deterministic");
+  assert.equal(stageEnabled(plan, "registered_tests"), true);
+  assert.equal(stageEnabled(plan, "anatomia_code_analysis"), true);
+  assert.equal(stageEnabled(plan, "security_review"), true);
+  assert.deepEqual(plan.testSelection.selected.sort(), ["check", "smoke", "unit"]);
 });
 
 test("a spec change uses the same scale-selected model review tier", () => {

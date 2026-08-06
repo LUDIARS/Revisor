@@ -1,6 +1,6 @@
 {
   "name": "review-plan",
-  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, bounded test autofix, capacity fallback, and same-head partial verification.",
+  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, bounded test autofix, capacity fallback, and model-free deterministic re-verification.",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -16,7 +16,7 @@
       "pathPattern": "(^|/)src/(?:anatomia|review-plan|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:review-plan|review-strategy|reviewer|retry-review|test-autofix)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:review-plan|review-strategy|reviewer|retry-review|runner-review|test-autofix)\\.test\\.mjs$"
     }
   ],
   "templateRules": [],
@@ -27,7 +27,7 @@
     "reviewer-strategy",
     "bounded-test-autofix",
     "provider-capacity-fallback",
-    "same-head-partial-verification",
+    "deterministic-re-verification",
     "cost-validation-mode"
   ],
   "specRefs": [
@@ -35,5 +35,5 @@
     "review-cost-control — review model cost and retry control"
   ],
   "rationale": "These modules jointly own how one local PR review is planned and executed. Gate interpretation remains in review-gate, Git worktree primitives remain in local-workspace, and publication remains in remote-publication.",
-  "updatedAt": "2026-08-05T00:00:00.000Z"
+  "updatedAt": "2026-08-06T00:00:00.000Z"
 }
