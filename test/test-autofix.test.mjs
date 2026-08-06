@@ -36,6 +36,41 @@ test("stops a no-progress autofix before it becomes a token loop", async () => {
   assert.equal(result.attempts, 1);
 });
 
+test("preserves registered-test evidence when the autofix model fails", async () => {
+  let reranTests = false;
+  const result = await runTestAutofixLoop({
+    initialCi: failed,
+    repair: async () => ({ ok: false, stdout: "withheld model output" }),
+    runTests: async () => {
+      reranTests = true;
+      return passed;
+    },
+  });
+  assert.equal(result.status, "model_failed");
+  assert.equal(result.attempts, 1);
+  assert.deepEqual(result.ci, failed);
+  assert.deepEqual(result.outputs, []);
+  assert.equal(reranTests, false);
+});
+
+test("withholds earlier reviewer output when a later autofix attempt fails", async () => {
+  let repairs = 0;
+  const result = await runTestAutofixLoop({
+    initialCi: failed,
+    repair: async () => {
+      repairs += 1;
+      return repairs === 1
+        ? { ok: true, changed: true, stdout: "earlier reviewer output" }
+        : { ok: false, stdout: "failed reviewer output" };
+    },
+    runTests: async () => failed,
+  });
+  assert.equal(result.status, "model_failed");
+  assert.equal(result.attempts, 2);
+  assert.deepEqual(result.ci, failed);
+  assert.deepEqual(result.outputs, []);
+});
+
 test("the autofix prompt contains bounded failure evidence and forbids a general review", () => {
   const prompt = buildTestAutofixPrompt({
     request: { repository: "LUDIARS/Revisor", number: 1 },

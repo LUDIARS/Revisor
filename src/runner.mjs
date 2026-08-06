@@ -150,6 +150,16 @@ async function autofixFailingTests({
   return { ...outcome, reviewer: activeReviewer };
 }
 
+function testAutofixHumanQuestion(status) {
+  if (status === "model_failed") {
+    return "Automated test autofix model failed; inspect the captured registered test evidence.";
+  }
+  if (status === "stalled") {
+    return "Automated test autofix made no progress; inspect the failing test or environment.";
+  }
+  return "Registered tests still fail after the bounded automated autofix attempts.";
+}
+
 export async function runReviewWithCapacityFallback(options, execute) {
   if (typeof execute !== "function") {
     throw new TypeError("A reviewer executor function is required.");
@@ -592,9 +602,7 @@ export function createPrReviewRunner({
               docsOrConfigOnly,
               security: initialSecurity,
             }),
-            humanQuestion: autofix.status === "stalled"
-              ? "Automated test autofix made no progress; inspect the failing test or environment."
-              : "Registered tests still fail after the bounded automated autofix attempts.",
+            humanQuestion: testAutofixHumanQuestion(autofix.status),
           };
         }
         // Test repair happens before the single intent review. Refresh the
@@ -810,9 +818,7 @@ export function createPrReviewRunner({
               // unchanged submitted head.
               intentReviewCompleted: false,
             }),
-            humanQuestion: autofix.status === "stalled"
-              ? "Automated test autofix made no progress; inspect the failing test or environment."
-              : "Registered tests still fail after the bounded automated autofix attempts.",
+            humanQuestion: testAutofixHumanQuestion(autofix.status),
           };
         }
         reviewed = await readChangeProfile(worktrees.head, worktrees.mergeBase);

@@ -42,7 +42,13 @@ export async function runTestAutofixLoop({
   for (let attempt = 1; !testsPassed(ci) && attempt <= maxAttempts; attempt += 1) {
     const result = await repair({ ci, attempt, maxAttempts });
     if (!result.ok) {
-      throw new Error("Test autofix model failed; output was withheld from the Check Run.");
+      // The model output stays withheld, but the registered-test evidence was
+      // already redacted and bounded at capture time. Returning it lets the
+      // normal action-required result persist the real failure instead of
+      // replacing it with an infrastructure error that cannot be diagnosed.
+      // A caller must never receive reviewer output with a model-failed
+      // result, including output retained from an earlier successful attempt.
+      return { ci, attempts: attempt, status: "model_failed", outputs: [] };
     }
     outputs.push(result.stdout ?? "");
     if (!result.changed) {
