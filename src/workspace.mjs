@@ -100,14 +100,6 @@ export async function prepareLocalWorktrees(repoPath, request) {
       `head SHA changed before review (expected ${request.headSha}, found ${inspected.headSha})`,
     );
   }
-  if (
-    request.baseSha
-    && inspected.baseSha.toLowerCase() !== request.baseSha.toLowerCase()
-  ) {
-    throw new Error(
-      `base SHA changed before review (expected ${request.baseSha}, found ${inspected.baseSha})`,
-    );
-  }
   const root = await mkdtemp(join(tmpdir(), "revisor-local-pr-"));
   const worktrees = {
     root,

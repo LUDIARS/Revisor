@@ -64,6 +64,28 @@ test("cleanup removes both disposable worktrees and the temp root", async () => 
   }
 });
 
+test("prepares the review after the base advances", async () => {
+  const fixture = repositoryFixture();
+  let worktrees = null;
+  try {
+    const originalBaseSha = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+    writeFileSync(join(fixture.repoPath, "other.txt"), "base moved\n", "utf8");
+    git(fixture.repoPath, "add", "other.txt");
+    git(fixture.repoPath, "commit", "-m", "base moves");
+
+    worktrees = await prepareLocalWorktrees(fixture.repoPath, {
+      ...request(fixture),
+      baseSha: originalBaseSha,
+    });
+
+    assert.equal(existsSync(worktrees.head), true);
+    assert.equal(existsSync(worktrees.base), true);
+  } finally {
+    if (worktrees) await cleanupWorktrees(fixture.repoPath, worktrees);
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 // A temp directory the filesystem refuses to delete (Windows EBUSY/EPERM while an
 // on-access scanner or an exiting child still holds a handle) must not turn an
 // otherwise complete review into a failed one.
