@@ -78,6 +78,6 @@ export function alternateReviewer(reviewer) {
 export function reviewerCapacityUnavailable(result) {
   if (result?.ok) return false;
   const output = `${result?.stdout ?? ""}\n${result?.stderr ?? ""}`;
-  return /monthly spend limit|rate[_ -]?limit|\b429\b|quota|usage limit|credit balance|overloaded/i
+  return /monthly spend limit|you(?:'ve| have) hit your limit|rate[_ -]?limit|\b429\b|quota|usage limit|credit balance|overloaded|process timed out/i
     .test(output);
 }

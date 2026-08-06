@@ -12,7 +12,7 @@ const PRE_MERGE_SYSTEM_FAILURE_PATTERN =
 const HARD_FAILURE_PATTERN =
   /information leakage|registered test|security finding\(s\)|actual finding/i;
 const SYSTEM_FAILURE_PATTERN =
-  /Anatomia|reviewer failed|security scan|ENOENT|spawn|timed? out|unavailable|not configured|is not a function|could not (?:start|read|resolve|load)/i;
+  /Anatomia|review investigation failed|reviewer failed|security scan|ENOENT|spawn|timed? out|unavailable|not configured|is not a function|could not (?:start|read|resolve|load)/i;
 
 /**
  * True when the only thing holding this PR back is the Genius card confirmation

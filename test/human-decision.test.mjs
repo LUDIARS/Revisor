@@ -42,6 +42,12 @@ test("an internal TypeError is classified as an overrideable system failure", ()
   })), true);
 });
 
+test("an investigation reviewer failure can be explicitly approved", () => {
+  assert.equal(isHumanOverrideableReviewHold(pullRequest({
+    error: "Review investigation failed; output was withheld from the Check Run.",
+  })), true);
+});
+
 test("pre-merge environment failure becomes bypassable only after it is recorded", () => {
   assert.equal(canBypassPreMergeSystemFailure(pullRequest({
     checkStatus: "test_ok",

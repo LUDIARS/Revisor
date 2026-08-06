@@ -30,3 +30,18 @@ Opusへ解決されていた。直近3日で87 PRに137 sessions、output 2,415,
 Claude reviewer はコード解析前に HTTP 429 `monthly spend limit` で終了した。相互provider固定では
 一方の月額枠切れが全PRを停止するため、capacity / rate limit / quota系だけ同じtier/effortの
 反対familyへ1回フォールバックする。通常のreview failureはフォールバック対象にしない。
+
+## 2026-08-06 local PR #243 investigation failure
+
+Claude Code の容量上限表示には `monthly spend limit` を含まない
+`You've hit your limit · resets ...` 形式もある。既存判定はこの形式を通常失敗として扱い、
+Codex fallback を起動せず investigation を3回連続で停止した。この provider 固有表示を
+capacity failure に追加し、通常の prompt / review failure は引き続き fallback 対象外とする。
+
+同じ最小入力でも Claude Code が容量エラー文を返さず無応答になり、Revisor に
+`process timed out` として終了させられる場合がある。この無応答タイムアウトも provider
+利用不能として扱い、反対 family の reviewer を一度だけ試す。
+
+さらに、調査 reviewer の両 provider が失敗した場合の `Review investigation failed` は
+基盤障害であるにもかかわらず、人間承認可能な system failure の語彙から漏れていた。
+実 finding や登録テスト失敗を上書きしない既存条件を維持し、この固定エラーだけを承認対象にする。

@@ -26,6 +26,15 @@ test("falls back only for provider capacity failures", () => {
   }), true);
   assert.equal(reviewerCapacityUnavailable({
     ok: false,
+    stdout: "You've hit your limit · resets 5pm (Asia/Tokyo)",
+  }), true);
+  assert.equal(reviewerCapacityUnavailable({
+    ok: false,
+    exitCode: null,
+    stderr: "process timed out",
+  }), true);
+  assert.equal(reviewerCapacityUnavailable({
+    ok: false,
     stderr: "review command failed because the prompt is invalid",
   }), false);
 });
