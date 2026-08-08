@@ -11,6 +11,7 @@ function analysisProjection(result) {
     quality: analysis.quality,
     architecture: analysis.architecture,
     baselineComplexityScore: result.baselineComplexityScore,
+    baselineComplexityFunctionCount: result.baselineComplexityFunctionCount,
     complexityScoreDelta: result.complexityScoreDelta,
     source: result.analysisSource,
   };

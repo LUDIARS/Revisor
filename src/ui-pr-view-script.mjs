@@ -367,9 +367,11 @@ export const PR_VIEW_SOURCE = `
     definition(list, '解析元', pr.anatomia.source);
     definition(list, 'complexity score', pr.anatomia.baselineComplexityScore === null
       ? '計画により未計測'
-      : pr.anatomia.baselineComplexityScore
-        + ' → ' + (pr.anatomia.baselineComplexityScore + pr.anatomia.complexityScoreDelta)
-        + ' (Δ ' + pr.anatomia.complexityScoreDelta + ')');
+      : pr.anatomia.complexityScoreDelta === null
+        ? '比較対象の基準関数がないため未計測'
+        : pr.anatomia.baselineComplexityScore
+          + ' → ' + (pr.anatomia.baselineComplexityScore + pr.anatomia.complexityScoreDelta)
+          + ' (Δ ' + pr.anatomia.complexityScoreDelta + ')');
     definition(list, '対象ドメイン', (pr.anatomia.domain && pr.anatomia.domain.hasTargetDomain)
       ? (pr.anatomia.domain.targetDomains || [])
           .map((entry) => (entry && entry.name) || entry).join(', ') || 'あり'

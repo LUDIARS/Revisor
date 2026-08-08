@@ -6,7 +6,7 @@ import {
   runReviewWithCapacityFallback,
 } from "../src/runner.mjs";
 
-function passingAnalysis(score) {
+function passingAnalysis(score, functions = 1) {
   return {
     domain: {
       hasTargetDomain: true,
@@ -16,7 +16,7 @@ function passingAnalysis(score) {
     quality: {
       changedFunctions: [{ anchor: "fn:changed" }],
       changedOrphans: [],
-      complexity: { score },
+      complexity: { score, functions },
     },
     architecture: {
       verify: { pass: true, gates: [] },
@@ -116,4 +116,65 @@ test("moved-head verification replans and refreshes head-dependent evidence", as
   assert.equal(result.baselineComplexityScore, 70);
   assert.equal(result.complexityScoreDelta, 5);
   assert.equal(result.runtimeVerification.required, false);
+});
+
+test("does not treat Anatomia's neutral score as a complexity baseline", async () => {
+  const testCases = [{
+    name: "unit",
+    command: "node",
+    args: ["--test"],
+    cwd: ".",
+    timeoutMs: 60_000,
+  }];
+  const result = await runPartialVerification({
+    request: {
+      repository: "LUDIARS/Vultus",
+      number: 330,
+      headSha: "b".repeat(40),
+      reviewMode: "verification",
+      verificationTargets: ["anatomia"],
+      testCases,
+      previousReview: {
+        reviewedHeadSha: "a".repeat(40),
+        intentReviewCompleted: true,
+        reviewer: "codex-sol",
+        reviewPlan: {
+          source: "deterministic",
+          stages: [],
+          testSelection: { selected: [], skipped: [] },
+        },
+        anatomia: {
+          ...passingAnalysis(100, 0),
+          baselineComplexityScore: 100,
+          baselineComplexityFunctionCount: 0,
+        },
+        leakage: { totalFindings: 0 },
+        ci: [{ name: "unit", status: "passed" }],
+        security: { status: "passed", totalFindings: 0 },
+        runtimeVerification: { score: 100, required: false, factors: [], evidence: [] },
+      },
+    },
+    submitted: {
+      classification: classifyChange({
+        changedPaths: ["server/src/index.ts"],
+        unifiedDiff: "",
+      }),
+    },
+    settings: { costValidationModeEnabled: false },
+    worktrees: { head: "head-worktree", base: "base-worktree", mergeBase: "merge-base" },
+    anatomiaCliPath: "anatomia-cli",
+    env: {},
+    runSecurity: async () => {
+      throw new Error("security is not a target in this fixture");
+    },
+    complexityDropThreshold: 10,
+    analyze: async ({ cwd }) => cwd === "base-worktree"
+      ? passingAnalysis(100, 0)
+      : passingAnalysis(77, 454),
+  });
+
+  assert.equal(result.baselineComplexityScore, 100);
+  assert.equal(result.baselineComplexityFunctionCount, 0);
+  assert.equal(result.complexityScoreDelta, null);
+  assert.deepEqual(result.reasons, []);
 });

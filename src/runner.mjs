@@ -220,7 +220,10 @@ function buildGateResult({
   geniusGuidance = null,
   intentReviewCompleted = false,
 }) {
-  const complexityScoreDelta = baseline
+  // A repository with no analyzed functions has Anatomia's neutral score of
+  // 100. That score is not a comparable baseline for a newly introduced code
+  // area, so only a measured baseline may enforce a complexity regression.
+  const complexityScoreDelta = baseline && baseline.quality.complexity.functions !== 0
     ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
     : null;
   const { reasons, advisories } = gateOutcome({
@@ -280,6 +283,7 @@ function buildGateResult({
       : null,
     analysis: finalAnalysis,
     baselineComplexityScore: baseline ? baseline.quality.complexity.score : null,
+    baselineComplexityFunctionCount: baseline?.quality.complexity.functions ?? null,
     complexityScoreDelta,
     initialLeakage,
     leakage,
@@ -364,7 +368,14 @@ export async function runPartialVerification({
       })
     : previous.ci;
   if (!Array.isArray(ci)) throw new Error("Partial verification requires the previous test result.");
-  let baselineScore = previous.anatomia?.baselineComplexityScore;
+  let baselineComplexity = typeof previous.anatomia?.baselineComplexityScore === "number"
+    ? {
+        score: previous.anatomia.baselineComplexityScore,
+        ...(typeof previous.anatomia.baselineComplexityFunctionCount === "number"
+          ? { functions: previous.anatomia.baselineComplexityFunctionCount }
+          : {}),
+      }
+    : null;
   if (targets.has("anatomia")) {
     const [currentAnalysis, baseline] = await Promise.all([
       analyze({
@@ -381,7 +392,7 @@ export async function runPartialVerification({
         : null,
     ]);
     analysis = currentAnalysis;
-    baselineScore = baseline?.quality?.complexity?.score ?? null;
+    baselineComplexity = baseline?.quality?.complexity ?? null;
   }
   if (!analysis) throw new Error("Partial verification requires an Anatomia result.");
   const security = targets.has("security")
@@ -398,8 +409,8 @@ export async function runPartialVerification({
     request,
     firstAnalysis: null,
     finalAnalysis: analysis,
-    baseline: typeof baselineScore === "number"
-      ? { quality: { complexity: { score: baselineScore } } }
+    baseline: baselineComplexity
+      ? { quality: { complexity: baselineComplexity } }
       : null,
     reviewer: previous.reviewer,
     contextSource: `partial-verification:${[...targets].join(",")}`,
