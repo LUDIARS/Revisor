@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runProcess } from "./process.mjs";
 
-const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
+const SAFE_REF = /^(?![-/])(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
 const SAFE_SHA = /^[0-9a-fA-F]{7,64}$/;
 
-function assertSafeRef(value, label) {
+export function assertSafeRef(value, label) {
   if (!SAFE_REF.test(value)) throw new Error(`${label} is not a safe Git ref`);
 }
 

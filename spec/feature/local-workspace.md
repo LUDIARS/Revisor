@@ -14,13 +14,15 @@ related:
   - ./security-scan.md
   - ./merge-risk.md
   - ../architecture.md
-updated: 2026-08-03
+updated: 2026-08-08
 ---
 
 # local-workspace — 使い捨て worktree とローカル ref の境界
 
-`src/workspace.mjs` は Revisor がローカル repository を触る唯一の境界である。責務は
-次に限定し、remote 通信 (fetch / push) は持たない。
+`src/workspace.mjs` は Revisor のローカル repository 操作を実行する境界である。
+`src/checkout-hygiene.mjs` はその操作を使い、監視 checkout を merge 前に復元する
+限定的なポリシーを所有する。どちらも remote 通信 (fetch / push) は持たない。
+`workspace.mjs` の実行責務は次に限定する。
 
 - 呼出側から来た ref 文字列を Git ref として安全な形だけに絞る
 - 固定 SHA を detached で checkout した使い捨て worktree を temp dir 配下に作る
@@ -32,8 +34,10 @@ updated: 2026-08-03
 ## ref の安全性
 
 `head_ref` / `base_ref` / 前進対象 branch は、絶対パス化・`..`・`@{`・`//` を含まない
-限定文字集合だけを通す。Revisor は ref を `refs/heads/<ref>` に組み立てて argv として
-渡すため、ここを抜けた文字列は Git の revision 構文や option として再解釈されうる。
+限定文字集合だけを通す (先頭の `-` も拒否する)。Revisor は ref を
+`refs/heads/<ref>` に組み立てるか、監視 checkout を戻す際に `git checkout <ref>` の
+argv として渡すため、ここを抜けた文字列は Git の revision 構文や option として
+再解釈されうる。
 検証は文字列を受け取った入口 (`inspectLocalPullRequest` / `advanceLocalBranch`) で行う。
 
 SHA も同じ扱いをする (`assertSafeSha`)。出所は Git 自身の出力か state に記録済みの Git の
@@ -87,3 +91,19 @@ untracked file は判定に入れない。審査は固定 SHA を別の worktree
 中断する)。submodule の未コミット内容も同様に無視し、submodule pointer の変更だけを
 tracked change として扱う。checkout 中の worktree が無い場合は `update-ref` の
 compare-and-swap、ある場合は `merge --ff-only` で前進する。
+
+## 監視 checkout の衛生 (2026-08-08 neco 指示)
+
+登録 rootPath (= Revisor が見ているディレクトリ) に対する運用ルール:
+
+1. **セッションは監視ディレクトリに重要なファイルの残骸を残す修正をしてはならない。**
+2. **監視 checkout が base ref (main) 以外のブランチへ切り替わるのは Test Workflow
+   のときだけ。** Revisor 自身は checkout を行わない。
+3. **マージ前には base ref へ戻り、変更を伴うファイルは stash される。**
+
+1〜2 はセッション側の規範だが、破られると `advanceLocalBranch` の清潔さ判定が
+fast-forward を拒否し (「テストが失敗する / マージが通らない」)、テストが別ブランチの
+コードを起動する。3 を `src/checkout-hygiene.mjs` の `restoreBaseCheckout` が
+squash merge の冒頭で機械的に強制する: 未コミット変更 (untracked / ignored 含む) を
+`revisor-checkout-hygiene` メッセージ付きで stash し (**削除はしない** — 残骸は
+復元可能なまま退避)、checkout を base ref へ戻してからマージ処理に入る。
