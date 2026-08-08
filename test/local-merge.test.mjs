@@ -17,7 +17,7 @@ function git(repoPath, ...args) {
 }
 
 // main 1 コミット + feat/local 1 コミットの素の作業リポジトリ。
-function repositoryFixture() {
+function repositoryFixture({ withLfs = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "revisor-local-merge-"));
   const repoPath = join(directory, "Product");
   const init = spawnSync("git", ["init", repoPath], {
@@ -28,16 +28,29 @@ function repositoryFixture() {
   git(repoPath, "checkout", "-b", "main");
   git(repoPath, "config", "user.name", "Test");
   git(repoPath, "config", "user.email", "test@example.invalid");
+  if (withLfs) {
+    writeFileSync(join(repoPath, ".gitattributes"), "*.bin filter=lfs -text\n", "utf8");
+  }
   writeFileSync(join(repoPath, "product.txt"), "base\n", "utf8");
   writeFileSync(join(repoPath, "other.txt"), "other\n", "utf8");
+  if (withLfs) writeFileSync(join(repoPath, "asset.bin"), "base asset\n", "utf8");
   git(repoPath, "add", ".");
   git(repoPath, "commit", "-m", "base");
   git(repoPath, "checkout", "-b", "feat/local");
   writeFileSync(join(repoPath, "product.txt"), "base\nfeature\n", "utf8");
+  if (withLfs) writeFileSync(join(repoPath, "asset.bin"), "feature asset\n", "utf8");
   git(repoPath, "add", "product.txt");
+  if (withLfs) git(repoPath, "add", "asset.bin");
   git(repoPath, "commit", "-m", "feature");
   git(repoPath, "checkout", "main");
   return { directory, repoPath };
+}
+
+function configureUnavailableLfsFilter(repoPath) {
+  git(repoPath, "config", "filter.lfs.process", "git-lfs-missing-binary filter-process");
+  git(repoPath, "config", "filter.lfs.smudge", "git-lfs-missing-binary smudge -- %f");
+  git(repoPath, "config", "filter.lfs.clean", "git-lfs-missing-binary clean -- %f");
+  git(repoPath, "config", "filter.lfs.required", "true");
 }
 
 function mergeInput(fixture, overrides = {}) {
@@ -75,6 +88,20 @@ test("merges even after the base advanced, as long as the squash applies cleanly
     const mergeCommitSha = await squashMergeLocalPullRequest(input);
 
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("squash merges LFS-tracked changes without a local git-lfs binary", async () => {
+  const fixture = repositoryFixture({ withLfs: true });
+  try {
+    configureUnavailableLfsFilter(fixture.repoPath);
+
+    const mergeCommitSha = await squashMergeLocalPullRequest(mergeInput(fixture));
+
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+    assert.equal(git(fixture.repoPath, "show", "main:asset.bin"), "feature asset");
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

@@ -27,6 +27,22 @@ export async function git(cwd, args, timeoutMs = 120_000) {
   return result.stdout.trim();
 }
 
+// A repository whose `.gitattributes` declares `filter=lfs` routes checked-out
+// content through the `filter.lfs.process` (or smudge/clean) command that
+// `git lfs install` configures. When git-lfs is not installed, launching that
+// filter fails and Git aborts the whole `worktree add` with a non-zero exit,
+// even though a plain checkout without LFS content would have worked fine.
+// These worktrees are disposable internal copies Revisor only reads for
+// review/diff/merge; they never need real LFS blobs, so blanking the filter
+// commands lets Git fall back to the raw pointer-file content instead of
+// failing.
+export const NO_LFS_FILTER_ARGS = [
+  "-c", "filter.lfs.process=",
+  "-c", "filter.lfs.smudge=",
+  "-c", "filter.lfs.clean=",
+  "-c", "filter.lfs.required=false",
+];
+
 function parseWorktreeList(output) {
   return output
     .split(/\r?\n\r?\n/)
@@ -108,8 +124,8 @@ export async function prepareLocalWorktrees(repoPath, request) {
     mergeBase: inspected.mergeBase,
   };
   try {
-    await git(repoPath, ["worktree", "add", "--detach", worktrees.head, inspected.headSha]);
-    await git(repoPath, ["worktree", "add", "--detach", worktrees.base, inspected.mergeBase]);
+    await git(repoPath, [...NO_LFS_FILTER_ARGS, "worktree", "add", "--detach", worktrees.head, inspected.headSha]);
+    await git(repoPath, [...NO_LFS_FILTER_ARGS, "worktree", "add", "--detach", worktrees.base, inspected.mergeBase]);
     return worktrees;
   } catch (error) {
     await cleanupWorktrees(repoPath, worktrees);

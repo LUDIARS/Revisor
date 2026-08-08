@@ -86,6 +86,56 @@ test("prepares the review after the base advances", async () => {
   }
 });
 
+// `git lfs install` points `filter.lfs.process` (and smudge/clean) at the
+// `git-lfs` binary; when that binary is missing, launching the filter fails
+// and Git aborts the whole checkout non-zero. Revisor's disposable review
+// worktrees never need real LFS content, so worktree creation must still
+// succeed and simply leave the raw pointer/text content in place.
+test("worktree add succeeds when a repo's LFS filter binary is unavailable", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-workspace-lfs-"));
+  const repoPath = join(directory, "Product");
+  const init = spawnSync("git", ["init", repoPath], { encoding: "utf8", windowsHide: true });
+  if (init.status !== 0) throw new Error(init.stderr || init.stdout);
+  git(repoPath, "checkout", "-b", "main");
+  git(repoPath, "config", "user.name", "Test");
+  git(repoPath, "config", "user.email", "test@example.invalid");
+  writeFileSync(join(repoPath, ".gitattributes"), "*.bin filter=lfs -text\n", "utf8");
+  git(repoPath, "add", ".gitattributes");
+  git(repoPath, "commit", "-m", "attrs");
+  writeFileSync(join(repoPath, "asset.bin"), "binary asset content\n", "utf8");
+  git(repoPath, "add", "asset.bin");
+  git(repoPath, "commit", "-m", "asset");
+  git(repoPath, "checkout", "-b", "feat/local");
+  writeFileSync(join(repoPath, "asset.bin"), "binary asset content changed\n", "utf8");
+  git(repoPath, "add", "asset.bin");
+  git(repoPath, "commit", "-m", "feature");
+  const headSha = git(repoPath, "rev-parse", "refs/heads/feat/local");
+  git(repoPath, "checkout", "main");
+  // The filter commands are only configured now, after the content committed
+  // above, mirroring a machine where git-lfs was never installed: Git only
+  // needs to launch the filter when checking out (worktree add), not at commit
+  // time.
+  git(repoPath, "config", "filter.lfs.process", "git-lfs-missing-binary filter-process");
+  git(repoPath, "config", "filter.lfs.smudge", "git-lfs-missing-binary smudge -- %f");
+  git(repoPath, "config", "filter.lfs.clean", "git-lfs-missing-binary clean -- %f");
+  git(repoPath, "config", "filter.lfs.required", "true");
+
+  let worktrees = null;
+  try {
+    worktrees = await prepareLocalWorktrees(repoPath, {
+      headRef: "feat/local",
+      baseRef: "main",
+      headSha,
+    });
+
+    assert.equal(existsSync(worktrees.head), true);
+    assert.equal(existsSync(worktrees.base), true);
+  } finally {
+    if (worktrees) await cleanupWorktrees(repoPath, worktrees);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 // A temp directory the filesystem refuses to delete (Windows EBUSY/EPERM while an
 // on-access scanner or an exiting child still holds a handle) must not turn an
 // otherwise complete review into a failed one.

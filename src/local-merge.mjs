@@ -18,6 +18,7 @@ import {
   cleanupWorktrees,
   diffPatchId,
   git,
+  NO_LFS_FILTER_ARGS,
 } from "./workspace.mjs";
 
 function commitMessage(pullRequest) {
@@ -184,11 +185,17 @@ async function attemptSquashMerge({
     base: join(root, "unused"),
   };
   try {
-    await git(repository.rootPath, ["worktree", "add", "--detach", worktrees.head, baseSha]);
+    await git(repository.rootPath, [
+      ...NO_LFS_FILTER_ARGS,
+      "worktree", "add", "--detach", worktrees.head, baseSha,
+    ]);
     try {
       // A squash merge always stages a single-parent result. Git rejects
       // `--no-ff` together with `--squash`, so do not add a fast-forward flag.
-      await git(worktrees.head, ["merge", "--squash", "--no-commit", headSha]);
+      await git(worktrees.head, [
+        ...NO_LFS_FILTER_ARGS,
+        "merge", "--squash", "--no-commit", headSha,
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (await isMergeConflict(worktrees.head, message)) {

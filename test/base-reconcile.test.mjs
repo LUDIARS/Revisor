@@ -57,6 +57,13 @@ function reconcileInput(localPath, remotePath) {
   };
 }
 
+function configureUnavailableLfsFilter(repoPath) {
+  git(repoPath, "config", "filter.lfs.process", "git-lfs-missing-binary filter-process");
+  git(repoPath, "config", "filter.lfs.smudge", "git-lfs-missing-binary smudge -- %f");
+  git(repoPath, "config", "filter.lfs.clean", "git-lfs-missing-binary clean -- %f");
+  git(repoPath, "config", "filter.lfs.required", "true");
+}
+
 test("reports nothing to do when GitHub is not ahead", async () => {
   const { directory, localPath, remotePath } = fixture();
   try {
@@ -104,6 +111,31 @@ test("merges cleanly diverged histories and keeps both sides reachable", async (
     assert.equal(git(localPath, "merge-base", "--is-ancestor", localSha, mergedSha), "");
     // 監視 checkout 自体は動かしていない (branch ref だけが前進する)。
     assert.equal(git(localPath, "status", "--porcelain"), "");
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test("reconciles LFS-tracked remote changes without a local git-lfs binary", async () => {
+  const { directory, localPath, remotePath } = fixture();
+  try {
+    writeFileSync(join(localPath, ".gitattributes"), "*.bin filter=lfs -text\n", "utf8");
+    writeFileSync(join(localPath, "asset.bin"), "base asset\n", "utf8");
+    git(localPath, "add", ".");
+    git(localPath, "commit", "-m", "add LFS-tracked asset");
+    git(remotePath, "pull");
+    writeFileSync(join(remotePath, "asset.bin"), "remote asset\n", "utf8");
+    git(remotePath, "add", "asset.bin");
+    git(remotePath, "commit", "-m", "remote LFS asset change");
+    writeFileSync(join(localPath, "local.txt"), "local\n", "utf8");
+    git(localPath, "add", "local.txt");
+    git(localPath, "commit", "-m", "local-only change");
+    configureUnavailableLfsFilter(localPath);
+
+    const report = await reconcileBaseWithRemote(reconcileInput(localPath, remotePath));
+
+    assert.equal(report.action, "merge");
+    assert.equal(git(localPath, "show", "main:asset.bin"), "remote asset");
   } finally {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10 });
   }
