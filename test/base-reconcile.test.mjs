@@ -176,6 +176,40 @@ test("squash merge reconciles once and retries when GitHub moved independently",
   }
 });
 
+test("squash merge ignores an ambient fast-forward-only Git preference", async () => {
+  const { directory, localPath } = fixture();
+  try {
+    git(localPath, "checkout", "-b", "feat/local");
+    writeFileSync(join(localPath, "product.txt"), "base\nfeature\n", "utf8");
+    git(localPath, "add", "product.txt");
+    git(localPath, "commit", "-m", "feature");
+    const headSha = git(localPath, "rev-parse", "HEAD");
+    git(localPath, "checkout", "main");
+    git(localPath, "config", "merge.ff", "only");
+
+    const result = await squashMergeLocalPullRequest({
+      repository: { repository: "LUDIARS/Product", rootPath: localPath, baseRef: "main" },
+      pullRequest: {
+        id: "pr-ff-only",
+        status: "open",
+        checkStatus: "test_ok",
+        baseRef: "main",
+        headRef: "feat/local",
+        reviewedHeadSha: headSha,
+        title: "feature",
+        body: "",
+      },
+      scan: async () => ({ status: "skipped" }),
+      publish: async ({ mergeCommitSha }) => ({ mergeCommitSha, releaseTag: null, releaseUrl: null }),
+    });
+
+    assert.equal(git(localPath, "rev-parse", "main"), result.mergeCommitSha);
+    assert.equal(git(localPath, "show", "main:product.txt"), "base\nfeature");
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
 test("retry discards the local release tag attached to an abandoned prepared merge", async () => {
   const { directory, localPath } = fixture();
   try {

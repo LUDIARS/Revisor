@@ -192,7 +192,10 @@ async function attemptSquashMerge({
   try {
     await git(repository.rootPath, ["worktree", "add", "--detach", worktrees.head, baseSha]);
     try {
-      await git(worktrees.head, ["merge", "--squash", "--no-commit", headSha]);
+      // A user- or system-level `merge.ff=only` must not turn a deliberate
+      // squash merge into a fast-forward-only operation. Revisor needs the
+      // staged squash result regardless of that ambient Git preference.
+      await git(worktrees.head, ["merge", "--no-ff", "--squash", "--no-commit", headSha]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (await isMergeConflict(worktrees.head, message)) {
