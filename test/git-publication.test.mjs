@@ -32,6 +32,7 @@ test("publishes the reviewed base and release tag in one atomic push", async () 
     tag: "v1.2.3",
     token: "installation-token",
     runGit: async (_rootPath, args) => {
+      if (args[2] === MERGE_COMMIT) return EXPECTED_BASE;
       assert.deepEqual(args, ["merge-base", REMOTE_BASE, EXPECTED_BASE]);
       return REMOTE_BASE;
     },
@@ -64,7 +65,9 @@ test("publishes an ordinary merge without creating or pushing a tag", async () =
     mergeCommitSha: MERGE_COMMIT,
     tag: null,
     token: "installation-token",
-    runGit: async () => REMOTE_BASE,
+    runGit: async (_rootPath, args) => args[2] === MERGE_COMMIT
+      ? EXPECTED_BASE
+      : REMOTE_BASE,
     runRemoteGit,
   });
 
@@ -121,4 +124,28 @@ test("treats an already published base and tag as an idempotent success", async 
     },
   });
   assert.equal(pushed, false);
+});
+
+test("does not rewind a base branch that already contains the published merge", async () => {
+  const calls = [];
+  await pushPublishedCommit({
+    repository: "LUDIARS/Product",
+    rootPath: "C:/Product",
+    baseRef: "main",
+    expectedBaseSha: EXPECTED_BASE,
+    mergeCommitSha: MERGE_COMMIT,
+    tag: null,
+    token: "installation-token",
+    runGit: async (_rootPath, args) => {
+      assert.deepEqual(args, ["merge-base", REMOTE_BASE, MERGE_COMMIT]);
+      return MERGE_COMMIT;
+    },
+    runRemoteGit: async (request) => {
+      calls.push(request);
+      return lsRemote();
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].args[0], "ls-remote");
 });

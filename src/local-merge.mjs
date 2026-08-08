@@ -12,6 +12,7 @@ import {
   rememberPreparedMerge,
 } from "./git-publication.mjs";
 import { assertLocalVersionUnchanged } from "./local-version.mjs";
+import { classifyPreparedMerge, readPublishedBaseSha } from "./prepared-merge.mjs";
 import { publishMergedPullRequest } from "./release-publisher.mjs";
 import {
   advanceLocalBranch,
@@ -120,6 +121,9 @@ async function attemptSquashMerge({
   scan = configuredSecurityScan,
   publish = publishMergedPullRequest,
   allowSystemFailureOverride = false,
+  readPublishedBase = readPublishedBaseSha,
+  // stdout は CLI のデータ出力なので、マージ経路の診断行は stderr へ出す。
+  log = (message) => process.stderr.write(`Revisor: ${message}\n`),
 }) {
   if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
     throw new Error("Only an Open / Test OK local PR can be squash merged.");
@@ -153,30 +157,51 @@ async function attemptSquashMerge({
   // Releases and ordinary untagged merges reachable for an idempotent retry.
   const prepared = await findPreparedMerge(repository.rootPath, pullRequest.id);
   if (prepared) {
-    const expectedBaseSha = await git(repository.rootPath, [
-      "rev-parse",
-      `${prepared.mergeCommitSha}^`,
-    ]);
-    const publication = await publish({
+    // 公開済みの復旧対象だけを再利用する。 未公開のまま base だけが動いた prepared を
+    // 再利用すると、 古い親に固定された expectedBaseSha が publish の GitHub 検査を
+    // 永久に落とし続ける。
+    const decision = await classifyPreparedMerge({
       repository,
       pullRequest,
-      expectedBaseSha,
-      mergeCommitSha: prepared.mergeCommitSha,
-      preparedTag: prepared.tag,
-      env,
-    });
-    await advanceLocalBranch(
-      repository.rootPath,
-      pullRequest.baseRef,
+      prepared,
       baseSha,
-      prepared.mergeCommitSha,
-    );
+      env,
+      readPublishedBase,
+    });
+    if (decision.notice) log(decision.notice);
+    if (decision.action === "reuse") {
+      const expectedBaseSha = await git(repository.rootPath, [
+        "rev-parse",
+        `${prepared.mergeCommitSha}^`,
+      ]);
+      const publication = await publish({
+        repository,
+        pullRequest,
+        expectedBaseSha,
+        mergeCommitSha: prepared.mergeCommitSha,
+        preparedTag: prepared.tag,
+        env,
+      });
+      await advanceLocalBranch(
+        repository.rootPath,
+        pullRequest.baseRef,
+        baseSha,
+        prepared.mergeCommitSha,
+      );
+      await forgetPreparedMerge(
+        repository.rootPath,
+        pullRequest.id,
+        prepared.mergeCommitSha,
+      );
+      return publication;
+    }
+    // 破棄してから通常経路へ落ちる。 作り直しがコンフリクトした場合は下の
+    // MergeConflictError で明示的に失敗し、 古い prepared には戻らない。
     await forgetPreparedMerge(
       repository.rootPath,
       pullRequest.id,
       prepared.mergeCommitSha,
     );
-    return publication;
   }
   const root = await mkdtemp(join(tmpdir(), "revisor-squash-merge-"));
   const worktrees = {

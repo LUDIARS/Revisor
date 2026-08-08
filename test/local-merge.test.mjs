@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,37 @@ function git(repoPath, ...args) {
   });
   if (result.status !== 0) throw new Error(result.stderr || result.stdout);
   return result.stdout.trim();
+}
+
+// src/git-publication.mjs の preparedRef と同じ導出。 復旧 ref そのものを検査する
+// テストのために、 テスト側でも ref 名を組み立てる。
+function preparedRefName(localPrId) {
+  return `refs/revisor/prepared/${createHash("sha256").update(String(localPrId)).digest("hex")}`;
+}
+
+function refSha(repoPath, ref) {
+  const result = spawnSync("git", ["-C", repoPath, "rev-parse", "--verify", ref], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+// publish が落ちた回の残骸として prepared 復旧 ref を作る (実運用の「push 前後で
+// 落ちた」状況と同じ作られ方をさせる)。
+async function prepareInterruptedMerge(input) {
+  await assert.rejects(
+    squashMergeLocalPullRequest({
+      ...input,
+      publish: async () => {
+        throw new Error("publication interrupted");
+      },
+    }),
+    /publication interrupted/,
+  );
+  const preparedSha = refSha(input.repository.rootPath, preparedRefName(input.pullRequest.id));
+  assert.ok(preparedSha, "the interrupted merge must leave a prepared recovery ref");
+  return preparedSha;
 }
 
 // main 1 コミット + feat/local 1 コミットの素の作業リポジトリ。
@@ -238,6 +270,183 @@ test("reuses an untagged prepared merge when ordinary publication is retried", a
       git(fixture.repoPath, "rev-parse", "refs/heads/main"),
       publication.mergeCommitSha,
     );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("recovers idempotently when GitHub already points at the prepared merge", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    const preparedSha = await prepareInterruptedMerge(input);
+    // publish は成功していたが、 ローカル状態の更新途中で落ちた回の再実行。 base は
+    // 既に prepared まで進んでいるので、 prepared の親とは一致しない。
+    git(fixture.repoPath, "merge", "--ff-only", preparedSha);
+
+    const calls = [];
+    const notices = [];
+    const publication = await squashMergeLocalPullRequest({
+      ...input,
+      scan: async () => {
+        throw new Error("a published prepared merge must not be rebuilt or rescanned");
+      },
+      readPublishedBase: async () => preparedSha,
+      log: (message) => notices.push(message),
+      publish: async (request) => {
+        calls.push(request);
+        return { mergeCommitSha: request.mergeCommitSha, releaseTag: null, releaseUrl: null };
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].mergeCommitSha, preparedSha);
+    assert.equal(calls[0].expectedBaseSha, input.pullRequest.baseSha);
+    assert.equal(publication.mergeCommitSha, preparedSha);
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), preparedSha);
+    assert.equal(refSha(fixture.repoPath, preparedRefName(input.pullRequest.id)), null);
+    assert.match(notices.join("\n"), /already contains it/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("recovers idempotently when GitHub carried the base beyond the prepared merge", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    const preparedSha = await prepareInterruptedMerge(input);
+    git(fixture.repoPath, "merge", "--ff-only", preparedSha);
+    // GitHub 側は publish の後さらに前進している (prepared は祖先として含まれる)。
+    git(fixture.repoPath, "checkout", "-b", "published-later");
+    writeFileSync(join(fixture.repoPath, "other.txt"), "other\npublished later\n", "utf8");
+    git(fixture.repoPath, "add", "other.txt");
+    git(fixture.repoPath, "commit", "-m", "published later");
+    const publishedBaseSha = git(fixture.repoPath, "rev-parse", "HEAD");
+    git(fixture.repoPath, "checkout", "main");
+
+    const calls = [];
+    const publication = await squashMergeLocalPullRequest({
+      ...input,
+      scan: async () => {
+        throw new Error("a published prepared merge must not be rebuilt or rescanned");
+      },
+      readPublishedBase: async () => publishedBaseSha,
+      log: () => {},
+      publish: async (request) => {
+        calls.push(request);
+        return { mergeCommitSha: request.mergeCommitSha, releaseTag: null, releaseUrl: null };
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].mergeCommitSha, preparedSha);
+    assert.equal(publication.mergeCommitSha, preparedSha);
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), preparedSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("discards an unpublished prepared merge left behind by a moved base", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    const preparedSha = await prepareInterruptedMerge(input);
+    // 別の local PR が先に公開され、 ローカル base だけが前進した状態。 GitHub は
+    // まだ prepared を知らない。
+    writeFileSync(join(fixture.repoPath, "other.txt"), "other\nmoved\n", "utf8");
+    git(fixture.repoPath, "add", "other.txt");
+    git(fixture.repoPath, "commit", "-m", "another local PR landed first");
+    const movedBaseSha = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+
+    const calls = [];
+    const notices = [];
+    const publication = await squashMergeLocalPullRequest({
+      ...input,
+      readPublishedBase: async () => input.pullRequest.baseSha,
+      log: (message) => notices.push(message),
+      publish: async (request) => {
+        calls.push(request);
+        return { mergeCommitSha: request.mergeCommitSha, releaseTag: null, releaseUrl: null };
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.notEqual(publication.mergeCommitSha, preparedSha);
+    assert.equal(calls[0].expectedBaseSha, movedBaseSha);
+    assert.equal(
+      git(fixture.repoPath, "rev-parse", `${publication.mergeCommitSha}^`),
+      movedBaseSha,
+    );
+    assert.equal(
+      git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+      publication.mergeCommitSha,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("reports why a stale prepared merge was discarded", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    const preparedSha = await prepareInterruptedMerge(input);
+    writeFileSync(join(fixture.repoPath, "other.txt"), "other\nmoved\n", "utf8");
+    git(fixture.repoPath, "add", "other.txt");
+    git(fixture.repoPath, "commit", "-m", "another local PR landed first");
+    const movedBaseSha = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+
+    const notices = [];
+    await squashMergeLocalPullRequest({
+      ...input,
+      readPublishedBase: async () => input.pullRequest.baseSha,
+      log: (message) => notices.push(message),
+      publish: async (request) => ({
+        mergeCommitSha: request.mergeCommitSha,
+        releaseTag: null,
+        releaseUrl: null,
+      }),
+    });
+
+    const reported = notices.join("\n");
+    assert.match(reported, /discarded the stale prepared merge/);
+    assert.match(reported, new RegExp(input.pullRequest.id));
+    assert.match(reported, new RegExp(preparedSha));
+    assert.match(reported, new RegExp(input.pullRequest.baseSha));
+    assert.match(reported, new RegExp(movedBaseSha));
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("fails loudly instead of falling back when the rebuilt squash conflicts", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    const preparedSha = await prepareInterruptedMerge(input);
+    // 先に入った変更が同じ行を書き換えたので、 現在の base の上では作り直せない。
+    writeFileSync(join(fixture.repoPath, "product.txt"), "rewritten\n", "utf8");
+    git(fixture.repoPath, "add", "product.txt");
+    git(fixture.repoPath, "commit", "-m", "conflicting base change");
+    const movedBaseSha = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+
+    await assert.rejects(
+      squashMergeLocalPullRequest({
+        ...input,
+        readPublishedBase: async () => input.pullRequest.baseSha,
+        log: () => {},
+        publish: async () => {
+          throw new Error("a stale prepared merge must never be published");
+        },
+      }),
+      MergeConflictError,
+    );
+
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), movedBaseSha);
+    assert.equal(refSha(fixture.repoPath, preparedRefName(input.pullRequest.id)), null);
+    assert.ok(preparedSha);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

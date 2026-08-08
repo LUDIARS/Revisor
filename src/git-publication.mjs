@@ -175,7 +175,19 @@ export async function pushPublishedCommit({
   if (!remote.baseSha) {
     throw new RevisorError(`GitHub branch '${baseRef}' does not exist.`);
   }
-  if (remote.baseSha.toLowerCase() !== mergeCommitSha.toLowerCase()) {
+  let remoteAlreadyContainsMerge = remote.baseSha.toLowerCase() === mergeCommitSha.toLowerCase();
+  if (!remoteAlreadyContainsMerge) {
+    let mergeBase;
+    try {
+      mergeBase = await runGit(rootPath, ["merge-base", remote.baseSha, mergeCommitSha]);
+    } catch {
+      throw new RevisorError(
+        `GitHub '${baseRef}' is not contained in the local source of truth.`,
+      );
+    }
+    remoteAlreadyContainsMerge = mergeBase.toLowerCase() === mergeCommitSha.toLowerCase();
+  }
+  if (!remoteAlreadyContainsMerge) {
     let mergeBase;
     try {
       mergeBase = await runGit(rootPath, ["merge-base", remote.baseSha, expectedBaseSha]);
@@ -196,7 +208,7 @@ export async function pushPublishedCommit({
     throw new RevisorError(`GitHub release tag '${tag}' points to another commit.`);
   }
   const refspecs = [];
-  if (remote.baseSha.toLowerCase() !== mergeCommitSha.toLowerCase()) {
+  if (!remoteAlreadyContainsMerge) {
     refspecs.push(`${mergeCommitSha}:refs/heads/${baseRef}`);
   }
   if (tag && !remote.tagSha) refspecs.push(`refs/tags/${tag}:refs/tags/${tag}`);
