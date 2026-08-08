@@ -34,6 +34,7 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /block\('判断', decisionOf\(pr\)\)/);
   assert.match(page, /block\('レビュー計画', planOf\(pr\.reviewPlan\)\)/);
   assert.match(page, /block\('テスト', testsOf\(pr\)\)/);
+  assert.match(page, /block\('変更内容', changedFilesOf\(pr, openChangedFiles\)\)/);
   assert.match(page, /block\('レビュー', reviewOf\(pr\)\)/);
   assert.match(page, /block\('差分解析 \(Anatomia\)', analysisOf\(pr\)\)/);
   assert.match(page, /Genius の判断カード/);
@@ -55,13 +56,31 @@ test("the PR page explains early QA above the board", () => {
   assert.match(page, /request\('\/api\/test-workflow'\)/);
 });
 
+test("the PR page shows live dedicated review worker queues", () => {
+  const page = renderPrBoardPage("session-nonce");
+  assert.match(page, /レビュー worker queue/);
+  assert.match(page, /id="review-work-capacity"/);
+  assert.match(page, /request\('\/api\/review-work'\)/);
+  assert.match(page, /review_work\.updated/);
+});
+
+test("the PR page offers a GitHub-style changed-file and unified-diff overlay", () => {
+  const page = renderPrBoardPage("session-nonce");
+  assert.match(page, /id="pr-diff-overlay"/);
+  assert.match(page, /変更ファイルと diff を確認/);
+  assert.match(page, /request\('\/api\/local-prs\/'.*'\/files'\)/);
+  assert.match(page, /\/diff\?path=/);
+  assert.match(page, /function unifiedDiffView/);
+  assert.match(page, /'diff-line ' \+ tone/);
+});
+
 test("the compact PR menu puts the number before the review state and omits merge risk", () => {
   const page = renderPrBoardPage("session-nonce");
   assert.match(page, /class="cards" id="pr-cards"/);
-  assert.match(page, /function menuDecisionLabel\(decision\)/);
+  assert.match(page, /function menuDecisionLabel\(pr\)/);
   assert.match(page, /'レビュー項目があります'/);
   assert.match(page, /element\('span', 'pr-number', '#' \+ pr\.number\)/);
-  assert.match(page, /badge\(menuDecisionLabel\(pr\.decision\), pr\.decision\.tone\)/);
+  assert.match(page, /badge\(menuDecisionLabel\(pr\), menuTone\)/);
   assert.doesNotMatch(page, /function prCardChips\(pr\)/);
   assert.doesNotMatch(page, /function riskLabel\(decision\)/);
   assert.match(page, /@media \(max-width: 700px\)/);
@@ -178,6 +197,20 @@ test("the PR board receives realtime status events and logs them below the detai
   assert.doesNotMatch(page, /setInterval\(refresh, 3000\)/);
   assert.match(page, /main \{ width: calc\(100% - 32px\)/);
   assert.match(page, /grid-template-columns: minmax\(340px, 2fr\) minmax\(0, 3fr\)/);
+  assert.match(page, /visible\.slice\(-50\)/);
+  assert.match(page, /behavior: 'smooth'/);
+});
+
+test("each PR exposes persistent filtered Test Workflow logs and a full-screen Log overlay", () => {
+  const page = renderPrBoardPage("session-nonce");
+  assert.match(page, /block\('Test Workflow ログ', workflowLogOf\(pr, openLogOverlay\)\)/);
+  assert.match(page, /\['review_passed', 'Test OK'\]/);
+  assert.match(page, /\(pr\.lifecycleEvents \|\| \[\]\)\.slice\(-50\)/);
+  assert.match(page, /logButton\.textContent = 'Log'/);
+  assert.match(page, /class="log-overlay" hidden/);
+  assert.match(page, /position: fixed; inset: 0; z-index: 1000/);
+  assert.match(page, /source\.textContent = '該当PRを開く'/);
+  assert.match(page, /looksLikePullRequest/);
 });
 
 test("the Releases tab exposes initialization and confirmed immediate publication", () => {
@@ -204,7 +237,7 @@ test("the dashboard keeps configuration on the settings page", () => {
 test("renders a dedicated token-free settings page", () => {
   const page = renderSettingsPage("session-nonce");
   assert.match(page, /Anatomiaフォルダ/);
-  assert.match(page, /並列ワーカープロセス数/);
+  assert.match(page, /各レビュー工程の並列 worker 数/);
   assert.match(page, /許可Host/);
   assert.match(page, /暗号化config/);
   assert.match(page, /プロダクト登録/);
@@ -238,8 +271,13 @@ test("the settings page owns the review scale thresholds", () => {
   assert.match(page, /id="multi-domain-review-threshold"/);
   assert.match(page, /largeReviewLineThreshold:/);
   assert.match(page, /multiDomainReviewThreshold:/);
-  assert.match(page, /id="cost-validation-mode"/);
-  assert.match(page, /costValidationModeEnabled:/);
+  assert.match(page, /id="cost-validation-review"/);
+  assert.match(page, /id="cost-validation-genius"/);
+  assert.match(page, /id="cost-validation-anatomia-domain"/);
+  assert.match(page, /各レビュー工程の並列 worker 数/);
+  assert.match(page, /costValidationSkipReview:/);
+  assert.match(page, /costValidationSkipGenius:/);
+  assert.match(page, /costValidationSkipAnatomiaDomain:/);
 });
 
 // The page script reads every control by id, so a missing field throws on
@@ -394,6 +432,19 @@ test("the menu card keeps the plain decision label for states other than needs_h
     decision: { state: "auto_ok", label: "自動マージ可", tone: "ok", riskScore: 12 },
   });
   assert.deepEqual(flatten(card), ["#7", "自動マージ可", "Revisor", "自動マージ可の PR"]);
+  assert.equal(card.dataset.tone, "ok");
+});
+
+test("a Test OK PR overrides a human-decision label with a green Test OK badge", () => {
+  const card = renderCard({
+    id: "pr-ok",
+    number: 8,
+    repository: "Revisor",
+    title: "approved",
+    checkStatus: "test_ok",
+    decision: { state: "needs_human", label: "人間の判断が必要", tone: "bad" },
+  });
+  assert.deepEqual(flatten(card), ["#8", "Test OK", "Revisor", "approved"]);
   assert.equal(card.dataset.tone, "ok");
 });
 

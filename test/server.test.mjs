@@ -115,6 +115,17 @@ test("serves read-only local API requests to loopback without a token", async ()
     env: state.env,
     sessionToken: "ui-token",
     queue: { state: () => ({}) },
+    reviewWorkers: {
+      state: () => ({
+        queues: [{
+          id: "review",
+          label: "モデルレビュー",
+          workers: { configured: 1, idle: 0, running: 1 },
+          queued: [],
+          running: [{ repository: "LUDIARS/Vultus", number: 42, status: "running" }],
+        }],
+      }),
+    },
     localPrService: {
       listPullRequests: () => [{ id: "pr-1", number: 1 }],
       testWorkflowProducts: () => [{ repository: "LUDIARS/Revisor", number: 1 }],
@@ -132,6 +143,7 @@ test("serves read-only local API requests to loopback without a token", async ()
       ["/v1/local-prs/pr-1", (body) => assert.equal(body.pullRequest.body, "local only")],
       ["/v1/repositories", (body) => assert.equal(body.repositories[0].rootPath, "E:/Document/Ars/Revisor")],
       ["/v1/test-workflow", (body) => assert.equal(body.products[0].number, 1)],
+      ["/v1/review-work", (body) => assert.equal(body.workers.queues[0].running[0].number, 42)],
     ];
     for (const [url, assertBody] of reads) {
       const output = response();
@@ -142,6 +154,42 @@ test("serves read-only local API requests to loopback without a token", async ()
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }
+});
+
+test("serves a session-authorized local PR file list and one selected diff", async () => {
+  const handler = createRequestHandler({
+    env: {},
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {},
+    pullRequestDiffs: {
+      files: async (id) => ({
+        pullRequestId: id,
+        baseSha: "a".repeat(40),
+        headSha: "b".repeat(40),
+        files: [{ status: "modified", path: "src/view.mjs", previousPath: null }],
+      }),
+      fileDiff: async (id, path) => ({
+        pullRequestId: id,
+        file: { status: "modified", path, previousPath: null },
+        diff: "diff --git a/src/view.mjs b/src/view.mjs",
+      }),
+    },
+  });
+  const headers = { "x-revisor-session": "ui-token" };
+  const files = response();
+  await handler(request({ method: "GET", url: "/api/local-prs/pr-1/files", headers }), files);
+  assert.equal(files.status, 200);
+  assert.equal(JSON.parse(files.body).files[0].path, "src/view.mjs");
+
+  const diff = response();
+  await handler(request({
+    method: "GET",
+    url: "/api/local-prs/pr-1/diff?path=src%2Fview.mjs",
+    headers,
+  }), diff);
+  assert.equal(diff.status, 200);
+  assert.match(JSON.parse(diff.body).diff, /diff --git/);
 });
 
 // 読み取りを開けても、 破壊的操作は token を要求し続けることを固定する。

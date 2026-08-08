@@ -57,3 +57,48 @@ test("dispatches one active job per child worker", async () => {
   assert.deepEqual(await Promise.all([second, third]), [2, 3]);
   await pool.close();
 });
+
+test("prioritizes a ready review within its dedicated queue and exposes the queue state", async () => {
+  const worker = new FakeWorker();
+  const pool = new PrReviewWorkerPool({
+    size: 1,
+    cwd: process.cwd(),
+    createId: (() => {
+      let id = 0;
+      return () => `priority-${++id}`;
+    })(),
+    now: (() => {
+      let tick = 0;
+      return () => `2026-08-08T00:00:0${tick++}.000Z`;
+    })(),
+    forkWorker: () => worker,
+  });
+  const current = pool.run({ stage: "reviewer", repository: "LUDIARS/Vultus", number: 10 });
+  const routine = pool.run({ stage: "reviewer", repository: "LUDIARS/Vultus", number: 11 });
+  const urgent = pool.run(
+    { stage: "reviewer", repository: "LUDIARS/Vultus", number: 12 },
+    { priority: 0 },
+  );
+
+  assert.deepEqual(pool.state().queued.map((entry) => entry.number), [12, 11]);
+  assert.equal(pool.state().running[0].number, 10);
+  worker.emit("message", {
+    type: "result",
+    id: worker.messages[0].id,
+    result: "current",
+  });
+  assert.equal(await current, "current");
+  assert.equal(worker.messages[1].request.number, 12);
+  worker.emit("message", {
+    type: "result",
+    id: worker.messages[1].id,
+    result: "urgent",
+  });
+  worker.emit("message", {
+    type: "result",
+    id: worker.messages[2].id,
+    result: "routine",
+  });
+  assert.deepEqual(await Promise.all([routine, urgent]), ["routine", "urgent"]);
+  await pool.close();
+});

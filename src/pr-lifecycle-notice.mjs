@@ -71,6 +71,10 @@ export function pullRequestLifecycleMessage(event, pullRequest) {
     lines.push(`✅ Revisor 審査通過: ${label}`);
     if (title) lines.push(title);
     lines.push("Open / Test OK です。");
+  } else if (event === "review_queued") {
+    lines.push(`🔁 Revisor 再審査: ${label}`);
+    if (title) lines.push(title);
+    lines.push("レビューを再キューしました。");
   } else if (event === "review_failed") {
     lines.push(`❌ Revisor 審査失敗: ${label}`);
     if (title) lines.push(title);
@@ -91,6 +95,14 @@ export function pullRequestLifecycleMessage(event, pullRequest) {
     throw new TypeError(`Unknown PR lifecycle event '${event}'.`);
   }
   return lines.join("\n");
+}
+
+export function pullRequestLifecycleTone(event) {
+  if (event === "review_passed") return "ok";
+  if (event === "review_failed") return "bad";
+  if (event === "merged") return "merged";
+  if (event === "review_queued") return "warn";
+  return "idle";
 }
 
 export async function notifyPullRequestLifecycle({

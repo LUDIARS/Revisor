@@ -11,7 +11,7 @@ export const PR_EVENTS_SOURCE = `
   function renderPrEventLog() {
     const visible = prEvents.filter((entry) =>
       !entry.pullRequestId || !selectedPrId || entry.pullRequestId === selectedPrId);
-    prEventEntries.replaceChildren(...visible.slice(-40).reverse().map((entry) => {
+    prEventEntries.replaceChildren(...visible.slice(-50).map((entry) => {
       const item = element('li', entry.tone || 'idle');
       item.append(
         element('time', null, entry.time),
@@ -19,6 +19,7 @@ export const PR_EVENTS_SOURCE = `
       );
       return item;
     }));
+    prEventEntries.scrollTo?.({ top: prEventEntries.scrollHeight, behavior: 'smooth' });
   }
 
   function recordPrEvent(message, pullRequestId = null, tone = 'idle') {
@@ -28,7 +29,7 @@ export const PR_EVENTS_SOURCE = `
       tone,
       time: new Date().toLocaleTimeString('ja-JP', { hour12: false }),
     });
-    if (prEvents.length > 100) prEvents.shift();
+    if (prEvents.length > 50) prEvents.shift();
     renderPrEventLog();
   }
 
@@ -50,7 +51,13 @@ export const PR_EVENTS_SOURCE = `
       } catch {
         return;
       }
-      if (!event || !String(event.type).startsWith('pull_request.')) return;
+      if (!event) return;
+      if (event.type === 'review_work.updated') {
+        recordPrEvent('レビュー worker queue が更新されました。', null, 'idle');
+        await refresh();
+        return;
+      }
+      if (!String(event.type).startsWith('pull_request.')) return;
       const label = event.repository + ' #' + event.number + ' — '
         + event.status + ' / ' + event.checkStatus;
       recordPrEvent(label, event.pullRequestId,

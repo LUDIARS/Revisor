@@ -1,3 +1,8 @@
+import {
+  pullRequestLifecycleMessage,
+  pullRequestLifecycleTone,
+} from "./pr-lifecycle-notice.mjs";
+
 function analysisProjection(result) {
   const analysis = result?.analysis;
   if (!analysis) return null;
@@ -70,9 +75,16 @@ export class LocalPrReporter {
   }
 
   async #announceReviewStatus(event, localPrId) {
+    const pullRequest = this.store.getPullRequest(localPrId);
+    if (pullRequest && typeof this.store.appendPullRequestEvent === "function") {
+      this.store.appendPullRequestEvent(localPrId, {
+        event,
+        message: pullRequestLifecycleMessage(event, pullRequest),
+        tone: pullRequestLifecycleTone(event),
+      });
+    }
     if (!this.notifyReviewStatus) return;
     try {
-      const pullRequest = this.store.getPullRequest(localPrId);
       if (pullRequest) await this.notifyReviewStatus(event, pullRequest);
     } catch {
       // Discord status is best-effort and must not change the review verdict.

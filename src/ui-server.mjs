@@ -67,6 +67,8 @@ export function createUiRequestHandler({
   env = process.env,
   sessionToken,
   queue,
+  reviewWorkers = null,
+  pullRequestDiffs = null,
   localPrService,
   releaseService,
 }) {
@@ -170,6 +172,13 @@ export function createUiRequestHandler({
         sendJson(response, 200, queue.state());
         return;
       }
+      if (request.method === "GET" && url.pathname === "/api/review-work") {
+        sendJson(response, 200, {
+          reviewQueue: queue.state(),
+          workers: reviewWorkers?.state() ?? { queues: [] },
+        });
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/api/repositories") {
         sendJson(response, 200, {
           repositories: localPrService.listRepositories(),
@@ -229,6 +238,21 @@ export function createUiRequestHandler({
         sendJson(response, 200, {
           products: localPrService.testWorkflowProducts(),
         });
+        return;
+      }
+      const files = /^\/api\/local-prs\/([^/]+)\/files$/.exec(url.pathname);
+      if (request.method === "GET" && files) {
+        if (!pullRequestDiffs) throw new Error("Pull-request diff reader is unavailable.");
+        sendJson(response, 200, await pullRequestDiffs.files(decodeURIComponent(files[1])));
+        return;
+      }
+      const diff = /^\/api\/local-prs\/([^/]+)\/diff$/.exec(url.pathname);
+      if (request.method === "GET" && diff) {
+        if (!pullRequestDiffs) throw new Error("Pull-request diff reader is unavailable.");
+        sendJson(response, 200, await pullRequestDiffs.fileDiff(
+          decodeURIComponent(diff[1]),
+          url.searchParams.get("path"),
+        ));
         return;
       }
       const merge = /^\/api\/local-prs\/([^/]+)\/merge$/.exec(url.pathname);

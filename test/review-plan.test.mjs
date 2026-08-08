@@ -50,6 +50,16 @@ test("cost validation mode records review, Genius and domain review as skipped",
   assert.equal(plan.stages.find((stage) => stage.id === "reviewer_autofix").status, "skipped");
 });
 
+test("cost validation mode skips only the independently selected stage", () => {
+  const plan = applyCostValidationMode(planFor(["src/runner.mjs"]), {
+    costValidationSkipGenius: true,
+  });
+  assert.equal(stageEnabled(plan, "reviewer_autofix"), true);
+  assert.equal(stageEnabled(plan, "anatomia_domain_review"), true);
+  assert.equal(stageEnabled(plan, "genius_judgment"), false);
+  assert.deepEqual(plan.validationMode.skipped, ["genius_judgment"]);
+});
+
 test("verification derives a deterministic plan from the current head", () => {
   const plan = planVerification({
     classification: classifyChange({

@@ -5,8 +5,13 @@ import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
-import { redactSecretLines } from "./leakage.mjs";
+import {
+  pullRequestLifecycleMessage,
+  pullRequestLifecycleTone,
+} from "./pr-lifecycle-notice.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
+import { mergeFailureMessage, writeMergeFailureLog } from "./merge-failure-log.mjs";
+import { prepareMergeRepository } from "./merge-repository.mjs";
 import {
   approvedPullRequestForManualMerge,
   canBypassPreMergeSystemFailure,
@@ -42,12 +47,26 @@ function reviewRequest(repository, pullRequest, options = {}) {
   };
 }
 
+function validationModeSkips(settings) {
+  return [
+    ...(settings.costValidationSkipReview ? ["reviewer_autofix"] : []),
+    ...(settings.costValidationSkipGenius ? ["genius_judgment"] : []),
+    ...(settings.costValidationSkipAnatomiaDomain ? ["anatomia_domain_review"] : []),
+  ].sort();
+}
+
+function sameValidationMode(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export class LocalPrService {
   constructor({
     store,
     queue,
     installGuard = installPushGuard,
     merge = squashMergeLocalPullRequest,
+    prepareMerge = prepareMergeRepository,
+    logMergeFailure = writeMergeFailureLog,
     securityScan,
     publisher,
     prepareVersionFile = prepareRegisteredVersionFile,
@@ -67,6 +86,8 @@ export class LocalPrService {
     this.queue = queue;
     this.installGuard = installGuard;
     this.merge = merge;
+    this.prepareMerge = prepareMerge;
+    this.logMergeFailure = logMergeFailure;
     this.securityScan = securityScan;
     this.publisher = publisher;
     this.prepareVersionFile = prepareVersionFile;
@@ -114,6 +135,10 @@ export class LocalPrService {
 
   listRepositories() {
     return this.store.listRepositories();
+  }
+
+  getRepository(repository) {
+    return this.store.getRepository(repository);
   }
 
   async submitPullRequest(submission) {
@@ -187,7 +212,9 @@ export class LocalPrService {
     if (pullRequest.status !== "open") {
       throw new Error("Only an open local PR can be reviewed again.");
     }
-    return this.#requeue(pullRequest);
+    const queued = await this.#requeue(pullRequest);
+    await this.#announceLifecycle("review_queued", queued);
+    return queued;
   }
 
   /**
@@ -271,11 +298,11 @@ export class LocalPrService {
     );
     await assertLocalVersionUnchanged(repository.rootPath, refs.baseSha, refs.headSha);
     let scope = retryReviewScope(pullRequest, refs.headSha);
-    const previousValidationMode = pullRequest.reviewPlan?.validationMode?.enabled === true;
+    const previousValidationMode = [...(pullRequest.reviewPlan?.validationMode?.skipped ?? [])].sort();
     const currentValidationMode = pullRequest.reviewPlan
-      ? this.loadSettings().costValidationModeEnabled === true
-      : false;
-    if (pullRequest.reviewPlan && previousValidationMode !== currentValidationMode) {
+      ? validationModeSkips(this.loadSettings())
+      : [];
+    if (pullRequest.reviewPlan && !sameValidationMode(previousValidationMode, currentValidationMode)) {
       scope = { reviewMode: "full", verificationTargets: [] };
     }
     const previousReview = scope.reviewMode === "verification" ? pullRequest : null;
@@ -317,6 +344,13 @@ export class LocalPrService {
   }
 
   async #announceLifecycle(event, pullRequest) {
+    if (typeof this.store.appendPullRequestEvent === "function") {
+      this.store.appendPullRequestEvent(pullRequest.id, {
+        event,
+        message: pullRequestLifecycleMessage(event, pullRequest),
+        tone: pullRequestLifecycleTone(event),
+      });
+    }
     if (!this.notifyLifecycle) return;
     try {
       await this.notifyLifecycle(event, pullRequest);
@@ -367,6 +401,7 @@ export class LocalPrService {
     // base ref が動いたあとに close が通ると、 main へ入った変更が closed として
     // board から消え、 記録と Git が食い違う。
     this.#merging.add(id);
+    let mergeRootPath = null;
     try {
       // The merge endpoint is the board's explicit human action. Genius reviews
       // stay action_required for auto-merge, but the sole card-confirmation hold
@@ -377,8 +412,14 @@ export class LocalPrService {
       const allowSystemFailureOverride = humanApproved
         && (isHumanOverrideableReviewHold(pullRequest)
           || canBypassPreMergeSystemFailure(pullRequest));
-      const publication = await this.merge({
+      const mergeRepository = await this.prepareMerge({
         repository,
+        pullRequest: approvedPullRequest,
+        statePath: this.store.path,
+      });
+      mergeRootPath = mergeRepository.rootPath;
+      const publication = await this.merge({
+        repository: mergeRepository,
         pullRequest: approvedPullRequest,
         env: this.env,
         allowSystemFailureOverride,
@@ -402,6 +443,17 @@ export class LocalPrService {
       await this.#announceLifecycle("merged", merged);
       return merged;
     } catch (error) {
+      try {
+        this.logMergeFailure({
+          error,
+          repository,
+          pullRequest,
+          mergeRootPath,
+        });
+      } catch {
+        // Observability failure must not replace the merge failure returned to
+        // the caller or prevent its safe, redacted board projection.
+      }
       // コンフリクトは再審査では直らない: ブランチ側の rebase が要るので、 Test OK
       // から外して人間の判断待ちに落とす (Test Forum からも消える)。
       if (error instanceof MergeConflictError) {
@@ -420,9 +472,7 @@ export class LocalPrService {
       // decision board and into notifications, so it obeys the same boundary as
       // any other stored free-form output: locations survive, secrets do not.
       this.store.updatePullRequest(id, {
-        mergeError: redactSecretLines(
-          error instanceof Error ? error.message : String(error),
-        ),
+        mergeError: mergeFailureMessage(error),
       });
       throw error;
     } finally {

@@ -13,6 +13,7 @@ import { RevisorError } from "./errors.mjs";
 
 const STATE_PATH_ENV = "REVISOR_STATE_PATH";
 const QA_ELIGIBLE_CHECK_STATUSES = new Set(["queued", "running", "test_ok"]);
+const MAX_PULL_REQUEST_EVENTS = 50;
 
 function testWorkflowStatus(checkStatus) {
   return checkStatus === "test_ok" ? "Open / Test OK" : "Open / In Review";
@@ -173,6 +174,7 @@ export class LocalPrStore {
       checkStatus: "queued",
       mergeCommitSha: null,
       mergeError: null,
+      lifecycleEvents: [],
       releaseTag: null,
       releaseUrl: null,
       publishedAt: null,
@@ -209,6 +211,27 @@ export class LocalPrStore {
     const record = state.pullRequests.find((candidate) => candidate.id === id);
     if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
     Object.assign(record, patch, { id: record.id, updatedAt: this.now() });
+    writeState(this.path, state);
+    const updated = structuredClone(record);
+    this.emitPullRequest("pull_request.updated", updated);
+    return updated;
+  }
+
+  appendPullRequestEvent(id, event) {
+    const state = readState(this.path);
+    const record = state.pullRequests.find((candidate) => candidate.id === id);
+    if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
+    const lifecycleEvents = Array.isArray(record.lifecycleEvents)
+      ? record.lifecycleEvents
+      : [];
+    lifecycleEvents.push({
+      event: String(event.event),
+      message: String(event.message),
+      tone: String(event.tone ?? "idle"),
+      at: this.now(),
+    });
+    record.lifecycleEvents = lifecycleEvents.slice(-MAX_PULL_REQUEST_EVENTS);
+    record.updatedAt = this.now();
     writeState(this.path, state);
     const updated = structuredClone(record);
     this.emitPullRequest("pull_request.updated", updated);

@@ -27,15 +27,18 @@ const BODY = `
         <span class="note">Yドメイン以上なら Opus / Sol を high effort で使います。既定は3です。</span>
       </div>
       <div class="field">
-        <label for="worker-count">並列ワーカープロセス数（1〜8、次回起動から適用）</label>
+        <label for="worker-count">各レビュー工程の並列 worker 数（1〜8、次回起動から適用）</label>
         <input id="worker-count" type="number" min="1" max="8" step="1" required>
+        <span class="note">Anatomia・登録テスト・モデルレビュー・セキュリティ診断は専用 queue を持ち、この数ずつ並列実行します。</span>
       </div>
       <div class="field">
-        <label class="check">
-          <input id="cost-validation-mode" type="checkbox">
-          コスト・品質・速度の検証モード（review / Genius / Anatomia domain を skipped）
-        </label>
-        <span class="note">省略したゲートはレビュー計画へ記録し、それ自体ではテストOK・マージをブロックしません。</span>
+        <fieldset>
+          <legend>コスト・品質・速度の検証モードで省略する工程</legend>
+          <label class="check"><input id="cost-validation-review" type="checkbox">Review / 自動修正を skipped</label>
+          <label class="check"><input id="cost-validation-genius" type="checkbox">Genius 判断を skipped</label>
+          <label class="check"><input id="cost-validation-anatomia-domain" type="checkbox">Anatomia domain review を skipped</label>
+        </fieldset>
+        <span class="note">省略した工程だけをレビュー計画へ記録します。未選択の工程は通常どおり実行します。</span>
       </div>
       <div class="field">
         <label class="check">
@@ -195,8 +198,12 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
       String(state.settings.largeReviewLineThreshold);
     document.querySelector('#multi-domain-review-threshold').value =
       String(state.settings.multiDomainReviewThreshold);
-    document.querySelector('#cost-validation-mode').checked =
-      state.settings.costValidationModeEnabled;
+    document.querySelector('#cost-validation-review').checked =
+      state.settings.costValidationSkipReview;
+    document.querySelector('#cost-validation-genius').checked =
+      state.settings.costValidationSkipGenius;
+    document.querySelector('#cost-validation-anatomia-domain').checked =
+      state.settings.costValidationSkipAnatomiaDomain;
     document.querySelector('#concordia-context').checked = state.settings.concordiaContextEnabled;
     document.querySelector('#plan-advisor').value = state.settings.planAdvisor;
     document.querySelector('#augur-folder').value = state.settings.augurFolder;
@@ -256,8 +263,12 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
             Number(document.querySelector('#large-review-line-threshold').value),
           multiDomainReviewThreshold:
             Number(document.querySelector('#multi-domain-review-threshold').value),
-          costValidationModeEnabled:
-            document.querySelector('#cost-validation-mode').checked,
+          costValidationSkipReview:
+            document.querySelector('#cost-validation-review').checked,
+          costValidationSkipGenius:
+            document.querySelector('#cost-validation-genius').checked,
+          costValidationSkipAnatomiaDomain:
+            document.querySelector('#cost-validation-anatomia-domain').checked,
           concordiaContextEnabled: document.querySelector('#concordia-context').checked,
           planAdvisor: document.querySelector('#plan-advisor').value,
           augurFolder: document.querySelector('#augur-folder').value,

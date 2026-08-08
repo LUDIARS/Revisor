@@ -45,6 +45,8 @@ import {
   git,
   prepareLocalWorktrees,
 } from "./workspace.mjs";
+import { REVIEW_WORK_STAGES } from "./review-work.mjs";
+import { withWorktreeMutationLock } from "./worktree-mutation-lock.mjs";
 
 async function commitAndAdvanceAutofix(cwd, repoPath, request) {
   const status = await git(cwd, ["status", "--porcelain"]);
@@ -81,8 +83,8 @@ function changeKindsDiffer(before, after) {
     || beforeKinds.some((kind) => !afterKinds.includes(kind));
 }
 
-async function verifyAutofixPlan({ worktreePath, testCases, plan, env }) {
-  const ci = await runPlannedTests({ worktreePath, testCases, plan, env });
+async function verifyAutofixPlan({ worktreePath, testCases, plan, env, runTests = runPlannedTests }) {
+  const ci = await runTests({ worktreePath, testCases, plan, env });
   if (!testsPassed(ci)) {
     throw new Error(
       "Test autofix changed the review plan and the newly selected registered tests do not pass.",
@@ -114,6 +116,7 @@ async function autofixFailingTests({
   plan,
   env,
   runReview,
+  runTests = runPlannedTests,
   reviewerTimeoutMs,
 }) {
   let activeReviewer = reviewer;
@@ -141,7 +144,7 @@ async function autofixFailingTests({
       const after = await worktreeChangeFingerprint(worktreePath);
       return { ...result, changed: before !== after };
     },
-    runTests: () => runPlannedTests({
+    runTests: () => runTests({
       worktreePath,
       testCases,
       plan,
@@ -178,11 +181,19 @@ export async function runReviewWithCapacityFallback(options, execute) {
 // project-wide initial analysis only to report what the repository looks like. A
 // plan that drops code analysis drops both runs, which is where most of the saved
 // time comes from.
-async function analyzeCodeBaseline({ cliPath, repoPath, repository, worktrees, enabled }) {
+async function analyzeCodeBaseline({
+  cliPath,
+  repoPath,
+  repository,
+  worktrees,
+  enabled,
+  analyze = analyzePr,
+  initialAnalyze = ensureInitialAnalysis,
+}) {
   if (!enabled) return { firstAnalysis: null, baseline: null };
   const [firstAnalysis, baseline] = await Promise.all([
-    ensureInitialAnalysis({ cliPath, repoPath, repository }),
-    analyzePr({ cliPath, cwd: worktrees.base, base: "HEAD" }),
+    initialAnalyze({ cliPath, repoPath, repository }),
+    analyze({ cliPath, cwd: worktrees.base, base: "HEAD" }),
   ]);
   return { firstAnalysis, baseline };
 }
@@ -325,6 +336,7 @@ export async function runPartialVerification({
   runSecurity,
   complexityDropThreshold,
   analyze = analyzePr,
+  runTests = runPlannedTests,
 }) {
   const previous = request.previousReview;
   const targets = new Set(request.verificationTargets ?? []);
@@ -337,14 +349,14 @@ export async function runPartialVerification({
   const plan = planVerification({
     classification: submitted.classification,
     testCases: request.testCases,
-    validationModeEnabled: settings.costValidationModeEnabled,
+    validationMode: settings,
   });
   const leakage = targets.has("leakage")
     ? scanAddedDiffForLeaks(submitted.unifiedDiff)
     : previous.leakage;
   if (!leakage) throw new Error("Partial verification requires the previous leakage result.");
   const ci = targets.has("tests")
-    ? await runPlannedTests({
+    ? await runTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan,
@@ -438,12 +450,13 @@ export function createPrReviewRunner({
   complexityDropThreshold = 10,
   runReview = runReviewer,
   runSecurity = runSecurityScan,
+  runTests = runPlannedTests,
+  analyze = analyzePr,
+  initialAnalyze = ensureInitialAnalysis,
+  scheduleWork = null,
+  mutateWorktrees = withWorktreeMutationLock,
   transport = fetch,
 } = {}) {
-  // Bind the executor once so intent-review call sites cannot accidentally omit
-  // the second helper argument. That omission used to fail every normal review
-  // before a reviewer or registered test could produce evidence.
-  const reviewWithFallback = (options) => runReviewWithCapacityFallback(options, runReview);
   return async (request) => {
     if (request.repository !== request.headRepository) {
       throw new Error("Fork pull requests are not eligible for the local autofix review");
@@ -451,8 +464,38 @@ export function createPrReviewRunner({
     const settings = readSettings(env);
     const workspaceRoot = resolveWorkspaceRoot(cwd);
     const repoPath = request.rootPath;
-    const worktrees = await prepareLocalWorktrees(repoPath, request);
+    const worktrees = await mutateWorktrees(
+      repoPath,
+      () => prepareLocalWorktrees(repoPath, request),
+    );
     try {
+      const runStage = (stage, options, priority) => {
+        if (!scheduleWork) {
+          if (stage === REVIEW_WORK_STAGES.REVIEW) return runReview(options);
+          if (stage === REVIEW_WORK_STAGES.TEST) return runTests(options);
+          if (stage === REVIEW_WORK_STAGES.ANALYZE) return analyze(options);
+          if (stage === REVIEW_WORK_STAGES.INITIAL_ANALYZE) return initialAnalyze(options);
+          if (stage === REVIEW_WORK_STAGES.SECURITY) return runSecurity(options);
+          throw new Error(`Unsupported review stage '${stage}'.`);
+        }
+        return scheduleWork({
+          stage,
+          repository: request.repository,
+          number: request.number,
+          localPrId: request.localPrId,
+          options,
+        }, { priority });
+      };
+      // This binding is intentionally per PR. A pool task must always carry
+      // the local PR identity that owns it, never an ambient mutable request.
+      const executeReview = (options) => runStage(REVIEW_WORK_STAGES.REVIEW, options, 0);
+      const executeTests = (options) => runStage(REVIEW_WORK_STAGES.TEST, options, 1);
+      const executeAnalysis = (options) => runStage(REVIEW_WORK_STAGES.ANALYZE, options, 1);
+      const executeInitialAnalysis = (options) =>
+        runStage(REVIEW_WORK_STAGES.INITIAL_ANALYZE, options, 1);
+      const executeSecurity = (options) => runStage(REVIEW_WORK_STAGES.SECURITY, options, 2);
+      const reviewWithFallback = (options) =>
+        runReviewWithCapacityFallback(options, executeReview);
       // The plan is decided from the submitted diff, before any expensive stage
       // runs, so the change profile is the first thing this review establishes.
       let submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
@@ -473,8 +516,10 @@ export function createPrReviewRunner({
           worktrees,
           anatomiaCliPath: partialAnatomiaCliPath,
           env,
-          runSecurity,
+          runSecurity: executeSecurity,
           complexityDropThreshold,
+          analyze: executeAnalysis,
+          runTests: executeTests,
         });
       }
       const anatomiaCliPath = await resolveAnatomiaCli(settings.anatomiaFolder);
@@ -499,22 +544,22 @@ export function createPrReviewRunner({
       let plan = await advisePlan({
         // The default is deterministic. An explicitly configured advisor is a
         // separate, visible model cost and remains subject to the plan floor.
-        advisor: settings.costValidationModeEnabled ? "none" : settings.planAdvisor,
+        advisor: settings.costValidationSkipReview ? "none" : settings.planAdvisor,
         plan: deterministicPlan,
         request,
         testCases: request.testCases,
         cwd: worktrees.head,
         augurFolder: settings.augurFolder,
         reviewer: externalReviewer,
-        runReview,
+        runReview: executeReview,
         leakageClear: initialLeakage.totalFindings === 0,
       });
-      plan = applyCostValidationMode(plan, settings.costValidationModeEnabled);
+      plan = applyCostValidationMode(plan, settings);
       codeDomainRequired = submitted.classification.codeDomainRequired
         && stageEnabled(plan, "anatomia_domain_review");
       const codeAnalysis = stageEnabled(plan, "anatomia_code_analysis");
       let [initial, { firstAnalysis, baseline }] = await Promise.all([
-        analyzePr({
+        executeAnalysis({
           cliPath: anatomiaCliPath,
           cwd: worktrees.head,
           base: worktrees.mergeBase,
@@ -525,6 +570,8 @@ export function createPrReviewRunner({
           repository: request.repository,
           worktrees,
           enabled: codeAnalysis,
+          analyze: executeAnalysis,
+          initialAnalyze: executeInitialAnalysis,
         }),
       ]);
       let reviewStrategy = selectReviewStrategy({
@@ -534,14 +581,14 @@ export function createPrReviewRunner({
         settings,
       });
       plan = { ...plan, reviewStrategy };
-      let initialCi = await runPlannedTests({
+      let initialCi = await executeTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan,
         env,
       });
       let initialSecurity = await reviewSecurityScan({
-        runSecurity,
+        runSecurity: executeSecurity,
         worktrees,
         leakage: initialLeakage,
         ci: initialCi,
@@ -606,7 +653,8 @@ export function createPrReviewRunner({
           testCases: request.testCases,
           plan,
           env,
-          runReview,
+          runReview: executeReview,
+          runTests: executeTests,
           reviewerTimeoutMs,
         });
         externalReviewer = autofix.reviewer;
@@ -642,18 +690,19 @@ export function createPrReviewRunner({
           plan = applyCostValidationMode(planReview({
             classification: submitted.classification,
             testCases: request.testCases,
-          }), settings.costValidationModeEnabled);
+          }), settings);
           initialCi = await verifyAutofixPlan({
             worktreePath: worktrees.head,
             testCases: request.testCases,
             plan,
             env,
+            runTests: executeTests,
           });
         }
         codeDomainRequired = submitted.classification.codeDomainRequired
           && stageEnabled(plan, "anatomia_domain_review");
         initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
-        initial = await analyzePr({
+        initial = await executeAnalysis({
           cliPath: anatomiaCliPath,
           cwd: worktrees.head,
           base: worktrees.mergeBase,
@@ -666,7 +715,7 @@ export function createPrReviewRunner({
         });
         plan = { ...plan, reviewStrategy };
         initialSecurity = await reviewSecurityScan({
-          runSecurity,
+          runSecurity: executeSecurity,
           worktrees,
           leakage: initialLeakage,
           ci: initialCi,
@@ -783,10 +832,10 @@ export function createPrReviewRunner({
         submitted.classification,
         reviewed.classification,
       )
-        ? planReview({
+        ? applyCostValidationMode(planReview({
             classification: reviewed.classification,
             testCases: request.testCases,
-          })
+          }), settings)
         : plan;
       finalPlan = { ...finalPlan, reviewStrategy };
       // The scan still runs at most once per review pass — the pre-merge scan
@@ -800,7 +849,7 @@ export function createPrReviewRunner({
             "required only after the reviewer added executable content; covered by the pre-merge scan",
           )
         : initialSecurity;
-      let finalCi = await runPlannedTests({
+      let finalCi = await executeTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan: finalPlan,
@@ -816,7 +865,8 @@ export function createPrReviewRunner({
           testCases: request.testCases,
           plan: finalPlan,
           env,
-          runReview,
+          runReview: executeReview,
+          runTests: executeTests,
           reviewerTimeoutMs,
         });
         reviewer = autofix.reviewer;
@@ -853,10 +903,10 @@ export function createPrReviewRunner({
           reviewed.classification,
         );
         finalPlan = reviewPlanChanged
-          ? planReview({
+          ? applyCostValidationMode(planReview({
               classification: reviewed.classification,
               testCases: request.testCases,
-            })
+            }), settings)
           : plan;
         finalPlan = { ...finalPlan, reviewStrategy };
         if (reviewPlanChanged) {
@@ -865,6 +915,7 @@ export function createPrReviewRunner({
             testCases: request.testCases,
             plan: finalPlan,
             env,
+            runTests: executeTests,
           });
           if (finalSecurity.status === "skipped"
               && stageEnabled(finalPlan, "security_review")) {
@@ -880,7 +931,7 @@ export function createPrReviewRunner({
           "Opposite-model autofix introduced potential information leakage; changes were discarded before commit or push.",
         );
       }
-      finalAnalysis = await analyzePr({
+      finalAnalysis = await executeAnalysis({
         cliPath: anatomiaCliPath,
         cwd: worktrees.head,
         base: worktrees.mergeBase,
@@ -919,7 +970,7 @@ export function createPrReviewRunner({
           : null,
       };
     } finally {
-      await cleanupWorktrees(repoPath, worktrees);
+      await mutateWorktrees(repoPath, () => cleanupWorktrees(repoPath, worktrees));
     }
   };
 }

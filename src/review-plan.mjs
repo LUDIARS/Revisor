@@ -141,26 +141,51 @@ export function planReview({ classification, testCases = [] }) {
   };
 }
 
-export function applyCostValidationMode(plan, enabled) {
-  if (!enabled) return plan;
-  const skipped = new Set(["reviewer_autofix", "anatomia_domain_review"]);
+function validationSkips(mode) {
+  if (mode === true) {
+    return { review: true, genius: true, anatomiaDomain: true };
+  }
+  if (!mode || typeof mode !== "object") {
+    return { review: false, genius: false, anatomiaDomain: false };
+  }
+  return {
+    review: mode.costValidationSkipReview === true,
+    genius: mode.costValidationSkipGenius === true,
+    anatomiaDomain: mode.costValidationSkipAnatomiaDomain === true,
+  };
+}
+
+export function applyCostValidationMode(plan, mode) {
+  const skips = validationSkips(mode);
+  if (!skips.review && !skips.genius && !skips.anatomiaDomain) return plan;
+  const skipped = new Set([
+    ...(skips.review ? ["reviewer_autofix"] : []),
+    ...(skips.anatomiaDomain ? ["anatomia_domain_review"] : []),
+  ]);
   const reason = "コスト・品質・速度の検証モードにより skipped";
+  const skippedIds = [
+    ...(skips.review ? ["reviewer_autofix"] : []),
+    ...(skips.genius ? ["genius_judgment"] : []),
+    ...(skips.anatomiaDomain ? ["anatomia_domain_review"] : []),
+  ];
   return {
     ...plan,
     validationMode: {
       enabled: true,
-      skipped: ["reviewer_autofix", "genius_judgment", "anatomia_domain_review"],
+      skipped: skippedIds,
     },
-    review: {
-      tier: "model_review",
-      label: "検証モード（モデルレビュー skipped）",
-      reason,
-    },
+    review: skips.review
+      ? {
+          tier: "model_review",
+          label: "検証モード（モデルレビュー skipped）",
+          reason,
+        }
+      : plan.review,
     stages: [
       ...plan.stages.map((stage) => skipped.has(stage.id)
         ? { ...stage, run: false, status: "skipped", reason }
         : stage),
-      { id: "genius_judgment", run: false, status: "skipped", reason },
+      ...(skips.genius ? [{ id: "genius_judgment", run: false, status: "skipped", reason }] : []),
     ],
   };
 }
@@ -171,11 +196,12 @@ export function applyCostValidationMode(plan, enabled) {
 export function planVerification({
   classification,
   testCases = [],
-  validationModeEnabled = false,
+  validationMode = false,
+  validationModeEnabled = undefined,
 }) {
   return applyCostValidationMode(
     planReview({ classification, testCases }),
-    validationModeEnabled,
+    validationModeEnabled === undefined ? validationMode : validationModeEnabled,
   );
 }
 

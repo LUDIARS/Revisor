@@ -12,6 +12,7 @@ import test from "node:test";
 import { MergeConflictError, StaleReviewError } from "../src/errors.mjs";
 import { LocalPrReporter } from "../src/local-reporter.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
+import { resolveMergeRepositoryPath } from "../src/merge-repository.mjs";
 import { PrReviewQueue } from "../src/queue.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
 import { GENIUS_HUMAN_DECISION_REASON } from "../src/human-decision.mjs";
@@ -145,15 +146,21 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
       reviewedHeadSha: queued.headSha,
     });
     const merged = await service.mergePullRequest(pullRequest.id);
+    const mergeRoot = resolveMergeRepositoryPath({
+      repository: { repository: "LUDIARS/Product" },
+      statePath: store.path,
+    });
     assert.equal(merged.status, "merged");
     assert.equal(merged.releaseTag, "v0.1.0");
+    assert.equal(git(mergeRoot, "show", "main:product.txt").replace(/\r\n/g, "\n"), "base\nfeature");
     assert.equal(
       readFileSync(join(fixture.repoPath, "product.txt"), "utf8").replace(/\r\n/g, "\n"),
-      "base\nfeature\n",
+      "base\n",
     );
-    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
-    assert.equal(git(fixture.repoPath, "log", "-1", "--format=%P"), fixture.baseSha);
-    assert.match(git(fixture.repoPath, "log", "-1", "--format=%B"), /Revisor-Local-PR/);
+    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "1");
+    assert.equal(git(mergeRoot, "rev-list", "--count", "main"), "2");
+    assert.equal(git(mergeRoot, "log", "-1", "--format=%P", "main"), fixture.baseSha);
+    assert.match(git(mergeRoot, "log", "-1", "--format=%B"), /Revisor-Local-PR/);
     assert.deepEqual(lifecycle, [
       ["created", "open"],
       ["merged", "merged"],
@@ -568,7 +575,8 @@ test("merges while untracked files sit in the base worktree", async () => {
     writeFileSync(join(fixture.repoPath, "local-notes.txt"), "scratch\n", "utf8");
     const merged = await service.mergePullRequest(pullRequest.id);
     assert.equal(merged.status, "merged");
-    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
+    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "1");
+    assert.equal(readFileSync(join(fixture.repoPath, "local-notes.txt"), "utf8"), "scratch\n");
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -639,16 +647,17 @@ test("blocks the squash merge when the pre-merge scan returns no usable result",
   }
 });
 
-test("refuses to advance a base branch carrying tracked modifications", async () => {
+test("merges without touching tracked modifications in the source base checkout", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
   try {
     const { service, pullRequest } = await readyToMerge(fixture, store);
     writeFileSync(join(fixture.repoPath, "product.txt"), "base\nlocal edit\n", "utf8");
-    await assert.rejects(
-      () => service.mergePullRequest(pullRequest.id),
-      /worktree is no longer clean/,
-    );
+    const before = git(fixture.repoPath, "status", "--porcelain");
+    const merged = await service.mergePullRequest(pullRequest.id);
+    assert.equal(merged.status, "merged");
+    assert.equal(git(fixture.repoPath, "status", "--porcelain"), before);
+    assert.equal(readFileSync(join(fixture.repoPath, "product.txt"), "utf8"), "base\nlocal edit\n");
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -701,7 +710,7 @@ test("merges while a submodule carries its own uncommitted content", async () =>
   }
 });
 
-test("still blocks when the submodule pointer itself moved", async () => {
+test("merges without touching an uncommitted submodule pointer in the source checkout", async () => {
   const fixture = submoduleFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
   try {
@@ -712,9 +721,12 @@ test("still blocks when the submodule pointer itself moved", async () => {
     const submodulePath = join(fixture.repoPath, "lib", "module");
     git(submodulePath, "-c", "protocol.file.allow=always", "fetch", "origin");
     git(submodulePath, "checkout", git(fixture.modulePath, "rev-parse", "HEAD"));
-    await assert.rejects(
-      () => service.mergePullRequest(pullRequest.id),
-      /worktree is no longer clean/,
+    const before = git(fixture.repoPath, "status", "--porcelain", "--untracked-files=no");
+    const merged = await service.mergePullRequest(pullRequest.id);
+    assert.equal(merged.status, "merged");
+    assert.equal(
+      git(fixture.repoPath, "status", "--porcelain", "--untracked-files=no"),
+      before,
     );
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });

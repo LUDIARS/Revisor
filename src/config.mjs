@@ -41,6 +41,9 @@ function defaults() {
     largeReviewLineThreshold: 1_000,
     multiDomainReviewThreshold: 3,
     costValidationModeEnabled: false,
+    costValidationSkipReview: false,
+    costValidationSkipGenius: false,
+    costValidationSkipAnatomiaDomain: false,
     // Automatic merging stays off until a human sets the risk they accept. The
     // threshold is the human's decision, so there is no safe value to assume.
     autoMergeEnabled: false,
@@ -150,6 +153,16 @@ function writeConfig(value, env) {
 export function readSettings(env = process.env) {
   const value = readConfig(env).settings;
   const base = defaults();
+  const legacyCostValidationMode = value.costValidationModeEnabled === true;
+  const costValidationSkipReview = typeof value.costValidationSkipReview === "boolean"
+    ? value.costValidationSkipReview
+    : legacyCostValidationMode;
+  const costValidationSkipGenius = typeof value.costValidationSkipGenius === "boolean"
+    ? value.costValidationSkipGenius
+    : legacyCostValidationMode;
+  const costValidationSkipAnatomiaDomain = typeof value.costValidationSkipAnatomiaDomain === "boolean"
+    ? value.costValidationSkipAnatomiaDomain
+    : legacyCostValidationMode;
   return {
     anatomiaFolder: typeof value.anatomiaFolder === "string"
       ? value.anatomiaFolder
@@ -171,7 +184,14 @@ export function readSettings(env = process.env) {
       && value.multiDomainReviewThreshold >= 1
       ? value.multiDomainReviewThreshold
       : base.multiDomainReviewThreshold,
-    costValidationModeEnabled: value.costValidationModeEnabled === true,
+    // Legacy callers stored one boolean for all three skips. Keep accepting it
+    // while exposing the independent values that the settings UI now owns.
+    costValidationModeEnabled: costValidationSkipReview
+      || costValidationSkipGenius
+      || costValidationSkipAnatomiaDomain,
+    costValidationSkipReview,
+    costValidationSkipGenius,
+    costValidationSkipAnatomiaDomain,
     autoMergeEnabled: value.autoMergeEnabled === true,
     autoMergeRiskThreshold: riskThreshold(
       value.autoMergeRiskThreshold,
@@ -217,6 +237,18 @@ export function writeSettings(settings, env = process.env) {
     throw new RevisorError("Worker count must be an integer from 1 to 8.");
   }
   const current = readSettings(env);
+  const skipCostValidation = (key) => {
+    if (settings[key] !== undefined) return settings[key] === true;
+    if (settings.costValidationModeEnabled !== undefined) {
+      return settings.costValidationModeEnabled === true;
+    }
+    return current[key] === true;
+  };
+  const costValidationSkipReview = skipCostValidation("costValidationSkipReview");
+  const costValidationSkipGenius = skipCostValidation("costValidationSkipGenius");
+  const costValidationSkipAnatomiaDomain = skipCostValidation(
+    "costValidationSkipAnatomiaDomain",
+  );
   const largeReviewLineThreshold = settings.largeReviewLineThreshold === undefined
     ? current.largeReviewLineThreshold
     : Number(settings.largeReviewLineThreshold);
@@ -297,9 +329,12 @@ export function writeSettings(settings, env = process.env) {
     workerCount,
     largeReviewLineThreshold,
     multiDomainReviewThreshold,
-    costValidationModeEnabled: settings.costValidationModeEnabled === undefined
-      ? current.costValidationModeEnabled
-      : settings.costValidationModeEnabled === true,
+    costValidationModeEnabled: costValidationSkipReview
+      || costValidationSkipGenius
+      || costValidationSkipAnatomiaDomain,
+    costValidationSkipReview,
+    costValidationSkipGenius,
+    costValidationSkipAnatomiaDomain,
     autoMergeEnabled: settings.autoMergeEnabled === undefined
       ? current.autoMergeEnabled
       : settings.autoMergeEnabled === true,

@@ -40,6 +40,9 @@ test("stores settings and encrypts local workflow secrets", () => {
       largeReviewLineThreshold: 1_000,
       multiDomainReviewThreshold: 3,
       costValidationModeEnabled: false,
+      costValidationSkipReview: false,
+      costValidationSkipGenius: false,
+      costValidationSkipAnatomiaDomain: false,
       // Automatic merging is off until a human states the risk they accept.
       autoMergeEnabled: false,
       autoMergeRiskThreshold: 15,
@@ -115,6 +118,30 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.equal(readSettings(state.env).largeReviewLineThreshold, 750);
     assert.equal(readSettings(state.env).multiDomainReviewThreshold, 2);
     assert.equal(readSettings(state.env).costValidationModeEnabled, true);
+    assert.equal(readSettings(state.env).costValidationSkipReview, true);
+    assert.equal(readSettings(state.env).costValidationSkipGenius, true);
+    assert.equal(readSettings(state.env).costValidationSkipAnatomiaDomain, true);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("persists each cost validation skip independently", () => {
+  const state = fixture();
+  try {
+    writeSettings({
+      anatomiaFolder: "E:/Document/Ars/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+      costValidationSkipReview: true,
+      costValidationSkipGenius: false,
+      costValidationSkipAnatomiaDomain: false,
+    }, state.env);
+    const settings = readSettings(state.env);
+    assert.equal(settings.costValidationModeEnabled, true);
+    assert.equal(settings.costValidationSkipReview, true);
+    assert.equal(settings.costValidationSkipGenius, false);
+    assert.equal(settings.costValidationSkipAnatomiaDomain, false);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

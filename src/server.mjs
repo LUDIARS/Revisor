@@ -20,7 +20,10 @@ import { PrReviewQueue } from "./queue.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { PrEventStream } from "./pr-event-stream.mjs";
 import { attachPrWebSocket } from "./pr-websocket.mjs";
+import { PullRequestDiffService } from "./pull-request-diff-service.mjs";
 import { ReleaseService } from "./release-service.mjs";
+import { createPrReviewRunner } from "./runner.mjs";
+import { ReviewStageWorkers } from "./review-stage-workers.mjs";
 import { LocalPrStore, resolveStatePath } from "./state-store.mjs";
 import { createUiRequestHandler, readJsonBody, sendJson } from "./ui-server.mjs";
 import { PrReviewWorkerPool } from "./worker-pool.mjs";
@@ -29,13 +32,16 @@ function isLocalApi(pathname) {
   return pathname === "/v1/repositories"
     || pathname === "/v1/local-prs"
     || pathname.startsWith("/v1/local-prs/")
-    || pathname === "/v1/test-workflow";
+    || pathname === "/v1/test-workflow"
+    || pathname === "/v1/review-work";
 }
 
 export function createRequestHandler({
   env = process.env,
   sessionToken,
   queue,
+  reviewWorkers = null,
+  pullRequestDiffs = null,
   localPrService,
   releaseService,
 }) {
@@ -43,6 +49,8 @@ export function createRequestHandler({
     env,
     sessionToken,
     queue,
+    reviewWorkers,
+    pullRequestDiffs,
     localPrService,
     releaseService,
   });
@@ -112,6 +120,13 @@ export function createRequestHandler({
         sendJson(response, 200, { products: localPrService.testWorkflowProducts() });
         return;
       }
+      if (request.method === "GET" && url.pathname === "/v1/review-work") {
+        sendJson(response, 200, {
+          reviewQueue: queue.state(),
+          workers: reviewWorkers?.state() ?? { queues: [] },
+        });
+        return;
+      }
       const merge = /^\/v1\/local-prs\/([^/]+)\/merge$/.exec(url.pathname);
       if (request.method === "POST" && merge) {
         const pullRequest = await localPrService.mergePullRequest(
@@ -163,6 +178,11 @@ export async function startRevisor({
   cwd = process.cwd(),
   runner,
   createWorkerPool = (options) => new PrReviewWorkerPool(options),
+  createStageWorkers = (options) => new ReviewStageWorkers({
+    ...options,
+    createPool: createWorkerPool,
+  }),
+  createPullRequestDiffService = (options) => new PullRequestDiffService(options),
   stateStore,
   createLocalPrService = (options) => new LocalPrService(options),
   createReleaseService = (options) => new ReleaseService(options),
@@ -202,12 +222,26 @@ export async function startRevisor({
     notifyCompletion: announceCompletion,
     notifyReviewStatus: announceLifecycle,
   });
-  const workerPool = runner
+  const reviewWorkers = runner
     ? null
-    : createWorkerPool({ size: settings.workerCount, cwd, env });
-  const jobRunner = runner ?? ((request) => workerPool.run(request));
+    : createStageWorkers({
+      size: settings.workerCount,
+      cwd,
+      env,
+      onStateChange: () => eventStream.publish({ type: "review_work.updated" }),
+    });
+  const jobRunner = runner ?? createPrReviewRunner({
+    cwd,
+    env,
+    scheduleWork: (work, options) => reviewWorkers.run(work, options),
+  });
+  // This queue records lifecycle and admits orchestrators; it is deliberately
+  // not a worker-capacity governor. A slow model review must not occupy a slot
+  // that stops later PRs from reaching an idle dedicated test/Anatomia/security
+  // worker. The stage pools own every expensive bounded operation, and runner
+  // worktree mutations are separately serialized per source repository.
   const queue = new PrReviewQueue(jobRunner, {
-    concurrency: settings.workerCount,
+    concurrency: Number.MAX_SAFE_INTEGER,
     reporter,
   });
   // `env` has to reach the service: the pre-merge security scan and the
@@ -226,11 +260,17 @@ export async function startRevisor({
     env,
     publicationCoordinator,
   });
+  const pullRequestDiffs = createPullRequestDiffService({
+    getPullRequest: (id) => localPrService.getPullRequest(id),
+    getRepository: (repository) => localPrService.getRepository(repository),
+  });
   const sessionToken = randomBytes(24).toString("base64url");
   const server = createServer(createRequestHandler({
     env,
     sessionToken,
     queue,
+    reviewWorkers,
+    pullRequestDiffs,
     localPrService,
     releaseService,
   }));
@@ -251,13 +291,13 @@ export async function startRevisor({
     });
   } catch (error) {
     prWebSocket.close();
-    await workerPool?.close();
+    await reviewWorkers?.close();
     throw error;
   }
   const address = server.address();
   if (!address || typeof address === "string") {
     prWebSocket.close();
-    await workerPool?.close();
+    await reviewWorkers?.close();
     server.close();
     throw new Error("Could not resolve the Revisor address.");
   }
@@ -271,7 +311,7 @@ export async function startRevisor({
     recovery = await localPrService.recoverInterruptedReviews();
   } catch (error) {
     prWebSocket.close();
-    await workerPool?.close();
+    await reviewWorkers?.close();
     server.close();
     throw error;
   }
@@ -318,6 +358,8 @@ export async function startRevisor({
   return {
     url: `http://127.0.0.1:${address.port}/`,
     queue,
+    reviewWorkers,
+    pullRequestDiffs,
     store,
     eventStream,
     localPrService,
@@ -330,7 +372,7 @@ export async function startRevisor({
       await new Promise((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });
-      await workerPool?.close();
+      await reviewWorkers?.close();
     },
   };
 }

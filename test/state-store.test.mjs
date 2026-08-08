@@ -68,6 +68,41 @@ test("projects an open PR for early QA while review is queued", () => {
   }
 });
 
+test("keeps the newest 50 lifecycle events on each pull request", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-state-events-"));
+  const path = join(directory, "state.json");
+  let tick = 0;
+  const store = new LocalPrStore({
+    path,
+    createId: () => "pr-events",
+    now: () => `2026-08-08T11:${String(tick++).padStart(2, "0")}:00.000Z`,
+  });
+  try {
+    const pullRequest = store.createPullRequest({
+      repository: "LUDIARS/Revisor",
+      title: "Event history",
+      headRef: "feat/events",
+      baseRef: "main",
+      headSha: "a".repeat(40),
+      baseSha: "b".repeat(40),
+    });
+    for (let index = 0; index < 55; index += 1) {
+      store.appendPullRequestEvent(pullRequest.id, {
+        event: index === 54 ? "review_passed" : "review_queued",
+        message: `event ${index}`,
+        tone: index === 54 ? "ok" : "warn",
+      });
+    }
+    const events = store.getPullRequest(pullRequest.id).lifecycleEvents;
+    assert.equal(events.length, 50);
+    assert.equal(events[0].message, "event 5");
+    assert.equal(events[49].event, "review_passed");
+    assert.equal(events[49].tone, "ok");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("early QA ignores legacy draft metadata but excludes settled reviews that need action", () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-state-"));
   const path = join(directory, "state.json");

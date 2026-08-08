@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "local-workspace — 使い捨て worktree とローカル ref の境界"
-description: "ローカル repository 上で review / squash merge が読む使い捨て detached worktree を作り、使い終えたら外す境界。ref / SHA 文字列の安全性検証、差分内容の指紋、worktree の清潔さ判定、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。fetch も push もしない。"
+description: "review 元と Revisor 所有 merge repository の上で使い捨て detached worktree を作り、使い終えたら外す境界。ref / SHA 文字列の安全性検証、差分内容の指紋、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。"
 service: revisor
 domain: local-workspace
 tags:
@@ -20,8 +20,8 @@ updated: 2026-08-08
 # local-workspace — 使い捨て worktree とローカル ref の境界
 
 `src/workspace.mjs` は Revisor のローカル repository 操作を実行する境界である。
-`src/checkout-hygiene.mjs` はその操作を使い、監視 checkout を merge 前に復元する
-限定的なポリシーを所有する。どちらも remote 通信 (fetch / push) は持たない。
+`src/merge-repository.mjs` は登録 checkout から head の Git object だけを取得し、
+state data 配下の独立 repository を merge 境界として用意する。
 `workspace.mjs` の実行責務は次に限定する。
 
 - 呼出側から来た ref 文字列を Git ref として安全な形だけに絞る
@@ -92,18 +92,14 @@ untracked file は判定に入れない。審査は固定 SHA を別の worktree
 tracked change として扱う。checkout 中の worktree が無い場合は `update-ref` の
 compare-and-swap、ある場合は `merge --ff-only` で前進する。
 
-## 監視 checkout の衛生 (2026-08-08 neco 指示)
+## 登録 checkout と merge repository の分離 (2026-08-08 neco 指示)
 
-登録 rootPath (= Revisor が見ているディレクトリ) に対する運用ルール:
+登録 `rootPath` はレビュー対象 branch を提供する source であり、merge の作業場所ではない。
+Revisor は `revisor.state.json` と同じ data directory の `merge-repositories/` に repository
+ごとの永続 clone を所有する。clone は object store も独立させ、branch を checkout しない。
 
-1. **セッションは監視ディレクトリに重要なファイルの残骸を残す修正をしてはならない。**
-2. **監視 checkout が base ref (main) 以外のブランチへ切り替わるのは Test Workflow
-   のときだけ。** Revisor 自身は checkout を行わない。
-3. **マージ前には base ref へ戻り、変更を伴うファイルは stash される。**
-
-1〜2 はセッション側の規範だが、破られると `advanceLocalBranch` の清潔さ判定が
-fast-forward を拒否し (「テストが失敗する / マージが通らない」)、テストが別ブランチの
-コードを起動する。3 を `src/checkout-hygiene.mjs` の `restoreBaseCheckout` が
-squash merge の冒頭で機械的に強制する: 未コミット変更 (untracked / ignored 含む) を
-`revisor-checkout-hygiene` メッセージ付きで stash し (**削除はしない** — 残骸は
-復元可能なまま退避)、checkout を base ref へ戻してからマージ処理に入る。
+merge の直前に source から対象 head ref だけを clone へ fetch する。base ref は clone 作成時
+だけ source から初期化し、以後は Revisor の publish または GitHub reconcile だけが CAS で
+前進させる。squash worktree、prepared ref、release version、tag、push はすべて clone 上で
+処理する。したがって登録 checkout に tracked edit、untracked file、ignored build tree があっても、
+Revisor は status/stash/checkout/reset を実行せず、それらを merge 成否の条件にしない。

@@ -1,4 +1,5 @@
 import { CLIENT_REQUEST_SOURCE } from "./ui-client-request.mjs";
+import { PR_DIFF_VIEW_SOURCE } from "./ui-pr-diff-view-script.mjs";
 import { renderPage } from "./ui-layout.mjs";
 import { PR_EVENTS_SOURCE } from "./ui-pr-events.mjs";
 import { PR_VIEW_SOURCE } from "./ui-pr-view-script.mjs";
@@ -13,6 +14,11 @@ const BODY = `
     <p class="note">審査中は先行QA、審査通過後は確定QAとして、人間が同じ変更を早期に確認できます。</p>
     <ul id="test-products"></ul>
     <p id="test-products-empty" class="empty">確認できる PR はありません。</p>
+  </section>
+  <section class="review-work-summary">
+    <h2>レビュー worker queue</h2>
+    <p id="review-work-capacity" class="note">worker 状態を取得中…</p>
+    <div id="review-work-queues"></div>
   </section>
   <div class="pr-board">
     <section class="pr-list-pane">
@@ -41,6 +47,33 @@ const BODY = `
         <ol id="pr-event-entries"></ol>
       </div>
     </section>
+  </div>
+  <div id="pr-log-overlay" class="log-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="pr-log-title">
+    <div class="log-overlay-panel">
+      <div class="log-overlay-head">
+        <h2 id="pr-log-title">PR ログ</h2>
+        <button id="pr-log-close" class="secondary" type="button">閉じる</button>
+      </div>
+      <pre id="pr-log-content"></pre>
+    </div>
+  </div>
+  <div id="pr-diff-overlay" class="diff-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="pr-diff-title">
+    <div class="diff-overlay-panel">
+      <div class="log-overlay-head">
+        <h2 id="pr-diff-title">変更ファイル</h2>
+        <button id="pr-diff-close" class="secondary" type="button">閉じる</button>
+      </div>
+      <div class="diff-viewer">
+        <aside class="diff-files-pane">
+          <p id="pr-diff-status" class="note">変更ファイルを取得中…</p>
+          <div id="pr-diff-files"></div>
+        </aside>
+        <section class="diff-content-pane">
+          <p id="pr-diff-file-name" class="note">ファイルを選択してください。</p>
+          <div id="pr-diff-content"></div>
+        </section>
+      </div>
+    </div>
   </div>
 `;
 
@@ -81,9 +114,103 @@ const CONTROLLER_SOURCE = `
   const filterProjects = document.querySelector('#filter-projects');
   const testProducts = document.querySelector('#test-products');
   const testProductsEmpty = document.querySelector('#test-products-empty');
+  const reviewWorkCapacity = document.querySelector('#review-work-capacity');
+  const reviewWorkQueues = document.querySelector('#review-work-queues');
+  const prLogOverlay = document.querySelector('#pr-log-overlay');
+  const prLogTitle = document.querySelector('#pr-log-title');
+  const prLogContent = document.querySelector('#pr-log-content');
+  const prLogClose = document.querySelector('#pr-log-close');
+  const prDiffOverlay = document.querySelector('#pr-diff-overlay');
+  const prDiffTitle = document.querySelector('#pr-diff-title');
+  const prDiffStatus = document.querySelector('#pr-diff-status');
+  const prDiffFiles = document.querySelector('#pr-diff-files');
+  const prDiffFileName = document.querySelector('#pr-diff-file-name');
+  const prDiffContent = document.querySelector('#pr-diff-content');
+  const prDiffClose = document.querySelector('#pr-diff-close');
   let selectedPrId = null;
   let openPullRequests = [];
   let selectedProjects = new Set();
+  let diffRequestVersion = 0;
+
+  function fullLogText(pr) {
+    const sections = [];
+    const events = (pr.lifecycleEvents || []).slice(-50);
+    sections.push(events.length === 0
+      ? 'Lifecycle\\nイベントはありません。'
+      : 'Lifecycle\\n' + events.map((entry) =>
+        '[' + entry.at + '] ' + entry.message).join('\\n\\n'));
+    const tests = (pr.ci || []).filter((entry) => entry.output && entry.output.text);
+    sections.push(tests.length === 0
+      ? 'Test output\\n保存されたテスト出力はありません。'
+      : 'Test output\\n' + tests.map((entry) =>
+        '--- ' + entry.name + ' [' + entry.status + '] ---\\n' + entry.output.text).join('\\n\\n'));
+    if (pr.error) sections.push('Review error\\n' + pr.error);
+    if (pr.mergeError) sections.push('Merge error\\n' + pr.mergeError);
+    return sections.join('\\n\\n');
+  }
+
+  function openLogOverlay(pr) {
+    prLogTitle.textContent = pr.repository + ' #' + pr.number + ' — ログ';
+    prLogContent.textContent = fullLogText(pr);
+    prLogOverlay.hidden = false;
+    document.body.classList.add('overlay-open');
+    prLogClose.focus();
+  }
+
+  function closeLogOverlay() {
+    prLogOverlay.hidden = true;
+    document.body.classList.remove('overlay-open');
+  }
+
+  function closeDiffOverlay() {
+    diffRequestVersion += 1;
+    prDiffOverlay.hidden = true;
+    document.body.classList.remove('overlay-open');
+  }
+
+  async function loadDiffFile(pr, files, file, version) {
+    if (version !== diffRequestVersion) return;
+    renderDiffFileList(prDiffFiles, files, file.path,
+      (next) => { void loadDiffFile(pr, files, next, diffRequestVersion); });
+    prDiffFileName.textContent = file.path;
+    prDiffContent.replaceChildren(paragraph('diff を取得中…'));
+    try {
+      const result = await request('/api/local-prs/' + encodeURIComponent(pr.id)
+        + '/diff?path=' + encodeURIComponent(file.path));
+      if (version !== diffRequestVersion) return;
+      prDiffContent.replaceChildren(unifiedDiffView(result.diff || '差分はありません。'));
+    } catch (error) {
+      if (version !== diffRequestVersion) return;
+      prDiffContent.replaceChildren(paragraph(error.message));
+    }
+  }
+
+  async function openChangedFiles(pr) {
+    const version = ++diffRequestVersion;
+    prDiffTitle.textContent = pr.repository + ' #' + pr.number + ' — 変更ファイル';
+    prDiffStatus.textContent = '変更ファイルを取得中…';
+    prDiffFiles.replaceChildren();
+    prDiffFileName.textContent = 'ファイルを選択してください。';
+    prDiffContent.replaceChildren();
+    prDiffOverlay.hidden = false;
+    document.body.classList.add('overlay-open');
+    prDiffClose.focus();
+    try {
+      const result = await request('/api/local-prs/' + encodeURIComponent(pr.id) + '/files');
+      if (version !== diffRequestVersion) return;
+      const files = result.files || [];
+      prDiffStatus.textContent = files.length + ' ファイル変更 — '
+        + result.baseSha.slice(0, 12) + ' … ' + result.headSha.slice(0, 12);
+      if (files.length === 0) {
+        prDiffContent.replaceChildren(paragraph('変更ファイルはありません。'));
+        return;
+      }
+      await loadDiffFile(pr, files, files[0], version);
+    } catch (error) {
+      if (version !== diffRequestVersion) return;
+      prDiffStatus.textContent = error.message;
+    }
+  }
 
   function actionsOf(pr) {
     const wrapper = element('div', 'actions');
@@ -135,6 +262,8 @@ const CONTROLLER_SOURCE = `
     fragment.append(block('判断', decisionOf(pr)));
     fragment.append(block('レビュー計画', planOf(pr.reviewPlan)));
     fragment.append(block('テスト', testsOf(pr)));
+    fragment.append(block('変更内容', changedFilesOf(pr, openChangedFiles)));
+    fragment.append(block('Test Workflow ログ', workflowLogOf(pr, openLogOverlay)));
     fragment.append(block('レビュー', reviewOf(pr)));
     fragment.append(block('差分解析 (Anatomia)', analysisOf(pr)));
     fragment.append(block('操作', actionsOf(pr)));
@@ -156,6 +285,57 @@ const CONTROLLER_SOURCE = `
       item.addEventListener('click', () => selectPullRequest(product.pullRequestId));
       return item;
     }));
+  }
+
+  function workItem(entry) {
+    const item = element('li', entry.status === 'running' ? 'running' : 'queued');
+    const request = entry.request || entry;
+    const label = request.repository && request.number !== null
+      ? request.repository + ' #' + request.number
+      : 'PR を割り当て中';
+    item.append(
+      element('strong', null, label),
+      element('span', null, entry.status === 'running'
+        ? '実行中' + (entry.workerId ? ' (' + entry.workerId + ')' : '')
+        : '待機中'),
+    );
+    return item;
+  }
+
+  function renderReviewWork(state) {
+    const queues = state.workers?.queues || [];
+    const totalWorkers = queues.reduce((sum, queue) => sum + (queue.workers?.configured || 0), 0);
+    const idleWorkers = queues.reduce((sum, queue) => sum + (queue.workers?.idle || 0), 0);
+    reviewWorkCapacity.textContent = '専用 worker ' + totalWorkers + ' / 空き ' + idleWorkers
+      + ' — 実行中の工程と待機列を表示します。';
+    const outer = (state.reviewQueue?.jobs || [])
+      .filter((job) => job.status === 'queued' || job.status === 'running');
+    const cards = queues.map((queue) => {
+      const card = element('section', 'review-work-queue');
+      const workers = queue.workers || {};
+      card.append(element(
+        'h3',
+        null,
+        queue.label + ' — 実行 ' + (workers.running || 0) + ' / 空き ' + (workers.idle || 0),
+      ));
+      const work = [...(queue.running || []), ...(queue.queued || [])];
+      if (work.length === 0) card.append(paragraph('待機中の工程はありません。'));
+      else card.append(Object.assign(document.createElement('ul'), {
+        className: 'review-work-items',
+      }));
+      const list = card.querySelector('.review-work-items');
+      if (list) list.append(...work.map(workItem));
+      return card;
+    });
+    if (outer.length > 0) {
+      const pending = element('section', 'review-work-queue');
+      pending.append(element('h3', null, 'レビュー orchestration'));
+      const list = element('ul', 'review-work-items');
+      list.append(...outer.map(workItem));
+      pending.append(list);
+      cards.unshift(pending);
+    }
+    reviewWorkQueues.replaceChildren(...cards);
   }
 
   function renderProjectFilter() {
@@ -198,12 +378,14 @@ const CONTROLLER_SOURCE = `
 
   async function refresh() {
     try {
-      const [prs, workflow] = await Promise.all([
+      const [prs, workflow, reviewWork] = await Promise.all([
         request('/api/local-prs'),
         request('/api/test-workflow'),
+        request('/api/review-work'),
       ]);
       renderPullRequests(prs.pullRequests);
       renderTestWorkflow(workflow.products);
+      renderReviewWork(reviewWork);
     } catch (error) {
       prActionMessage.textContent = error.message;
     }
@@ -214,10 +396,22 @@ const CONTROLLER_SOURCE = `
     selectedProjects = new Set([...filterProjects.selectedOptions].map((option) => option.value));
     renderBoard();
   });
+  prLogClose.addEventListener('click', closeLogOverlay);
+  prLogOverlay.addEventListener('click', (event) => {
+    if (event.target === prLogOverlay) closeLogOverlay();
+  });
+  prDiffClose.addEventListener('click', closeDiffOverlay);
+  prDiffOverlay.addEventListener('click', (event) => {
+    if (event.target === prDiffOverlay) closeDiffOverlay();
+  });
+  addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !prLogOverlay.hidden) closeLogOverlay();
+    if (event.key === 'Escape' && !prDiffOverlay.hidden) closeDiffOverlay();
+  });
   refresh().finally(connectPrEvents);
 `;
 
-const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_FILTER_SOURCE}${PR_EVENTS_SOURCE}${CONTROLLER_SOURCE}`;
+const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_DIFF_VIEW_SOURCE}${PR_FILTER_SOURCE}${PR_EVENTS_SOURCE}${CONTROLLER_SOURCE}`;
 
 export function renderPrBoardPage(sessionToken) {
   return renderPage({

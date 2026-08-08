@@ -60,19 +60,21 @@ export const PR_VIEW_SOURCE = `
     return element('span', 'badge ' + (tone || 'idle'), label);
   }
 
-  function menuDecisionLabel(decision) {
-    return decision.state === 'needs_human' ? 'レビュー項目があります' : decision.label;
+  function menuDecisionLabel(pr) {
+    if (pr.checkStatus === 'test_ok') return 'Test OK';
+    return pr.decision.state === 'needs_human' ? 'レビュー項目があります' : pr.decision.label;
   }
 
   function prCard(pr, selectedId, select) {
     const card = element('div', pr.id === selectedId ? 'card selected' : 'card');
-    card.dataset.tone = pr.decision.tone;
+    const menuTone = pr.checkStatus === 'test_ok' ? 'ok' : pr.decision.tone;
+    card.dataset.tone = menuTone;
     card.setAttribute('role', 'button');
     card.tabIndex = 0;
     const head = element('div', 'card-head');
     head.append(
       element('span', 'pr-number', '#' + pr.number),
-      badge(menuDecisionLabel(pr.decision), pr.decision.tone),
+      badge(menuDecisionLabel(pr), menuTone),
     );
     card.append(head);
     card.append(element('div', 'card-repository', pr.repository));
@@ -244,6 +246,78 @@ export const PR_VIEW_SOURCE = `
     if (outputs) {
       wrapper.append(block('失敗したテストの出力 (秘匿値はマスク済み)', outputs));
     }
+    return wrapper;
+  }
+
+  function sourcePullRequestUrl(pr) {
+    for (const link of pr.sourceLinks || []) {
+      let parsed;
+      try {
+        parsed = new URL(link.url);
+      } catch {
+        continue;
+      }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+      const looksLikePullRequest = /\\/pull\\/\\d+(?:\\/|$)/.test(parsed.pathname)
+        || /(?:pull request|\\bpr\\b)/i.test(text(link.label));
+      if (looksLikePullRequest) return parsed.href;
+    }
+    return null;
+  }
+
+  function workflowLogOf(pr, openLogs) {
+    const wrapper = element('div', 'workflow-log');
+    const toolbar = element('div', 'workflow-log-toolbar');
+    const filter = document.createElement('select');
+    filter.setAttribute('aria-label', 'Test Workflow ログのフィルタ');
+    for (const [value, label] of [
+      ['all', 'すべて'],
+      ['review_passed', 'Test OK'],
+      ['review_failed', '失敗'],
+      ['review_queued', '再審査'],
+      ['merged', 'マージ'],
+    ]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      filter.append(option);
+    }
+    const logButton = document.createElement('button');
+    logButton.type = 'button';
+    logButton.className = 'secondary';
+    logButton.textContent = 'Log';
+    logButton.addEventListener('click', () => openLogs(pr));
+    toolbar.append(filter, logButton);
+    const sourceUrl = sourcePullRequestUrl(pr);
+    if (sourceUrl) {
+      const source = document.createElement('a');
+      source.className = 'button-link';
+      source.href = sourceUrl;
+      source.target = '_blank';
+      source.rel = 'noopener noreferrer';
+      source.textContent = '該当PRを開く';
+      toolbar.append(source);
+    }
+    const entries = element('ol', 'workflow-log-entries');
+    const render = () => {
+      const events = (pr.lifecycleEvents || []).slice(-50).filter((entry) =>
+        filter.value === 'all' || entry.event === filter.value);
+      entries.replaceChildren(...events.map((entry) => {
+        const item = element('li', entry.tone || 'idle');
+        item.append(
+          element('time', null, entry.at),
+          element('span', null, entry.message),
+        );
+        return item;
+      }));
+      if (events.length === 0) {
+        entries.append(element('li', 'idle', '条件に一致するログはありません。'));
+      }
+      entries.scrollTo?.({ top: entries.scrollHeight, behavior: 'smooth' });
+    };
+    filter.addEventListener('change', render);
+    wrapper.append(toolbar, entries);
+    render();
     return wrapper;
   }
 

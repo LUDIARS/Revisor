@@ -12,7 +12,6 @@ import {
   rememberPreparedMerge,
 } from "./git-publication.mjs";
 import { assertLocalVersionUnchanged } from "./local-version.mjs";
-import { restoreBaseCheckout } from "./checkout-hygiene.mjs";
 import { publishMergedPullRequest } from "./release-publisher.mjs";
 import {
   advanceLocalBranch,
@@ -119,16 +118,11 @@ async function attemptSquashMerge({
   env = process.env,
   scan = configuredSecurityScan,
   publish = publishMergedPullRequest,
-  restoreCheckout = restoreBaseCheckout,
   allowSystemFailureOverride = false,
 }) {
   if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
     throw new Error("Only an Open / Test OK local PR can be squash merged.");
   }
-  // Sessions and test runs leave the watched checkout on a head branch or with
-  // edited files; both make `advanceLocalBranch` refuse the merge. Restore the
-  // base ref and stash the debris (recoverable) before anything reads SHAs.
-  await restoreCheckout({ rootPath: repository.rootPath, baseRef: pullRequest.baseRef });
   // ベースは審査時の SHA に固定しない。 他 PR のマージで base は常に前進するので、
   // 固定すると 1 本マージするたびに残り全部がマージ不能になる。 進んだ base とは
   // squash 適用時のコンフリクトだけを判定に使う。
@@ -192,10 +186,9 @@ async function attemptSquashMerge({
   try {
     await git(repository.rootPath, ["worktree", "add", "--detach", worktrees.head, baseSha]);
     try {
-      // A user- or system-level `merge.ff=only` must not turn a deliberate
-      // squash merge into a fast-forward-only operation. Revisor needs the
-      // staged squash result regardless of that ambient Git preference.
-      await git(worktrees.head, ["merge", "--no-ff", "--squash", "--no-commit", headSha]);
+      // A squash merge always stages a single-parent result. Git rejects
+      // `--no-ff` together with `--squash`, so do not add a fast-forward flag.
+      await git(worktrees.head, ["merge", "--squash", "--no-commit", headSha]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (await isMergeConflict(worktrees.head, message)) {

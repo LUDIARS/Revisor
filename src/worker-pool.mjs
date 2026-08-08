@@ -10,12 +10,16 @@ export class PrReviewWorkerPool {
   #waiting = [];
   #active = new Map();
   #closing = false;
+  #nextWorkerId = 1;
+  #workerIds = new WeakMap();
 
   constructor({
     size,
     cwd,
     env = process.env,
     createId = randomUUID,
+    now = () => new Date().toISOString(),
+    onStateChange = () => {},
     forkWorker = () => fork(WORKER_ENTRY, [], {
       cwd,
       env,
@@ -28,21 +32,50 @@ export class PrReviewWorkerPool {
     }
     this.size = size;
     this.createId = createId;
+    this.now = now;
+    this.onStateChange = onStateChange;
     this.forkWorker = forkWorker;
     for (let index = 0; index < size; index += 1) this.#spawn();
   }
 
-  run(request) {
+  run(request, { priority = 1 } = {}) {
     if (this.#closing) return Promise.reject(new Error("PR review worker pool is closing."));
+    if (!Number.isInteger(priority) || priority < 0) {
+      return Promise.reject(new TypeError("PR review task priority must be a non-negative integer."));
+    }
     return new Promise((resolve, reject) => {
-      this.#waiting.push({
+      const task = {
         id: this.createId(),
         request,
+        priority,
+        status: "queued",
+        createdAt: this.now(),
+        startedAt: null,
+        workerId: null,
         resolve,
         reject,
-      });
+      };
+      // Stable priority insertion: a ready model review must not wait behind
+      // diagnostics that were queued first, while equal-priority tasks retain
+      // their arrival order.
+      const index = this.#waiting.findIndex((candidate) => candidate.priority > priority);
+      if (index === -1) this.#waiting.push(task);
+      else this.#waiting.splice(index, 0, task);
+      this.#notifyState();
       this.#dispatch();
     });
+  }
+
+  state() {
+    return {
+      workers: {
+        configured: this.size,
+        idle: this.#idle.length,
+        running: this.#active.size,
+      },
+      queued: this.#waiting.map((task) => this.#taskState(task)),
+      running: [...this.#active.values()].map((task) => this.#taskState(task)),
+    };
   }
 
   async close() {
@@ -62,6 +95,7 @@ export class PrReviewWorkerPool {
     await Promise.all(exits);
     this.#workers.clear();
     this.#idle.length = 0;
+    this.#notifyState();
   }
 
   #spawn() {
@@ -69,6 +103,7 @@ export class PrReviewWorkerPool {
     const worker = this.forkWorker();
     this.#workers.add(worker);
     this.#idle.push(worker);
+    this.#workerIds.set(worker, `worker-${this.#nextWorkerId++}`);
     worker.on("message", (message) => this.#handleMessage(worker, message));
     worker.once("error", (error) => this.#handleExit(worker, error));
     worker.once("exit", (code, signal) => {
@@ -86,8 +121,10 @@ export class PrReviewWorkerPool {
     if (!task || task.worker !== worker) return;
     this.#active.delete(message.id);
     this.#idle.push(worker);
+    task.status = message.type === "result" ? "completed" : "failed";
     if (message.type === "result") task.resolve(message.result);
     else task.reject(new Error(message.error || "PR review worker failed."));
+    this.#notifyState();
     this.#dispatch();
   }
 
@@ -97,9 +134,11 @@ export class PrReviewWorkerPool {
     for (const [id, task] of this.#active) {
       if (task.worker !== worker) continue;
       this.#active.delete(id);
+      task.status = "failed";
       task.reject(error);
       break;
     }
+    this.#notifyState();
     if (!this.#closing) this.#spawn();
   }
 
@@ -108,7 +147,11 @@ export class PrReviewWorkerPool {
       const worker = this.#idle.shift();
       const task = this.#waiting.shift();
       task.worker = worker;
+      task.workerId = this.#workerIds.get(worker) ?? "worker";
+      task.status = "running";
+      task.startedAt = this.now();
       this.#active.set(task.id, task);
+      this.#notifyState();
       worker.send(
         { type: "run", id: task.id, request: task.request },
         (error) => {
@@ -117,10 +160,37 @@ export class PrReviewWorkerPool {
           if (active !== task) return;
           this.#active.delete(task.id);
           this.#idle.push(worker);
+          task.status = "failed";
           task.reject(error);
+          this.#notifyState();
           this.#dispatch();
         },
       );
+    }
+  }
+
+  #taskState(task) {
+    const request = task.request && typeof task.request === "object" ? task.request : {};
+    return {
+      id: task.id,
+      stage: typeof request.stage === "string" ? request.stage : "review",
+      repository: typeof request.repository === "string" ? request.repository : null,
+      number: Number.isInteger(request.number) ? request.number : null,
+      localPrId: typeof request.localPrId === "string" ? request.localPrId : null,
+      priority: task.priority,
+      status: task.status,
+      createdAt: task.createdAt,
+      startedAt: task.startedAt,
+      workerId: task.workerId,
+    };
+  }
+
+  #notifyState() {
+    try {
+      this.onStateChange(this.state());
+    } catch {
+      // Worker observability is best-effort; a dashboard listener must never
+      // interrupt review execution or strand a queued task.
     }
   }
 }
