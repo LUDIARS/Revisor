@@ -14,7 +14,7 @@ related:
   - ../architecture.md
   - ./pr-lifecycle.md
   - ./security-scan.md
-updated: 2026-08-05
+updated: 2026-08-08
 ---
 
 # remote-publication — reviewed main and operator-triggered Release publication
@@ -107,6 +107,16 @@ workflow changes otherwise fails closed at GitHub.
 The remote base must equal or be an ancestor of the local source-of-truth base,
 unless it already equals a prepared squash commit from a retry. Revisor never
 force pushes over an independently moved remote base.
+
+An independently moved remote base is first repaired automatically
+(2026-08-08): `src/base-reconcile.mjs` fetches the remote base and brings it
+into the local base — fast-forward when only GitHub is ahead, a clean merge
+commit when the histories diverged — then the squash merge is retried once on
+the advanced base (the stale prepared merge from the failed attempt is
+discarded first, together with any local release tag attached to it). Only a
+conflicting divergence, or a base that moves again right after reconciliation,
+still stops with the manual-reconcile error. The repair only ever pulls remote
+commits in; local history is never rewritten.
 
 Ordinary publication sends only the base ref. A manual Release sends base and
 annotated tag in one atomic push; the Release API call follows after its target

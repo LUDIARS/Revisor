@@ -2,11 +2,13 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSettings } from "./config.mjs";
-import { MergeConflictError, StaleReviewError } from "./errors.mjs";
+import { BaseMovedError, MergeConflictError, StaleReviewError } from "./errors.mjs";
+import { reconcileBaseWithRemote } from "./base-reconcile.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
 import {
   findPreparedMerge,
   forgetPreparedMerge,
+  forgetPreparedReleaseTag,
   rememberPreparedMerge,
 } from "./git-publication.mjs";
 import { assertLocalVersionUnchanged } from "./local-version.mjs";
@@ -107,7 +109,11 @@ async function isMergeConflict(worktreePath, message) {
   }
 }
 
-export async function squashMergeLocalPullRequest({
+/**
+ * squash merge の 1 回分の試行。 GitHub base が独立に進んでいた場合の自動 reconcile
+ * (取り込み + 再試行) は wrapper (`squashMergeLocalPullRequest`) が 1 回だけ行う。
+ */
+async function attemptSquashMerge({
   repository,
   pullRequest,
   env = process.env,
@@ -232,5 +238,36 @@ export async function squashMergeLocalPullRequest({
     return publication;
   } finally {
     await cleanupWorktrees(repository.rootPath, worktrees);
+  }
+}
+
+export async function squashMergeLocalPullRequest(input) {
+  try {
+    return await attemptSquashMerge(input);
+  } catch (error) {
+    if (!(error instanceof BaseMovedError)) throw error;
+    // GitHub 側だけが進んだ状態は定型修復できる: 先行コミットをローカル base へ
+    // 取り込み (ff / クリーン merge のみ、 コンフリクトは人間へ)、 進んだ base の上で
+    // squash をやり直す。 失敗した試行の prepared merge は旧 base を親に持つため捨てる
+    // (捨てないと再試行も同じ乖離判定で止まる)。 再試行は 1 回だけ — reconcile 直後に
+    // また乖離するなら別の書き込み主体がいるので、 隠さず従来のエラーで止める。
+    const reconcile = input.reconcileBase ?? reconcileBaseWithRemote;
+    const prepared = await findPreparedMerge(input.repository.rootPath, input.pullRequest.id);
+    if (prepared) {
+      await forgetPreparedMerge(input.repository.rootPath, input.pullRequest.id, prepared.mergeCommitSha);
+      if (prepared.tag) {
+        await forgetPreparedReleaseTag(
+          input.repository.rootPath,
+          prepared.tag,
+          prepared.mergeCommitSha,
+        );
+      }
+    }
+    await reconcile({
+      repository: input.repository,
+      baseRef: input.pullRequest.baseRef,
+      env: input.env ?? process.env,
+    });
+    return attemptSquashMerge(input);
   }
 }

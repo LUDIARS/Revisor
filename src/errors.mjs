@@ -20,3 +20,12 @@ export class StaleReviewError extends RevisorError {
     this.name = "StaleReviewError";
   }
 }
+
+// GitHub 側の base branch がローカル正本と独立に進んだ。ローカル base への
+// 取り込み (reconcile) と再 squash で解消できる。
+export class BaseMovedError extends RevisorError {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "BaseMovedError";
+  }
+}

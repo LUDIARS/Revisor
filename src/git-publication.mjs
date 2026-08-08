@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { RevisorError } from "./errors.mjs";
+import { BaseMovedError, RevisorError } from "./errors.mjs";
 import { git } from "./workspace.mjs";
 import { isReleaseTag } from "./release-version.mjs";
 import { githubRemoteUrl, runAuthenticatedGit } from "./authenticated-git.mjs";
@@ -55,6 +55,20 @@ export async function forgetPreparedMerge(rootPath, localPrId, mergeCommitSha) {
     // Publication has already succeeded and the base now reaches the commit.
     // A stale private ref is harmless and can be replaced by a later retry.
   }
+}
+
+// A release tag is created before its atomic push. When that preflight finds
+// the remote base has moved, the tagged commit is intentionally abandoned and
+// the local tag must go too; otherwise the rebuilt merge cannot reuse its tag.
+export async function forgetPreparedReleaseTag(rootPath, tag, mergeCommitSha) {
+  if (!isReleaseTag(tag)) {
+    throw new RevisorError(`Prepared release tag '${tag}' is not canonical.`);
+  }
+  const target = await git(rootPath, ["rev-list", "-n", "1", tag]);
+  if (target.toLowerCase() !== mergeCommitSha.toLowerCase()) {
+    throw new RevisorError(`Prepared release tag '${tag}' points to another commit.`);
+  }
+  await git(rootPath, ["tag", "-d", tag]);
 }
 
 export async function findPreparedMerge(rootPath, localPrId) {
@@ -171,7 +185,9 @@ export async function pushPublishedCommit({
       );
     }
     if (mergeBase.toLowerCase() !== remote.baseSha.toLowerCase()) {
-      throw new RevisorError(
+      // 型付きで投げる — squash merge 側が reconcile (取り込み + 再 squash) を
+      // 1 回だけ自動試行する。メッセージは従来のまま (人間向けの最終表示も兼ねる)。
+      throw new BaseMovedError(
         `GitHub '${baseRef}' moved independently; reconcile it with local '${baseRef}' before publishing.`,
       );
     }
