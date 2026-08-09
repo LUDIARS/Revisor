@@ -176,3 +176,31 @@ test("announces blocked and worker-failed reviews to the status channel", async 
   await reporter.failed({ request: { localPrId: "pr-1" }, error: "worker died" });
   assert.deepEqual(statuses, ["review_failed", "review_failed"]);
 });
+
+test("persists only the safe Anatomia gate projection", async () => {
+  const record = pr({ checkStatus: "queued" });
+  const reporter = new LocalPrReporter(makeStore(record));
+  await reporter.completed({
+    request: { localPrId: "pr-1", headSha: "abc" },
+    result: {
+      conclusion: "action_required",
+      anatomiaGate: {
+        status: "blocked",
+        message: "Anatomia review gate found 1 blocking reason(s).",
+        reasons: ["Anatomia changed violation: forbidden dependency"],
+        cliPath: "LOCAL_CLI_PATH_SHOULD_NOT_PERSIST",
+        analysis: { proprietaryArtifact: "internal-module-map" },
+      },
+    },
+  });
+
+  assert.deepEqual(record.anatomiaGate, {
+    status: "blocked",
+    message: "Anatomia review gate found 1 blocking reason(s).",
+    reasons: ["Anatomia changed violation: forbidden dependency"],
+  });
+  assert.doesNotMatch(
+    JSON.stringify(record.anatomiaGate),
+    /LOCAL_CLI_PATH_SHOULD_NOT_PERSIST|proprietaryArtifact/,
+  );
+});

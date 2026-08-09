@@ -240,6 +240,7 @@ test("the dashboard keeps configuration on the settings page", () => {
 test("renders a dedicated token-free settings page", () => {
   const page = renderSettingsPage("session-nonce");
   assert.match(page, /Anatomiaフォルダ/);
+  assert.match(page, /id="anatomia-review-gate"/);
   assert.match(page, /各レビュー工程の並列 worker 数/);
   assert.match(page, /許可Host/);
   assert.match(page, /暗号化config/);
@@ -280,6 +281,7 @@ test("the settings page owns the review scale thresholds", () => {
   assert.match(page, /各レビュー工程の並列 worker 数/);
   assert.match(page, /costValidationSkipReview:/);
   assert.match(page, /costValidationSkipGenius:/);
+  assert.match(page, /anatomiaReviewGateEnabled:/);
   assert.match(page, /costValidationSkipAnatomiaDomain:/);
 });
 
@@ -356,6 +358,24 @@ function renderTests(pr) {
   const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn testsOf;`);
   return view(fakeDocument())(pr);
 }
+
+function renderedText(node) {
+  return [node.textContent, ...(node.children ?? []).map(renderedText)].join(" ");
+}
+
+test("the PR detail renders the Anatomia front-gate outcome", () => {
+  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn reviewOf;`);
+  const rendered = view(fakeDocument())({
+    anatomiaGate: {
+      status: "blocked",
+      message: "Anatomia review gate found a blocking reason.",
+    },
+    reasons: ["Anatomia changed violation: forbidden dependency"],
+    advisories: [],
+  });
+  assert.match(renderedText(rendered), /Anatomia 前段ゲート blocked/);
+  assert.match(renderedText(rendered), /forbidden dependency/);
+});
 
 function renderCard(pr) {
   const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn prCard;`);

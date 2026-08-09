@@ -34,6 +34,7 @@ test("stores settings and encrypts local workflow secrets", () => {
   try {
     assert.deepEqual(readSettings(state.env), {
       anatomiaFolder: "",
+      anatomiaReviewGateEnabled: true,
       fallbackReviewer: "codex-sol",
       concordiaContextEnabled: true,
       workerCount: 1,
@@ -59,6 +60,7 @@ test("stores settings and encrypts local workflow secrets", () => {
     });
     writeSettings({
       anatomiaFolder: "E:/Document/Ars/Anatomia",
+      anatomiaReviewGateEnabled: false,
       fallbackReviewer: "claude-opus",
       concordiaContextEnabled: false,
       workerCount: 3,
@@ -71,6 +73,7 @@ test("stores settings and encrypts local workflow secrets", () => {
       securityScanEffort: "low",
       securityScanModel: " gpt-5.6-terra ",
     }, state.env);
+    assert.equal(readSettings(state.env).anatomiaReviewGateEnabled, false);
     assert.deepEqual(readSettings(state.env).securityScanEnabled, false);
     assert.equal(readSettings(state.env).securityFailOnSeverity, "medium");
     assert.equal(readSettings(state.env).securityMaxCostUsd, 2.5);

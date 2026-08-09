@@ -17,6 +17,25 @@ function analysisProjection(result) {
   };
 }
 
+function anatomiaGateProjection(result) {
+  const gate = result?.anatomiaGate;
+  if (!gate) return null;
+  // The runner needs the CLI path and raw analysis internally, but the local PR
+  // is durable and exposed through the UI API. Persist only the verdict fields
+  // so workstation paths and proprietary analysis artifacts cannot leak there.
+  return {
+    status: gate.status,
+    message: gate.message,
+    reasons: Array.isArray(gate.reasons) ? gate.reasons : [],
+  };
+}
+
+function anatomiaGateTone(status) {
+  if (status === "blocked") return "error";
+  if (status === "passed") return "ok";
+  return "idle";
+}
+
 // The review outcome fields owned by `completed`, cleared. A re-review resolves
 // fresh refs, so the previous run's outcome must not be read as the current one.
 export function pendingReviewProjection() {
@@ -26,6 +45,7 @@ export function pendingReviewProjection() {
     intentReviewCompleted: false,
     ci: [],
     anatomia: null,
+    anatomiaGate: null,
     leakage: null,
     security: null,
     reasons: [],
@@ -114,6 +134,7 @@ export class LocalPrReporter {
       intentReviewCompleted: job.result?.intentReviewCompleted === true,
       ci: job.result?.ci ?? [],
       anatomia: analysisProjection(job.result),
+      anatomiaGate: anatomiaGateProjection(job.result),
       leakage: job.result?.leakage ?? null,
       security: job.result?.security ?? null,
       reasons: job.result?.reasons ?? [],
@@ -124,6 +145,13 @@ export class LocalPrReporter {
       runtimeVerification: job.result?.runtimeVerification ?? null,
       geniusGuidance: job.result?.geniusGuidance ?? null,
     });
+    if (job.result?.anatomiaGate && typeof this.store.appendPullRequestEvent === "function") {
+      this.store.appendPullRequestEvent(job.request.localPrId, {
+        event: "anatomia_gate",
+        message: job.result.anatomiaGate.message,
+        tone: anatomiaGateTone(job.result.anatomiaGate.status),
+      });
+    }
     // 審査結果とマージは別イベント。自動マージより先に Test OK / 失敗を知らせる。
     await this.#announceReviewStatus(
       passed ? "review_passed" : "review_failed",

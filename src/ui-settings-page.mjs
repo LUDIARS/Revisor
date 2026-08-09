@@ -17,6 +17,13 @@ const BODY = `
         </select>
       </div>
       <div class="field">
+        <label class="check">
+          <input id="anatomia-review-gate" type="checkbox">
+          LLM レビュー前に Anatomia の機械ゲートを実行する
+        </label>
+        <span class="note">違反があれば LLM を起動せず判断待ちにします。解析不能時は理由を記録して LLM レビューを続行します。</span>
+      </div>
+      <div class="field">
         <label for="large-review-line-threshold">大規模レビューに切り替えるコード変更行数 X</label>
         <input id="large-review-line-threshold" type="number" min="1" step="1" required>
         <span class="note">X行を超えると、Sonnet→Opus または Terra→Sol の調査・判断2エージェント構成にします。既定は1000です。</span>
@@ -193,6 +200,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     const state = await request('/api/settings');
     document.querySelector('#anatomia-folder').value = state.settings.anatomiaFolder;
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
+    document.querySelector('#anatomia-review-gate').checked = state.settings.anatomiaReviewGateEnabled;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
     document.querySelector('#large-review-line-threshold').value =
       String(state.settings.largeReviewLineThreshold);
@@ -258,6 +266,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
         body: JSON.stringify({
           anatomiaFolder: document.querySelector('#anatomia-folder').value,
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
+          anatomiaReviewGateEnabled: document.querySelector('#anatomia-review-gate').checked,
           workerCount: Number(document.querySelector('#worker-count').value),
           largeReviewLineThreshold:
             Number(document.querySelector('#large-review-line-threshold').value),

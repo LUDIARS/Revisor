@@ -35,6 +35,7 @@ function isSecurityModel(value) {
 function defaults() {
   return {
     anatomiaFolder: "",
+    anatomiaReviewGateEnabled: true,
     fallbackReviewer: "codex-sol",
     concordiaContextEnabled: true,
     workerCount: 1,
@@ -167,6 +168,7 @@ export function readSettings(env = process.env) {
     anatomiaFolder: typeof value.anatomiaFolder === "string"
       ? value.anatomiaFolder
       : base.anatomiaFolder,
+    anatomiaReviewGateEnabled: value.anatomiaReviewGateEnabled !== false,
     fallbackReviewer: value.fallbackReviewer === "claude-opus"
       ? "claude-opus"
       : base.fallbackReviewer,
@@ -324,6 +326,9 @@ export function writeSettings(settings, env = process.env) {
   const config = readConfig(env);
   config.settings = {
     anatomiaFolder,
+    anatomiaReviewGateEnabled: settings.anatomiaReviewGateEnabled === undefined
+      ? current.anatomiaReviewGateEnabled
+      : settings.anatomiaReviewGateEnabled !== false,
     fallbackReviewer: settings.fallbackReviewer,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,

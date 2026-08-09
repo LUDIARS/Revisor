@@ -1,4 +1,8 @@
 import { analyzePr, ensureInitialAnalysis, resolveAnatomiaCli } from "./anatomia.mjs";
+import {
+  evaluateAnatomiaReviewGate,
+  runAnatomiaReviewGate,
+} from "./anatomia-review-gate.mjs";
 import { resolveWorkspaceRoot } from "./catalog.mjs";
 import {
   loadConcordiaContext,
@@ -219,6 +223,10 @@ function buildGateResult({
   humanReviewRequired = false,
   geniusGuidance = null,
   intentReviewCompleted = false,
+  anatomiaGate = null,
+  analysisSource = "anatomia-cli",
+  additionalReasons = [],
+  additionalAdvisories = [],
 }) {
   // A repository with no analyzed functions has Anatomia's neutral score of
   // 100. That score is not a comparable baseline for a newly introduced code
@@ -226,7 +234,7 @@ function buildGateResult({
   const complexityScoreDelta = baseline && baseline.quality.complexity.functions !== 0
     ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
     : null;
-  const { reasons, advisories } = gateOutcome({
+  const { reasons: gateReasons, advisories } = gateOutcome({
     finalAnalysis,
     complexityScoreDelta,
     threshold: complexityDropThreshold,
@@ -241,6 +249,7 @@ function buildGateResult({
     security,
     humanReviewRequired,
   });
+  const reasons = [...new Set([...gateReasons, ...additionalReasons])];
   const runtimeVerification = assessRuntimeVerification({
     classification,
     testCases: request.testCases,
@@ -269,7 +278,7 @@ function buildGateResult({
     reviewer,
     intentReviewCompleted,
     contextSource,
-    analysisSource: "anatomia-cli",
+    analysisSource,
     originalHeadSha: request.headSha,
     reviewedHeadSha,
     plan,
@@ -290,10 +299,54 @@ function buildGateResult({
     ci,
     security,
     reasons,
-    advisories,
+    advisories: [
+      ...advisories,
+      ...additionalAdvisories,
+      ...(anatomiaGate?.status === "unavailable" ? [anatomiaGate.message] : []),
+    ],
     runtimeVerification,
     mergeRisk,
     geniusGuidance,
+    anatomiaGate,
+  };
+}
+
+function buildAnatomiaBlockedResult({
+  request,
+  gate,
+  complexityDropThreshold,
+  initialLeakage,
+  leakage = initialLeakage,
+  ci = [],
+  docsOnly,
+  docsOrConfigOnly,
+  plan,
+  classification,
+  reviewer = "skipped",
+  contextSource = "anatomia-review-gate",
+}) {
+  return {
+    ...buildGateResult({
+      request,
+      firstAnalysis: null,
+      finalAnalysis: gate.analysis,
+      baseline: null,
+      reviewer,
+      contextSource,
+      reviewedHeadSha: request.headSha,
+      complexityDropThreshold,
+      initialLeakage,
+      leakage,
+      ci,
+      docsOnly,
+      docsOrConfigOnly,
+      plan,
+      classification,
+      security: null,
+      anatomiaGate: gate,
+      additionalReasons: gate.reasons,
+    }),
+    humanQuestion: "Resolve the Anatomia review-gate violations before LLM review can start.",
   };
 }
 
@@ -533,8 +586,36 @@ export function createPrReviewRunner({
           runTests: executeTests,
         });
       }
-      const anatomiaCliPath = await resolveAnatomiaCli(settings.anatomiaFolder);
       let initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
+      const deterministicPlan = planReview({
+        classification: submitted.classification,
+        testCases: request.testCases,
+      });
+      const frontGatePlan = applyCostValidationMode(deterministicPlan, settings);
+      // This is deliberately before plan advice and every reviewer invocation:
+      // deterministic Anatomia violations must not consume an LLM review slot.
+      let anatomiaGate = await runAnatomiaReviewGate({
+        enabled: settings.anatomiaReviewGateEnabled,
+        resolveCli: resolveAnatomiaCli,
+        analyze: executeAnalysis,
+        anatomiaFolder: settings.anatomiaFolder,
+        cwd: worktrees.head,
+        base: worktrees.mergeBase,
+        plan: frontGatePlan,
+        classification: submitted.classification,
+      });
+      if (anatomiaGate.status === "blocked") {
+        return buildAnatomiaBlockedResult({
+          request,
+          gate: anatomiaGate,
+          complexityDropThreshold,
+          initialLeakage,
+          docsOnly,
+          docsOrConfigOnly,
+          plan: frontGatePlan,
+          classification: submitted.classification,
+        });
+      }
       const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
       const authorContext = await resolveAuthorContext({
         settings,
@@ -548,10 +629,6 @@ export function createPrReviewRunner({
         authorContext?.provider,
         settings.fallbackReviewer,
       );
-      const deterministicPlan = planReview({
-        classification: submitted.classification,
-        testCases: request.testCases,
-      });
       let plan = await advisePlan({
         // The default is deterministic. An explicitly configured advisor is a
         // separate, visible model cost and remains subject to the plan floor.
@@ -569,21 +646,29 @@ export function createPrReviewRunner({
       codeDomainRequired = submitted.classification.codeDomainRequired
         && stageEnabled(plan, "anatomia_domain_review");
       const codeAnalysis = stageEnabled(plan, "anatomia_code_analysis");
+      const anatomiaUnavailable = anatomiaGate.status === "unavailable";
+      const anatomiaCliPath = anatomiaUnavailable
+        ? null
+        : (anatomiaGate.cliPath ?? await resolveAnatomiaCli(settings.anatomiaFolder));
       let [initial, { firstAnalysis, baseline }] = await Promise.all([
-        executeAnalysis({
-          cliPath: anatomiaCliPath,
-          cwd: worktrees.head,
-          base: worktrees.mergeBase,
-        }),
-        analyzeCodeBaseline({
-          cliPath: anatomiaCliPath,
-          repoPath,
-          repository: request.repository,
-          worktrees,
-          enabled: codeAnalysis,
-          analyze: executeAnalysis,
-          initialAnalyze: executeInitialAnalysis,
-        }),
+        anatomiaGate.analysis
+          ? Promise.resolve(anatomiaGate.analysis)
+          : executeAnalysis({
+              cliPath: anatomiaCliPath,
+              cwd: worktrees.head,
+              base: worktrees.mergeBase,
+            }),
+        anatomiaUnavailable
+          ? Promise.resolve({ firstAnalysis: null, baseline: null })
+          : analyzeCodeBaseline({
+              cliPath: anatomiaCliPath,
+              repoPath,
+              repository: request.repository,
+              worktrees,
+              enabled: codeAnalysis,
+              analyze: executeAnalysis,
+              initialAnalyze: executeInitialAnalysis,
+            }),
       ]);
       let reviewStrategy = selectReviewStrategy({
         classification: submitted.classification,
@@ -615,6 +700,8 @@ export function createPrReviewRunner({
         plan,
         classification: submitted.classification,
         security: initialSecurity,
+        anatomiaGate,
+        analysisSource: anatomiaUnavailable ? "anatomia-unavailable" : "anatomia-cli",
       };
       if (initialLeakage.totalFindings > 0) {
         return {
@@ -713,11 +800,37 @@ export function createPrReviewRunner({
         codeDomainRequired = submitted.classification.codeDomainRequired
           && stageEnabled(plan, "anatomia_domain_review");
         initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
-        initial = await executeAnalysis({
-          cliPath: anatomiaCliPath,
-          cwd: worktrees.head,
-          base: worktrees.mergeBase,
-        });
+        if (!anatomiaUnavailable) {
+          initial = await executeAnalysis({
+            cliPath: anatomiaCliPath,
+            cwd: worktrees.head,
+            base: worktrees.mergeBase,
+          });
+          if (settings.anatomiaReviewGateEnabled) {
+            anatomiaGate = evaluateAnatomiaReviewGate({
+              analysis: initial,
+              cliPath: anatomiaCliPath,
+              plan,
+              classification: submitted.classification,
+            });
+            if (anatomiaGate.status === "blocked") {
+              return buildAnatomiaBlockedResult({
+                request,
+                gate: anatomiaGate,
+                complexityDropThreshold,
+                initialLeakage,
+                leakage: initialLeakage,
+                ci: initialCi,
+                docsOnly,
+                docsOrConfigOnly,
+                plan,
+                classification: submitted.classification,
+                reviewer: externalReviewer,
+                contextSource: "anatomia-review-gate-after-test-autofix",
+              });
+            }
+          }
+        }
         reviewStrategy = selectReviewStrategy({
           classification: submitted.classification,
           unifiedDiff: submitted.unifiedDiff,
@@ -739,6 +852,7 @@ export function createPrReviewRunner({
           plan,
           classification: submitted.classification,
           security: initialSecurity,
+          anatomiaGate,
         };
       }
       if (!stageEnabled(plan, "reviewer_autofix")) {
@@ -942,11 +1056,13 @@ export function createPrReviewRunner({
           "Opposite-model autofix introduced potential information leakage; changes were discarded before commit or push.",
         );
       }
-      finalAnalysis = await executeAnalysis({
-        cliPath: anatomiaCliPath,
-        cwd: worktrees.head,
-        base: worktrees.mergeBase,
-      });
+      if (!anatomiaUnavailable) {
+        finalAnalysis = await executeAnalysis({
+          cliPath: anatomiaCliPath,
+          cwd: worktrees.head,
+          base: worktrees.mergeBase,
+        });
+      }
       const reviewedHeadSha = await commitAndAdvanceAutofix(
         worktrees.head,
         repoPath,

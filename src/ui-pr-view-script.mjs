@@ -333,6 +333,9 @@ export const PR_VIEW_SOURCE = `
     const wrapper = document.createElement('div');
     const list = element('dl', 'meta');
     definition(list, 'レビュアー', pr.reviewer || '未実施');
+    if (pr.anatomiaGate) {
+      definition(list, 'Anatomia 前段ゲート', pr.anatomiaGate.status + ' — ' + pr.anatomiaGate.message);
+    }
     definition(list, '流出スキャン', pr.leakage
       ? (pr.leakage.totalFindings + ' 件 / 追加 ' + pr.leakage.scannedAddedLines + ' 行を検査')
       : '未実施');
