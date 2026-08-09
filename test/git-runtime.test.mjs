@@ -10,6 +10,7 @@ import {
 
 const ROOT = "C:\\managed\\revisor\\git";
 const ENV = { LOCALAPPDATA: "C:\\managed", REVISOR_GIT_ROOT: ROOT, AUTH_HEADER: "secret" };
+const KEEP_ENV = ({ env }) => env;
 
 function completeRuntime(path) {
   const portable = path.replaceAll("\\", "/");
@@ -22,6 +23,7 @@ test("launches the Revisor-owned Windows Git directly and preserves argv and env
     env: ENV,
     platform: "win32",
     fileExists: completeRuntime,
+    trustEnv: KEEP_ENV,
   });
 
   const paths = managedGitPaths(ROOT);
@@ -32,6 +34,19 @@ test("launches the Revisor-owned Windows Git directly and preserves argv and env
   ]);
   assert.deepEqual(invocation.args.slice(2), ["-C", "repo with spaces", "status"]);
   assert.equal(invocation.env, ENV);
+});
+
+test("hands Git the Revisor trust configuration through the environment", () => {
+  const invocation = managedGitInvocation(["status"], {
+    cwd: "C:\\review worktree",
+    env: ENV,
+    platform: "win32",
+    fileExists: completeRuntime,
+    trustEnv: ({ env }) => ({ ...env, GIT_CONFIG_GLOBAL: "C:\\managed\\trust.gitconfig" }),
+  });
+
+  assert.equal(invocation.env.GIT_CONFIG_GLOBAL, "C:\\managed\\trust.gitconfig");
+  assert.equal(invocation.env.AUTH_HEADER, "secret");
 });
 
 test("refuses a SourceTree runtime even when explicitly configured", () => {
@@ -61,7 +76,12 @@ test("fails closed when the managed runtime is incomplete", () => {
 test("uses the configured Revisor Git binary on non-Windows hosts", () => {
   const env = { REVISOR_GIT_BIN: "/opt/revisor/bin/git" };
   assert.deepEqual(
-    managedGitInvocation(["status"], { cwd: "/review/worktree", env, platform: "linux" }),
+    managedGitInvocation(["status"], {
+      cwd: "/review/worktree",
+      env,
+      platform: "linux",
+      trustEnv: KEEP_ENV,
+    }),
     {
       command: "/opt/revisor/bin/git",
       args: [

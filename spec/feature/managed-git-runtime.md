@@ -13,7 +13,7 @@ related:
   - ./runtime-execution.md
   - ./local-workspace.md
   - ../architecture.md
-updated: 2026-08-05
+updated: 2026-08-09
 ---
 
 # managed-git-runtime — deterministic Git for review operations
@@ -47,12 +47,36 @@ executable.
 Revisor fails closed when the runtime is absent or incomplete. SourceTree paths
 are refused even when supplied through `REVISOR_GIT_ROOT`.
 
-Each Git process also receives `safe.directory=<cwd>` as command-scoped
-configuration. The cwd is already an explicit Revisor input: a registered
-repository, a branch worktree checked for cleanliness, or a disposable review
-worktree. Command-scoped trust lets the service account inspect a worktree made
-by a sandboxed implementation account without weakening Git globally or trusting
-unrelated repositories.
+## Repository trust
+
+### SPEC-MANAGED-GIT-TRUST: Revisor-only global Git trust
+
+Each Git process receives `safe.directory=<cwd>` as command-scoped configuration.
+The cwd is already an explicit Revisor input: a registered repository, a branch
+worktree checked for cleanliness, or a disposable review worktree.
+
+Command scope reaches only the repository this Git process opens itself. It does
+not reach a local clone's **source** repository, which is opened by a child
+`upload-pack` process that inherits neither command-line scope nor
+`GIT_CONFIG_COUNT/KEY/VALUE`. Because preparing the isolated merge repository
+clones from the registered checkout, command-scoped trust alone leaves every
+merge for a checkout owned by another local account failing permanently.
+
+Revisor therefore owns a Git configuration file at
+`%LOCALAPPDATA%\LUDIARS\Revisor\git-trust.gitconfig` (`REVISOR_GIT_TRUST_CONFIG`
+overrides the location) and passes it to every managed invocation through
+`GIT_CONFIG_GLOBAL`, which child Git processes do inherit. The file includes the
+operator's own global configuration when it exists, so identity, credential, and
+conditional settings behave as before, and declares `safe.directory = *`.
+
+The wildcard is deliberate. LUDIARS checkouts are written by several local
+accounts — a sandboxed implementation account re-creating `.git` leaves that
+account as its owner — so per-path entries would only move the outage to the
+next contaminated checkout. Trust is scoped instead by *who reads the file*:
+only Revisor's own Git invocations, never the operator's global configuration.
+
+A host where the file cannot be resolved or written still runs Git, with the
+command-scoped trust alone.
 
 Windows registered test cases normally use `cmd.exe` for command shims. A case
 whose configured executable is Git stays a direct process request, so it

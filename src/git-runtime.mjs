@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, normalize, resolve } from "node:path";
+import { gitTrustEnv } from "./git-trust.mjs";
 
 function defaultWindowsGitRoot(env) {
   if (!env.LOCALAPPDATA) {
@@ -61,15 +62,20 @@ export function managedGitInvocation(args, {
   env = process.env,
   platform = process.platform,
   fileExists = existsSync,
+  trustEnv = gitTrustEnv,
 } = {}) {
+  // `-c safe.directory` が守れるのは、 この git プロセス自身が開くリポジトリ (cwd) だけ。
+  // local clone の取得元は子プロセスの `upload-pack` が開くため command-line scope が
+  // 届かない。 そちらは GIT_CONFIG_GLOBAL 経由の信頼設定が担う (src/git-trust.mjs)。
   const managedArgs = cwd
     ? ["-c", `safe.directory=${resolve(cwd).replaceAll("\\", "/")}`, ...args]
     : args;
+  const trustedEnv = trustEnv({ env, platform });
   if (platform !== "win32") {
     return {
       command: env.REVISOR_GIT_BIN || "git",
       args: managedArgs,
-      env,
+      env: trustedEnv,
     };
   }
 
@@ -77,6 +83,6 @@ export function managedGitInvocation(args, {
   return {
     command: paths.git,
     args: managedArgs,
-    env,
+    env: trustedEnv,
   };
 }

@@ -21,6 +21,11 @@ import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { PrEventStream } from "./pr-event-stream.mjs";
 import { attachPrWebSocket } from "./pr-websocket.mjs";
 import { PullRequestDiffService } from "./pull-request-diff-service.mjs";
+import {
+  formatRepositoryAccessFailure,
+  inspectRegisteredRepositories,
+  unreachableRepositories,
+} from "./repository-access.mjs";
 import { ReleaseService } from "./release-service.mjs";
 import { createPrReviewRunner } from "./runner.mjs";
 import { ReviewStageWorkers } from "./review-stage-workers.mjs";
@@ -335,6 +340,23 @@ export async function startRevisor({
         // 通知は落としてよい。
       }
     }
+  }
+  // 読めない登録 checkout は、 これまで「その repo のマージを試みた瞬間」に初めて
+  // 失敗として現れた (所有者汚染はマージ直前の clone で落ちる)。 起動時に全件を
+  // 名指しで出しておく。 確認そのものが失敗しても起動は止めない。
+  try {
+    const access = await inspectRegisteredRepositories(store.listRepositories());
+    for (const failure of unreachableRepositories(access)) {
+      process.stderr.write(
+        `Revisor cannot read a registered checkout: ${formatRepositoryAccessFailure(failure)}\n`,
+      );
+    }
+  } catch (error) {
+    process.stderr.write(
+      `Revisor could not check registered checkouts: ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
   }
   // レビュー完了時の 1 回きりだと「その瞬間 base が古かった」PR を二度と拾えない。
   // base が進んで squash が通るようになった Test OK を定期的に拾い直す。

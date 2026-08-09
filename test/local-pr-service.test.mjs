@@ -160,7 +160,9 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "1");
     assert.equal(git(mergeRoot, "rev-list", "--count", "main"), "2");
     assert.equal(git(mergeRoot, "log", "-1", "--format=%P", "main"), fixture.baseSha);
-    assert.match(git(mergeRoot, "log", "-1", "--format=%B"), /Revisor-Local-PR/);
+    // The merge repository deliberately keeps no branch checked out, so HEAD is
+    // still the base commit. Name the branch that the merge advanced.
+    assert.match(git(mergeRoot, "log", "-1", "--format=%B", "main"), /Revisor-Local-PR/);
     assert.deepEqual(lifecycle, [
       ["created", "open"],
       ["merged", "merged"],

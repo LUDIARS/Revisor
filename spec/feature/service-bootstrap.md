@@ -11,7 +11,7 @@ tags:
 status: implemented
 related:
   - ../architecture.md
-updated: 2026-08-04
+updated: 2026-08-09
 ---
 
 # service-bootstrap — managed listener location resolution
@@ -39,3 +39,15 @@ listenerへ渡すproduction codeの境界だけである。
 `resolveManagedServicePort` がこの順序の正本であり、`cli.mjs` の `serve` だけがRevisor
 自身のlistener解決に使う。同居serviceへの接続先 (`resolveServicePort` /
 `resolveServiceLoopbackUrl`) は引き続き中央catalogから解決し、このbootstrap責務と混ぜない。
+
+## 登録checkoutの読み取り確認
+
+### SPEC-SERVICE-REGISTERED-CHECKOUT-ACCESS: registered checkout readability
+
+listen後、中断レビューの復旧に続けて、登録済み全repositoryの `root_path` を1回だけ
+`rev-parse` で開く。読めないものは1件1行でstderrへ名指しする。所有者の汚染・移動・
+削除・`.git` の破損は、これまで「そのrepositoryをマージしようとした瞬間」に初めて
+失敗として現れていた。起動時に出しておけば、マージ待ち行列が止まる前に気付ける。
+
+この確認は best-effort であり、確認自体が失敗しても起動は止めない。状態も書き換えない
+(読めないrepositoryのPRを自動でfailにはしない)。
