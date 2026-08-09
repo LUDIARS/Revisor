@@ -98,8 +98,14 @@ compare-and-swap、ある場合は `merge --ff-only` で前進する。
 Revisor は `revisor.state.json` と同じ data directory の `merge-repositories/` に repository
 ごとの永続 clone を所有する。clone は object store も独立させ、branch を checkout しない。
 
+この分離の結果、GitHub publication を通さない運用ではマージ済みの変更が登録 checkout へ
+降りてこない。降ろす条件と担当は `spec/feature/checkout-publication.md` で定義する
+(常時追従はしない。本ブランチが base ref のときだけ fast-forward)。
+
 merge の直前に source から対象 head ref だけを clone へ fetch する。base ref は clone 作成時
 だけ source から初期化し、以後は Revisor の publish または GitHub reconcile だけが CAS で
 前進させる。squash worktree、prepared ref、release version、tag、push はすべて clone 上で
-処理する。したがって登録 checkout に tracked edit、untracked file、ignored build tree があっても、
-Revisor は status/stash/checkout/reset を実行せず、それらを merge 成否の条件にしない。
+処理する。したがって merge 準備と merge 処理では、登録 checkout に tracked edit、untracked
+file、ignored build tree があっても、Revisor は status/stash/checkout/reset を実行せず、それらを
+merge 成否の条件にしない。merge 完了後に登録 checkout を前進させる任意の publication は
+`checkout-publication.md` の別の安全条件に従う。
