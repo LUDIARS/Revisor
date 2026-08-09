@@ -186,6 +186,9 @@ test("the dashboard keeps the operational panels and hands PR triage to the top 
   assert.match(page, /request\('\/api\/releases'\)/);
   assert.doesNotMatch(page, /push guard/i);
   assert.doesNotMatch(page, /<h2>テストワークフロー<\/h2>/);
+  assert.match(page, /<label for="pr-body">PR内容<\/label>/);
+  assert.match(page, /## 実装内容/);
+  assert.match(page, /## 受け入れ条件/);
 });
 
 test("the PR board receives realtime status events and logs them below the detail", () => {
@@ -474,6 +477,28 @@ test("the PR detail renders structured source links safely", () => {
   assert.equal(link?.target, "_blank");
   assert.equal(link?.rel, "noopener noreferrer");
   assert.equal(flatten(rendered).includes("Discord セッション投稿"), true);
+});
+
+test("the PR detail presents body text as an independent PR content section", () => {
+  const rendered = renderOverview({
+    repository: "LUDIARS/Revisor",
+    number: 262,
+    title: "PR 内容を表示する",
+    status: "open",
+    checkStatus: "queued",
+    author: "local",
+    headRef: "feat/pr-content",
+    baseRef: "main",
+    headSha: "a".repeat(40),
+    reviewedHeadSha: null,
+    baseSha: "b".repeat(40),
+    labels: [],
+    updatedAt: "2026-08-08T00:00:00.000Z",
+    body: "## 実装内容\n- 表示する。\n\n## 受け入れ条件\n- 独立項目で読める。",
+    sourceLinks: [],
+  });
+  assert.equal(flatten(rendered).includes("PR内容"), true);
+  assert.equal(flatten(rendered).some((entry) => entry.includes("## 実装内容")), true);
 });
 
 test("a review recorded before test output was kept still renders its table", () => {

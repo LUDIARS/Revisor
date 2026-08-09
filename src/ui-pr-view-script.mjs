@@ -33,6 +33,14 @@ export const PR_VIEW_SOURCE = `
     return element('p', 'empty', message);
   }
 
+  function prContentOf(content) {
+    if (!content) return paragraph('PR内容はありません。');
+    const body = document.createElement('pre');
+    body.className = 'pr-content';
+    body.textContent = text(content);
+    return body;
+  }
+
   function listOf(values, emptyMessage) {
     if (!values || values.length === 0) return paragraph(emptyMessage);
     const list = document.createElement('ul');
@@ -174,7 +182,7 @@ export const PR_VIEW_SOURCE = `
     const wrapper = document.createElement('div');
     const list = element('dl', 'meta');
     definition(list, 'PR', pr.repository + ' #' + pr.number);
-    definition(list, 'title', pr.title);
+    definition(list, 'PR タイトル', pr.title);
     definition(list, '状態', pr.status + ' / ' + pr.checkStatus);
     definition(list, 'author', pr.author);
     definition(list, 'branch', pr.headRef + ' → ' + pr.baseRef);
@@ -183,8 +191,8 @@ export const PR_VIEW_SOURCE = `
     definition(list, 'base SHA', pr.baseSha);
     definition(list, 'labels', pr.labels.join(', ') || '—');
     definition(list, '更新', pr.updatedAt);
-    if (pr.body) definition(list, 'body', pr.body);
     wrapper.append(list);
+    wrapper.append(block('PR内容', prContentOf(pr.body)));
     if (pr.sourceLinks && pr.sourceLinks.length > 0) {
       wrapper.append(block('関連メッセージ', sourceLinksOf(pr.sourceLinks)));
     }

@@ -65,8 +65,8 @@ test("authenticates and creates a local PR without a GitHub head", async () => {
       headers: { authorization: "Bearer workflow-token" },
       body: JSON.stringify({
         repository: "LUDIARS/Revisor",
-        title: "Local workflow",
-        body: "Never push the head branch.",
+        title: "ローカルワークフローを登録する",
+        body: "## 実装内容\n- head branch を登録する。\n\n## 受け入れ条件\n- GitHub head を必要としない。",
         author: "neco",
         head_ref: "feat/local-workflow",
       }),
@@ -80,6 +80,43 @@ test("authenticates and creates a local PR without a GitHub head", async () => {
       number: 1,
       checkStatus: "queued",
     });
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects incomplete PR content before the review service can enqueue tests", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  let submitted = false;
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {
+      async submitPullRequest() {
+        submitted = true;
+        return { id: "pr-1" };
+      },
+    },
+  });
+  const output = response();
+  try {
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({
+        repository: "LUDIARS/Revisor",
+        title: "内容不足の PR",
+        body: "## 実装内容\n- 受け入れ条件が無い。",
+        author: "neco",
+        head_ref: "feat/local-workflow",
+      }),
+    }), output);
+    assert.equal(output.status, 400);
+    assert.match(JSON.parse(output.body).error, /受け入れ条件/);
+    assert.equal(submitted, false);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

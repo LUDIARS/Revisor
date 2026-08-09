@@ -4,6 +4,7 @@ import { CHANGE_KINDS } from "./change-classification.mjs";
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
 const SAFE_COMMAND_PART = /^[^\0\r\n"&|<>^%!]*$/;
+const JAPANESE_CHARACTER = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/;
 const SENSITIVE_URL_PARAMETER =
   /^(?:access_?)?token$|^(?:api_?)?key$|^auth(?:orization)?$|^credential$|^password$|^secret$|^(?:sig|signature)$/i;
 
@@ -38,6 +39,47 @@ function stringList(value, label) {
     throw new Error(`${label} is invalid.`);
   }
   return [...new Set(value.map((item) => item.trim()))];
+}
+
+function japaneseText(value, label, maximum = 255) {
+  const normalized = text(value, label, maximum);
+  if (!JAPANESE_CHARACTER.test(normalized)) {
+    throw new Error(`${label} must be written in Japanese.`);
+  }
+  return normalized;
+}
+
+function prContent(value) {
+  const body = text(value, "PR content", 65_536);
+  for (const heading of ["実装内容", "受け入れ条件"]) {
+    const content = sectionContent(body, heading);
+    if (!content) {
+      throw new Error(`PR content requires a non-empty '## ${heading}' section.`);
+    }
+    if (!JAPANESE_CHARACTER.test(content)) {
+      throw new Error(`PR content section '## ${heading}' must be written in Japanese.`);
+    }
+  }
+  return body;
+}
+
+function sectionContent(markdown, heading) {
+  const lines = markdown.split(/\r?\n/);
+  const headingPattern = new RegExp(`^##\\s+${heading}\\s*$`);
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (start < 0) return "";
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index++) {
+    if (/^#{1,2}\s+/.test(lines[index].trim())) {
+      end = index;
+      break;
+    }
+  }
+  // 子見出しそのものだけでは内容にならない。本文または箇条書きで具体化を要求する。
+  return lines.slice(start + 1, end)
+    .filter((line) => !/^#{1,6}\s+/.test(line.trim()))
+    .join("\n")
+    .trim();
 }
 
 function sourceLink(value, index) {
@@ -180,8 +222,8 @@ export function validatePullRequestSubmission(body) {
   if (!REPOSITORY.test(repository)) throw new Error("repository is invalid.");
   return {
     repository,
-    title: text(body.title, "title", 256),
-    body: typeof body.body === "string" && body.body.length <= 65_536 ? body.body : "",
+    title: japaneseText(body.title, "PR title", 256),
+    body: prContent(body.body),
     sourceLinks: sourceLinks(body.source_links),
     author: text(body.author ?? "local", "author", 100),
     // `draft` is accepted for compatibility with older clients, but local PRs

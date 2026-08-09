@@ -23,11 +23,11 @@ const BODY = `
       <h2>ローカル PR 作成</h2>
       <form id="pr-form">
         <div class="field"><label for="pr-repository">repository</label><select id="pr-repository" required></select></div>
-        <div class="field"><label for="pr-title">title</label><input id="pr-title" required></div>
+        <div class="field"><label for="pr-title">PR タイトル</label><input id="pr-title" required></div>
         <div class="field"><label for="pr-head">head branch</label><input id="pr-head" required placeholder="feat/local-change"></div>
         <div class="field"><label for="pr-author">author</label><input id="pr-author" required value="local"></div>
         <div class="field"><label for="pr-labels">labels (comma separated)</label><input id="pr-labels"></div>
-        <div class="field"><label for="pr-body">body</label><textarea id="pr-body"></textarea></div>
+        <div class="field"><label for="pr-body">PR内容</label><textarea id="pr-body" required placeholder="## 実装内容&#10;- 実装したことを具体的に記載する。&#10;&#10;## 受け入れ条件&#10;- 満たすべき条件を具体的に記載する。"></textarea></div>
         <button type="submit">PR を登録して審査開始</button>
         <p id="pr-message" role="status"></p>
       </form>

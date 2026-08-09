@@ -5,6 +5,24 @@ import {
   validateRepositoryRegistration,
 } from "../src/local-contracts.mjs";
 
+const PR_CONTENT = [
+  "## 実装内容",
+  "- ローカル PR の内容契約を検証する。",
+  "",
+  "## 受け入れ条件",
+  "- 不十分な内容ではテストを開始しない。",
+].join("\n");
+
+function pullRequestInput(overrides = {}) {
+  return {
+    repository: "LUDIARS/Revisor",
+    title: "ローカル PR の内容契約を追加する",
+    body: PR_CONTENT,
+    head_ref: "feat/local-pr",
+    ...overrides,
+  };
+}
+
 test("requires test cases at repository registration", () => {
   assert.throws(() => validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
@@ -37,15 +55,12 @@ test("normalizes argv test cases and local PR metadata", () => {
     runtime: false,
     always: false,
   });
-  assert.deepEqual(validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  assert.deepEqual(validatePullRequestSubmission(pullRequestInput({
     draft: true,
-  }), {
+  })), {
     repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    body: "",
+    title: "ローカル PR の内容契約を追加する",
+    body: PR_CONTENT,
     sourceLinks: [],
     author: "local",
     draft: false,
@@ -60,10 +75,7 @@ test("normalizes argv test cases and local PR metadata", () => {
 });
 
 test("validates Discord and Slack source links", () => {
-  const submission = validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  const submission = validatePullRequestSubmission(pullRequestInput({
     source_links: [
       {
         platform: "discord",
@@ -76,67 +88,63 @@ test("validates Discord and Slack source links", () => {
         url: "https://workspace.slack.com/archives/C1/p123",
       },
     ],
-  });
+  }));
   assert.equal(submission.sourceLinks.length, 2);
-  assert.throws(() => validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  assert.throws(() => validatePullRequestSubmission(pullRequestInput({
     source_links: [{ platform: "discord", label: "wrong", url: "https://example.com/1" }],
-  }), /does not identify a source message/);
-  assert.throws(() => validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  })), /does not identify a source message/);
+  assert.throws(() => validatePullRequestSubmission(pullRequestInput({
     source_links: [{
       platform: "discord",
       label: "credential-bearing link",
       url: "https://token@discord.com/channels/1/2/3",
     }],
-  }), /must not contain credentials/);
-  assert.throws(() => validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  })), /must not contain credentials/);
+  assert.throws(() => validatePullRequestSubmission(pullRequestInput({
     source_links: [{
       platform: "slack",
       label: "token in query",
       url: "https://workspace.slack.com/archives/C1/p123?access_token=value",
     }],
-  }), /must not contain credentials/);
-  assert.throws(() => validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  })), /must not contain credentials/);
+  assert.throws(() => validatePullRequestSubmission(pullRequestInput({
     source_links: [{
       platform: "slack",
       label: "redirect endpoint",
       url: "https://workspace.slack.com/redirect?url=https://example.com",
     }],
-  }), /does not identify a source message/);
+  })), /does not identify a source message/);
 });
 
 test("keeps the submitting session so the review verdict can reach it", () => {
-  const submission = validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  const submission = validatePullRequestSubmission(pullRequestInput({
     session_id: "lictor-abc",
-  });
+  }));
   assert.equal(submission.sessionId, "lictor-abc");
   // 宛先は任意項目なので、空欄で埋めてくるクライアントの投稿ごと落とさない。
-  assert.equal(validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  assert.equal(validatePullRequestSubmission(pullRequestInput({
     session_id: "  ",
-  }).sessionId, null);
-  assert.throws(() => validatePullRequestSubmission({
-    repository: "LUDIARS/Revisor",
-    title: "Local PR",
-    head_ref: "feat/local-pr",
+  })).sessionId, null);
+  assert.throws(() => validatePullRequestSubmission(pullRequestInput({
     session_id: "x".repeat(129),
-  }));
+  })));
+});
+
+test("rejects non-Japanese or incomplete PR content before it reaches review", () => {
+  assert.throws(
+    () => validatePullRequestSubmission(pullRequestInput({ title: "Add PR contract" })),
+    /PR title must be written in Japanese/,
+  );
+  assert.throws(
+    () => validatePullRequestSubmission(pullRequestInput({ body: "## 実装内容\n- 内容" })),
+    /requires a non-empty '## 受け入れ条件' section/,
+  );
+  assert.throws(
+    () => validatePullRequestSubmission(pullRequestInput({
+      body: "## 実装内容\n- implement contract\n\n## 受け入れ条件\n- satisfy requirements",
+    })),
+    /must be written in Japanese/,
+  );
 });
 
 test("rejects shell metacharacters in registered test argv", () => {
