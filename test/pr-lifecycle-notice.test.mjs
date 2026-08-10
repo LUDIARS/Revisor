@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   notifyPullRequestLifecycle,
   pullRequestLifecycleMessage,
+  pullRequestLifecycleTone,
 } from "../src/pr-lifecycle-notice.mjs";
 
 function pr(overrides = {}) {
@@ -131,4 +132,38 @@ test("does not publish a lifecycle notice for a sessionless PR", async () => {
   });
   assert.equal(sent, false);
   assert.equal(called, false);
+});
+
+test("a closed PR notice names the reason and says it was not merged", () => {
+  const text = pullRequestLifecycleMessage("closed", pr({
+    status: "closed",
+    checkStatus: "test_ok",
+    closeReason: "内容は既に main に入っている",
+  }));
+  assert.match(text, /取り下げ/);
+  assert.match(text, /LUDIARS\/Revisor#12/);
+  assert.match(text, /理由: 内容は既に main に入っている/);
+  // マージ通知と取り違えられると、入ったものと入らなかったものが区別できなくなる。
+  assert.match(text, /マージされていません/);
+});
+
+test("a closed PR notice is explicit when no reason was recorded", () => {
+  const text = pullRequestLifecycleMessage("closed", pr({ status: "closed", closeReason: null }));
+  assert.match(text, /理由の記録はありません/);
+  assert.equal(pullRequestLifecycleTone("closed"), "warn");
+});
+
+test("a close reason cannot smuggle mentions, local details, or credentials into Discord", () => {
+  const credential = ["ghp", "_", "a".repeat(24)].join("");
+  const text = pullRequestLifecycleMessage("closed", pr({
+    status: "closed",
+    closeReason: `@everyone /home/someone/secret/notes.md を参照\nhttp://127.0.0.1:11111/private\n${credential}`,
+  }));
+  assert.doesNotMatch(text, /@everyone/);
+  assert.doesNotMatch(text, /home\/someone/);
+  assert.doesNotMatch(text, /127\.0\.0\.1/);
+  assert.match(text, /\[redacted: private endpoint\]/);
+  assert.doesNotMatch(text, new RegExp(credential));
+  assert.match(text, /\[redacted: github-token\]/);
+  assert.match(text, /…\/notes\.md/);
 });

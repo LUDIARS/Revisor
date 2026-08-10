@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   cleanupWorktrees,
   diffPatchId,
+  git as revisorGit,
   NO_LFS_FILTER_ARGS,
   prepareLocalWorktrees,
 } from "../src/workspace.mjs";
@@ -49,6 +50,33 @@ function repositoryFixture() {
 function request(fixture) {
   return { headRef: "feat/local", baseRef: "main", headSha: fixture.headSha };
 }
+
+test("the shared git boundary preserves a working LFS clean filter", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-workspace-lfs-filter-"));
+  const repoPath = join(directory, "Product");
+  const filterPath = join(directory, "clean-filter.mjs");
+  const init = spawnSync("git", ["init", repoPath], { encoding: "utf8", windowsHide: true });
+  if (init.status !== 0) throw new Error(init.stderr || init.stdout);
+  try {
+    writeFileSync(
+      filterPath,
+      "let value = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (chunk) => { value += chunk; }); process.stdin.on('end', () => process.stdout.write(`filtered:${value}`));\n",
+      "utf8",
+    );
+    writeFileSync(join(repoPath, ".gitattributes"), "*.bin filter=lfs -text\n", "utf8");
+    writeFileSync(join(repoPath, "asset.bin"), "asset content\n", "utf8");
+    const commandPath = filterPath.replaceAll("\\", "/");
+    git(repoPath, "config", "filter.lfs.process", "");
+    git(repoPath, "config", "filter.lfs.clean", `node \"${commandPath}\"`);
+    git(repoPath, "config", "filter.lfs.required", "true");
+
+    await revisorGit(repoPath, ["add", "asset.bin"]);
+
+    assert.equal(git(repoPath, "show", ":asset.bin"), "filtered:asset content");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("cleanup removes both disposable worktrees and the temp root", async () => {
   const fixture = repositoryFixture();

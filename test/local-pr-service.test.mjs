@@ -1417,10 +1417,12 @@ test("the sweep re-reads each candidate and skips one merged mid-sweep", async (
 test("closes an open local PR and keeps it out of the test workflow", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const announced = [];
   const service = new LocalPrService({
     store,
     queue: { async submit() { return { id: "job-1" }; } },
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    notifyLifecycle: async (event, record) => { announced.push({ event, status: record.status }); },
   });
   try {
     await service.registerRepository({
@@ -1445,12 +1447,14 @@ test("closes an open local PR and keeps it out of the test workflow", async () =
     store.updatePullRequest(pullRequest.id, { checkStatus: "test_ok" });
     assert.equal(service.testWorkflowProducts().length, 1);
 
-    const closed = service.closePullRequest(pullRequest.id, { reason: " 別経路で main へ入った " });
+    const closed = await service.closePullRequest(pullRequest.id, { reason: " 別経路で main へ入った " });
     assert.equal(closed.status, "closed");
     assert.equal(closed.closeReason, "別経路で main へ入った");
     assert.ok(closed.closedAt);
     // 取り下げた PR は「テストして」と人間へ出し続けない。
     assert.deepEqual(service.testWorkflowProducts(), []);
+    // 通知が無いと、 PR を待っている人と Discord スレッドが開いたまま取り残される。
+    assert.deepEqual(announced, [{ event: "created", status: "open" }, { event: "closed", status: "closed" }]);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -1484,7 +1488,7 @@ test("a closed local PR can be neither merged, re-queued, nor closed twice", asy
       headRef: "feat/local",
     });
     store.updatePullRequest(pullRequest.id, { checkStatus: "test_ok" });
-    service.closePullRequest(pullRequest.id);
+    await service.closePullRequest(pullRequest.id);
 
     await assert.rejects(
       () => service.mergePullRequest(pullRequest.id),
@@ -1494,7 +1498,7 @@ test("a closed local PR can be neither merged, re-queued, nor closed twice", asy
       () => service.retryPullRequest(pullRequest.id),
       /Only an open local PR can be reviewed again/,
     );
-    assert.throws(
+    await assert.rejects(
       () => service.closePullRequest(pullRequest.id),
       /Only an open local PR can be closed/,
     );
@@ -1533,7 +1537,7 @@ test("refuses to close a local PR while its review is in flight", async () => {
     // 提出直後は queued。 走っているワーカーが結果を書き戻すので、 ここで closed に
     // しても上書きされて open へ戻ったように見えるだけになる。
     assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
-    assert.throws(
+    await assert.rejects(
       () => service.closePullRequest(pullRequest.id),
       /A local PR under review cannot be closed/,
     );
@@ -1587,7 +1591,7 @@ test("refuses to close a local PR while its squash merge is in flight", async ()
 
     const merging = service.mergePullRequest(pullRequest.id);
     await mergeStarted;
-    assert.throws(
+    await assert.rejects(
       () => service.closePullRequest(pullRequest.id),
       /A local PR being merged cannot be closed/,
     );
@@ -1599,7 +1603,7 @@ test("refuses to close a local PR while its squash merge is in flight", async ()
     assert.equal(after.status, "merged");
     assert.equal(after.closeReason, undefined);
     // マージが終われば締め出しは解ける (終局済みとして拒否される)。
-    assert.throws(
+    await assert.rejects(
       () => service.closePullRequest(pullRequest.id),
       /Only an open local PR can be closed/,
     );

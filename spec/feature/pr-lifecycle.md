@@ -13,6 +13,7 @@ related:
   - ../architecture.md
   - ./human-decision-board.md
   - ./crash-recovery.md
+  - ./pr-lifecycle-notice.md
   - ./review-gate.md
 updated: 2026-08-10
 ---
@@ -54,13 +55,15 @@ PR や、案ごと捨てた PR が `open` のまま残ると:
 - squash マージが走っている間も拒否する
   (`A local PR being merged cannot be closed; ...`)。同じ理由の別の形で、こちらは
   被害が重い: squash はマージ前セキュリティスキャンを含んで数分かかる一方
-  `closePullRequest` は同期で status を書くので、その最中に取り下げを通すと、
+  `closePullRequest` の status 書き込みは同期なので、その最中に取り下げを通すと、
   完了した merge が `status: "merged"` を書き戻して取り下げを踏み潰し、
   取り下げたはずの変更が board から消えないまま main へ入る。締め出す区間は
   squash 開始から status 書き込み完了まで
 - 理由は**任意**。文字列で中身があるものだけ `closeReason` に trim して記録し、
   それ以外は `null`。終局の可否を理由の有無で左右しない
 - `closedAt` に ISO 時刻を書く
+- state 書き込み後に `closed` lifecycle event を追記し、session 紐付きなら
+  Concordia の報告 channel へ best-effort で通知する。通知失敗は取り下げを巻き戻さない
 
 `mergePullRequest` も同じ理由で `open` 以外を拒否する
 (`Only an open local PR can be merged (it is '<status>').`)。`closed` を通すと、
@@ -124,7 +127,7 @@ POST /api/local-prs/:id/close  UI セッション
 `test/local-pr-service.test.mjs`:
 
 - `test_ok` の PR を取り下げると `closed` + `closeReason` (trim 済み) + `closedAt`
-  になり、`testWorkflowProducts()` から消えること
+  になり、`testWorkflowProducts()` から消え、`closed` 通知が 1 通出ること
 - 取り下げ済みは merge も retry も 2 度目の close も拒否されること
 - 審査中 (`queued`) の close が拒否されること
 - squash マージ中の close が拒否され、マージが踏み潰されずに `merged` になること

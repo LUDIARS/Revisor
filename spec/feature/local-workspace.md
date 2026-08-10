@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "local-workspace — 使い捨て worktree とローカル ref の境界"
-description: "review 元と Revisor 所有 merge repository の上で使い捨て detached worktree を作り、使い終えたら外す境界。ref / SHA 文字列の安全性検証、差分内容の指紋、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。"
+description: "review 元と Revisor 所有 merge repository の上で使い捨て detached worktree を作り、使い終えたら外す境界。ref / SHA 文字列の安全性検証、LFS フィルタ境界、差分内容の指紋、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。"
 service: revisor
 domain: local-workspace
 tags:
@@ -9,12 +9,13 @@ tags:
   - ref-validation
   - patch-id
   - cleanup
+  - git-lfs
 status: implemented
 related:
   - ./security-scan.md
   - ./merge-risk.md
   - ../architecture.md
-updated: 2026-08-08
+updated: 2026-08-10
 ---
 
 # local-workspace — 使い捨て worktree とローカル ref の境界
@@ -61,6 +62,20 @@ identifier を返す。rebase で SHA だけが変わったヘッドは指紋が
 worktree だけを読む。作業中のローカル worktree を触らないので、レビュー対象は投稿時点の
 SHA に固定され、利用者の未コミット作業も壊さない。生成途中で失敗した場合も、その場で
 cleanup してから例外を投げる。
+
+### LFS フィルタの境界
+
+使い捨て review / integration worktree は実 LFS blob を必要とせず、pointer file の
+内容だけを扱う。そのため worktree 生成とその中の squash / commit は
+`gitWithoutLfs` を明示的に使う。この無効化を共通の `git` へ混ぜない。共通境界で
+無条件に clean filter を外すと、reviewer autofix の `git add` などが実 blob を
+LFS pointer へ変換せず commit しうるため。
+
+監視中の実 checkout の status / fast-forward は、設定済み LFS filter をまず使う。
+filter 実行ファイルが無いことを示す失敗に限り、filter を外して 1 回再試行する。
+既に実 blob が materialize された checkout では、filter 無しの status がそれを
+tracked change と検出するので前進を拒否する。pointer file のみを持つ LFS 未導入環境では、
+pointer のまま安全に fast-forward できる。
 
 ## cleanup の best-effort 範囲
 

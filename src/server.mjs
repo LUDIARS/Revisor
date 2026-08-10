@@ -130,7 +130,7 @@ export function createRequestHandler({
       const close = /^\/v1\/local-prs\/([^/]+)\/close$/.exec(url.pathname);
       if (request.method === "POST" && close) {
         const body = await readJsonBody(request).catch(() => null);
-        const pullRequest = localPrService.closePullRequest(
+        const pullRequest = await localPrService.closePullRequest(
           decodeURIComponent(close[1]),
           { reason: typeof body?.reason === "string" ? body.reason : null },
         );

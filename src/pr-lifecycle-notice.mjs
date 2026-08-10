@@ -1,16 +1,18 @@
+import { redactSecretLines } from "./leakage.mjs";
+
 const MAX_LISTED_REASONS = 5;
 
 // 見えない文字をソースへ直接書くと編集や lint で消えるので、コードポイントで持つ。
 const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
 
 /**
- * PR タイトル・ブランチ名・失敗理由は投稿者が自由に決められる文字列で、この channel は
- * そのまま Discord へ配送される。 `@everyone` / `@here` / `<@id>` は本文に書かれている
- * だけで通知が飛ぶので、埋め込む前にゼロ幅スペースで無害化する。 改行も畳んで、1 行 1
- * 情報という体裁を差し込みで崩されないようにする。
+ * PR タイトル・ブランチ名・失敗/取り下げ理由は投稿者が自由に決められる文字列で、
+ * この channel はそのまま Discord へ配送される。資格情報をマスクし、
+ * `@everyone` / `@here` / `<@id>` はゼロ幅スペースで無害化する。改行も畳んで、
+ * 1 行 1 情報という体裁を差し込みで崩されないようにする。
  */
 function plain(value) {
-  return String(value ?? "")
+  return redactSecretLines(String(value ?? ""))
     .replace(/\s+/g, " ")
     .trim()
     .replace(/@(everyone|here)/gi, `@${ZERO_WIDTH_SPACE}$1`)
@@ -34,12 +36,17 @@ function titleLine(pullRequest) {
 const ABSOLUTE_PATH =
   /(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<=^|[\s"'(=])\/)(?:[^\s"'(),;]*[\\/])+([^\s"'(),;]*)/g;
 
+const PRIVATE_ENDPOINT =
+  /\bhttps?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|\[::1\]|[^\s/:]+\.local)(?::\d+)?(?=\/|\s|$)(?:\/[^\s]*)?/gi;
+
 function withoutLocalPaths(value) {
   return String(value ?? "").replace(ABSOLUTE_PATH, (_match, tail) => `…/${tail}`);
 }
 
 function reasonText(value) {
-  return plain(withoutLocalPaths(value));
+  const withoutPrivateEndpoints = String(value ?? "")
+    .replace(PRIVATE_ENDPOINT, "[redacted: private endpoint]");
+  return plain(withoutLocalPaths(withoutPrivateEndpoints));
 }
 
 function summarizeReasons(pullRequest) {
@@ -91,6 +98,15 @@ export function pullRequestLifecycleMessage(event, pullRequest) {
     }
     if (pullRequest.releaseTag) lines.push(`リリース: ${plain(pullRequest.releaseTag)}`);
     if (pullRequest.releaseUrl) lines.push(plain(pullRequest.releaseUrl));
+  } else if (event === "closed") {
+    // 取り下げは「直せば通る」状態と見分けが付かないまま board から消える。 誰かが待って
+    // いる可能性があるので、消えた事実と理由を必ず出す。
+    lines.push(`🗑️ Revisor PR 取り下げ: ${label}`);
+    if (title) lines.push(title);
+    lines.push(`${plain(pullRequest.headRef)} → ${plain(pullRequest.baseRef)}`);
+    const reason = reasonText(pullRequest.closeReason);
+    lines.push(reason ? `理由: ${reason.slice(0, 300)}` : "理由の記録はありません。");
+    lines.push("マージされていません。ブランチは残っています。");
   } else if (event === "bypass_merged") {
     // 審査を通さずに入った変更は、通知の時点で通常のマージと区別できなければ、
     // 後追いレビューの起点を人間が見失う。
@@ -115,6 +131,8 @@ export function pullRequestLifecycleTone(event) {
   if (event === "merged") return "merged";
   if (event === "bypass_merged") return "warn";
   if (event === "review_queued") return "warn";
+  // 取り下げは失敗ではないが、 マージされずに終わった終局なので idle とは区別する。
+  if (event === "closed") return "warn";
   return "idle";
 }
 

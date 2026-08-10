@@ -6,6 +6,17 @@ import { runProcess } from "./process.mjs";
 const SAFE_REF = /^(?![-/])(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
 const SAFE_SHA = /^[0-9a-fA-F]{7,64}$/;
 
+// A repository whose `.gitattributes` declares `filter=lfs` routes checked-out
+// content through the `filter.lfs.process` (or smudge/clean) command that
+// `git lfs install` configures. Disposable Revisor worktrees only need the
+// pointer-file bytes, so callers that own such a worktree may opt out explicitly.
+export const NO_LFS_FILTER_ARGS = [
+  "-c", "filter.lfs.process=",
+  "-c", "filter.lfs.smudge=",
+  "-c", "filter.lfs.clean=",
+  "-c", "filter.lfs.required=false",
+];
+
 export function assertSafeRef(value, label) {
   if (!SAFE_REF.test(value)) throw new Error(`${label} is not a safe Git ref`);
 }
@@ -19,15 +30,10 @@ function assertSafeSha(value, label) {
   }
 }
 
-export async function git(cwd, args, timeoutMs = 120_000) {
-  // LFS フィルタの無効化は呼び出しごとに足すものではない。 worktree add と
-  // merge --squash だけ塞いでも、 commit・status・merge と個別に落ち続ける
-  // (どれも index を洗い直す過程でフィルタを起動する)。 Revisor の git 操作は
-  // すべてレビュー用の使い捨てコピーに対する読み書きで、 実 LFS blob を必要と
-  // しないので、 この境界でまとめて無効化する。
+async function runGit(cwd, args, timeoutMs, configArgs = []) {
   const result = await runProcess({
     command: "git",
-    args: [...NO_LFS_FILTER_ARGS, ...args],
+    args: [...configArgs, ...args],
     cwd,
     timeoutMs,
   });
@@ -37,21 +43,31 @@ export async function git(cwd, args, timeoutMs = 120_000) {
   return result.stdout.trim();
 }
 
-// A repository whose `.gitattributes` declares `filter=lfs` routes checked-out
-// content through the `filter.lfs.process` (or smudge/clean) command that
-// `git lfs install` configures. When git-lfs is not installed, launching that
-// filter fails and Git aborts the whole `worktree add` with a non-zero exit,
-// even though a plain checkout without LFS content would have worked fine.
-// These worktrees are disposable internal copies Revisor only reads for
-// review/diff/merge; they never need real LFS blobs, so blanking the filter
-// commands lets Git fall back to the raw pointer-file content instead of
-// failing.
-export const NO_LFS_FILTER_ARGS = [
-  "-c", "filter.lfs.process=",
-  "-c", "filter.lfs.smudge=",
-  "-c", "filter.lfs.clean=",
-  "-c", "filter.lfs.required=false",
-];
+export function git(cwd, args, timeoutMs = 120_000) {
+  return runGit(cwd, args, timeoutMs);
+}
+
+export function gitWithoutLfs(cwd, args, timeoutMs = 120_000) {
+  return runGit(cwd, args, timeoutMs, NO_LFS_FILTER_ARGS);
+}
+
+function isUnavailableLfsFilter(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:git-lfs|git lfs|filter(?:\.|\s+|['"])+lfs|lfs filter)/i.test(message)
+    && /(?:cannot|failed|fork|no such file|not found|not installed|not recognized|unable)/i.test(message);
+}
+
+async function gitWithLfsFallback(cwd, args, timeoutMs = 120_000) {
+  try {
+    return await git(cwd, args, timeoutMs);
+  } catch (error) {
+    if (!isUnavailableLfsFilter(error)) throw error;
+    // A monitored checkout may have a working LFS filter and materialized
+    // blobs, so never disable it pre-emptively. Falling back only after the
+    // configured filter is unavailable preserves normal clean/smudge semantics.
+    return gitWithoutLfs(cwd, args, timeoutMs);
+  }
+}
 
 function parseWorktreeList(output) {
   return output
@@ -78,7 +94,7 @@ function parseWorktreeList(output) {
 // fast-forward is affected. A changed submodule *pointer* is a tracked change
 // and is still reported.
 async function trackedChanges(worktreePath) {
-  return git(worktreePath, [
+  return gitWithLfsFallback(worktreePath, [
     "status",
     "--porcelain",
     "--untracked-files=no",
@@ -134,8 +150,8 @@ export async function prepareLocalWorktrees(repoPath, request) {
     mergeBase: inspected.mergeBase,
   };
   try {
-    await git(repoPath, ["worktree", "add", "--detach", worktrees.head, inspected.headSha]);
-    await git(repoPath, ["worktree", "add", "--detach", worktrees.base, inspected.mergeBase]);
+    await gitWithoutLfs(repoPath, ["worktree", "add", "--detach", worktrees.head, inspected.headSha]);
+    await gitWithoutLfs(repoPath, ["worktree", "add", "--detach", worktrees.base, inspected.mergeBase]);
     return worktrees;
   } catch (error) {
     await cleanupWorktrees(repoPath, worktrees);
@@ -199,7 +215,7 @@ export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha) {
   if (status) {
     throw new Error(`Cannot advance '${ref}'; its worktree is no longer clean.`);
   }
-  await git(checkedOutAt, ["merge", "--ff-only", nextSha]);
+  await gitWithLfsFallback(checkedOutAt, ["merge", "--ff-only", nextSha]);
   return nextSha;
 }
 

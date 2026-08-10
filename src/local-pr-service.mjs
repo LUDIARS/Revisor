@@ -253,7 +253,7 @@ export class LocalPrService {
    * 見えるだけ、 マージなら取り下げたはずの変更がそのまま main へ入る。
    * 理由は必須にしない代わりに、 渡されたものは記録して後から辿れるようにする。
    */
-  closePullRequest(id, { reason = null } = {}) {
+  async closePullRequest(id, { reason = null } = {}) {
     // 同一プロセスの async merge が lock を持っているとき同期 wait すると、merge の
     // 継続自体を event loop ごと止める。既存の in-memory guard で即座に拒否する。
     if (this.#merging.has(id)) {
@@ -274,9 +274,11 @@ export class LocalPrService {
         closeReason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
       });
     };
-    return this.lifecycleLockPath
+    const closed = this.lifecycleLockPath
       ? withFileLockSync(this.lifecycleLockPath, close, { label: "close-pull-request" })
       : close();
+    await this.#announceLifecycle("closed", closed);
+    return closed;
   }
 
   /**

@@ -268,7 +268,7 @@ export function createUiRequestHandler({
       if (request.method === "POST" && close) {
         const body = await readJsonBody(request).catch(() => null);
         sendJson(response, 200, {
-          pullRequest: localPrService.closePullRequest(decodeURIComponent(close[1]), {
+          pullRequest: await localPrService.closePullRequest(decodeURIComponent(close[1]), {
             reason: typeof body?.reason === "string" ? body.reason : null,
           }),
         });

@@ -196,7 +196,8 @@ the sole owner of the terminal completion notice after the final state exists.
 
 Every session-bound local PR lifecycle transition that changes what an operator
 needs to know is also published to Concordia's shared `報告` chat channel: PR
-creation, review pass or failure, and merge. Revisor propagates the submitting
+creation, review queue/pass/failure, normal or bypass merge, and close without merge. Revisor
+propagates the submitting
 Concordia session ID because Discord egress rejects unbound chat rows; CLI and
 script submissions without a session stay silent instead of claiming a Discord
 delivery that cannot occur. Concordia owns Discord credentials and delivers that
@@ -204,13 +205,14 @@ channel to the Discord `houkoku` surface, so Revisor never stores a Discord toke
 or webhook URL. Review completion and merge remain separate events, including
 when automatic merge follows a passing review immediately.
 
-Lifecycle messages contain only PR metadata and bounded failure reasons. They do
-not include diffs, test output, leakage values, or credentials. Titles, branch
-names, and failure reasons are author-controlled, so they are flattened to a
-single line and their `@everyone` / `@here` / `<@id>` mention syntax is
+Lifecycle messages contain only PR metadata and bounded failure or close
+reasons. They do not include diffs, test output, leakage values, or credentials.
+Titles, branch names, failure reasons, and close reasons are author-controlled,
+so credentials are redacted, the remaining text is flattened to a single line,
+and its `@everyone` / `@here` / `<@id>` mention syntax is
 neutralized before it reaches a Discord-backed channel. Delivery is best-effort:
 a missing Excubitor catalog entry, unavailable Concordia, disabled Discord
-egress, or rejected post never changes PR admission, review, or merge. A single
+egress, or rejected post never changes PR admission, review, merge, or close. A single
 transition never produces two notices: an unresumable interrupted review is
 announced once, by the recovery pass, with its final reason.
 

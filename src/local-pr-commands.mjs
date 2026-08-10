@@ -126,7 +126,7 @@ export async function runLocalPrCommand(args, {
   }
   if (scope === "pr" && action === "close") {
     const pullRequest = findByNumber(store, rest[0]);
-    const closed = localPrService.closePullRequest(pullRequest.id, {
+    const closed = await localPrService.closePullRequest(pullRequest.id, {
       reason: option(args, "--reason"),
     });
     write(json ? closed : `Closed ${summarize(closed)}`);

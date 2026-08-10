@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "pr-lifecycle-notice — PR ライフサイクルの外向き通知"
-description: "session 紐付きの local PR について、発行・審査通過・審査失敗・マージを Concordia の共有『報告』channel へ best-effort で公開する。Concordia が Discord egress を担うため Revisor は webhook/token を持たない。通知内容は PR メタデータと打ち切った失敗理由のみで、差分・テスト出力・leakage 値は含めない。"
+description: "session 紐付きの local PR について、発行・審査通過・審査失敗・マージ・取り下げを Concordia の共有『報告』channel へ best-effort で公開する。Concordia が Discord egress を担うため Revisor は webhook/token を持たない。通知内容は PR メタデータと打ち切った理由のみで、差分・テスト出力・leakage 値は含めない。"
 service: revisor
 domain: pr-notification
 tags:
@@ -13,7 +13,7 @@ status: implemented
 related:
   - ../architecture.md
   - ./crash-recovery.md
-updated: 2026-08-04
+updated: 2026-08-10
 ---
 
 # pr-lifecycle-notice — PR ライフサイクルの外向き通知
@@ -43,8 +43,11 @@ local PR は Revisor のダッシュボードにしか現れない。 投稿元�
 | --- | --- | --- |
 | `created` | `LocalPrService.submitPullRequest` | PR 発行、レビュー受付 |
 | `review_passed` | `LocalPrReporter.completed` (conclusion=success) | Open / Test OK |
+| `review_queued` | `LocalPrService.retryPullRequest` | 再審査のキュー投入 |
 | `review_failed` | `LocalPrReporter.completed` (それ以外) / `.failed` / `#enqueue` 失敗 / 復旧不能 | 理由付きの審査失敗 |
 | `merged` | `LocalPrService.mergePullRequest` | squash merge 完了 |
+| `bypass_merged` | `LocalPrService.mergePullRequest` (CLI bypass) | 審査を通さない復旧マージ。後追いレビューが必要 |
+| `closed` | `LocalPrService.closePullRequest` | マージせず取り下げ。理由の有無とブランチが残ることを明記 |
 
 **審査結果とマージは別イベント。** 自動マージが審査通過の直後に走る場合でも、
 `review_passed` を先に出してから `merged` を出す (`completed` は auto-merge の**前**に
@@ -64,20 +67,25 @@ Concordia の Discord egress は **session 紐付きの無い chat row を拒否
 ## 5. 内容の境界
 
 - 含める: repository#number、タイトル (200 字まで)、head → base、マージコミット先頭
-  12 文字、失敗理由 (1 件 300 字 × 最大 5 件 + 「ほか N 件」)
-- 含めない: 差分、テスト出力、leakage の一致値、資格情報、ローカルパス
-- 失敗理由は worker の例外文 (`git ... failed: <stderr>`、spawn の ENOENT 等) をそのまま
+  12 文字、失敗理由 (1 件 300 字 × 最大 5 件 + 「ほか N 件」)、取り下げ理由 (300 字)
+- 含めない: 差分、テスト出力、leakage の一致値、資格情報、ローカルパス、
+  失敗/取り下げ理由内の private endpoint
+- 失敗理由と取り下げ理由は資格情報を行単位でマスクする。失敗理由は worker の例外文
+  (`git ... failed: <stderr>`、spawn の ENOENT 等) を
   受け取るので、絶対パス (`C:\...` / `/home/...`) はディレクトリ部分を落として末尾の
   名前だけ残す。 ワークステーションのホームディレクトリ名は個人情報で、Discord へ出す
   対象ではないため。 相対パスは診断に要るのでそのまま残す。
-- 投稿者が自由に決められる文字列 (タイトル / ブランチ名 / 失敗理由) は埋め込み前に
+- 投稿者が自由に決められる文字列 (タイトル / ブランチ名 / 失敗理由 / 取り下げ理由) は
+  埋め込み前に
   正規化する: 空白を 1 文字に畳み、`@everyone` / `@here` / `<@id>` はゼロ幅スペースで
   無害化する。 Revisor の通知が Discord の一斉メンションに使われないため。
+- 失敗/取り下げ理由の loopback / RFC 1918 / `.local` URL は
+  `[redacted: private endpoint]` に置き換える。公開 URL と相対パスは診断のため残す。
 
 ## 6. best-effort
 
 catalog に Concordia が無い / Concordia が落ちている / Discord egress が無効 / 投稿が
-拒否された — いずれも PR の受理・審査・マージを変えない。 通知は呼び出し側
+拒否された — いずれも PR の受理・審査・マージ・取り下げを変えない。 通知は呼び出し側
 (`LocalPrService.#announceLifecycle`, `LocalPrReporter.#announceReviewStatus`) で
 必ず catch する。 reporter が throw するとキューは worker 失敗として扱うため、
 ここで漏らすと通知障害が審査結果を変えてしまう。
@@ -87,12 +95,13 @@ token を一切保持しない。
 
 ## 7. テスト
 
-- `test/pr-lifecycle-notice.test.mjs`: 4 イベントの本文、失敗理由の打ち切り、
+- `test/pr-lifecycle-notice.test.mjs`: lifecycle 本文と `closed` の warn tone、失敗理由の打ち切り、
   worker error の優先、メンション/改行の無害化、絶対パスの除去 (相対パスは保持)、
-  `報告` channel への送信、session 無しの無送信
+  取り下げ理由の資格情報 / private endpoint マスク、`報告` channel への送信、
+  session 無しの無送信
 - `test/concordia-context.test.mjs`: `POST /v1/chat` の body 形、session 無しで
   transport を呼ばないこと
-- `test/local-pr-service.test.mjs`: created → merged の順、復旧不能 PR が
+- `test/local-pr-service.test.mjs`: created → merged / closed の順、復旧不能 PR が
   `review_failed` を 1 通だけ最終理由で出すこと
 - `test/review-completion-notice.test.mjs`: `review_passed` → auto-merge → 終局通知の
   順序、action_required と worker 失敗の両方が `review_failed` になること、
