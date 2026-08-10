@@ -139,6 +139,65 @@ test("squash merges LFS-tracked changes without a local git-lfs binary", async (
   }
 });
 
+test("a refused merge names the observed state and the recorded reasons", async () => {
+  const fixture = repositoryFixture();
+  try {
+    await assert.rejects(
+      squashMergeLocalPullRequest(mergeInput(fixture, {
+        checkStatus: "action_required",
+        reasons: ["The head conflicts with the current 'main'; rebase the branch and submit a new review."],
+      })),
+      (error) => {
+        // 状態名だけだと「審査は通ったのに何を直せばいいのか」が呼び出し側に伝わらない。
+        assert.match(error.message, /checkStatus='action_required'/);
+        assert.match(error.message, /status='open'/);
+        assert.match(error.message, /head conflicts with the current 'main'/);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("a refused merge without recorded reasons still names the observed state", async () => {
+  const fixture = repositoryFixture();
+  try {
+    await assert.rejects(
+      squashMergeLocalPullRequest(mergeInput(fixture, { status: "closed", reasons: [] })),
+      (error) => {
+        assert.match(error.message, /status='closed'/);
+        assert.doesNotMatch(error.message, /Recorded reasons/);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("a refused merge redacts and flattens recorded reasons before returning them", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const token = `ghp_${"a".repeat(32)}`;
+    await assert.rejects(
+      squashMergeLocalPullRequest(mergeInput(fixture, {
+        checkStatus: "action_required\nforged detail",
+        reasons: [`first line\nsecond line: ${token}`],
+      })),
+      (error) => {
+        assert.match(error.message, /checkStatus='action_required forged detail'/);
+        assert.match(error.message, /\[redacted: github-token\]/);
+        assert.doesNotMatch(error.message, /ghp_/);
+        assert.doesNotMatch(error.message, /\n/);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("legacy draft metadata does not block a Test OK merge", async () => {
   const fixture = repositoryFixture();
   try {

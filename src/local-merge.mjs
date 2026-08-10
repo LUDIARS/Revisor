@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { readSettings } from "./config.mjs";
 import { BaseMovedError, MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { reconcileBaseWithRemote } from "./base-reconcile.mjs";
+import { redactSecretLines } from "./leakage.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
 import {
   findPreparedMerge,
@@ -21,6 +22,54 @@ import {
   git,
   NO_LFS_FILTER_ARGS,
 } from "./workspace.mjs";
+
+const MAX_MERGE_REFUSAL_REASONS = 5;
+const MAX_MERGE_REFUSAL_REASON_LENGTH = 300;
+const MAX_MERGE_REFUSAL_STATE_LENGTH = 100;
+
+function mergeRefusalText(value, maximumLength) {
+  return redactSecretLines(String(value ?? ""))
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maximumLength);
+}
+
+/**
+ * Explain a merge refusal with the evidence the caller needs to act on.
+ *
+ * Naming only the required state ("Only an Open / Test OK local PR can be
+ * squash merged.") tells the caller nothing about what to fix: the review may
+ * have passed while the head went on to conflict with a moved base, and the
+ * recorded `reasons` are the only place that distinction lives. Callers see
+ * this string and nothing else — Concordia's merge endpoint relays it verbatim
+ * — so the actual state and the recorded reasons belong in it. Those values
+ * are still bounded, flattened, and redacted before entering the message.
+ */
+function mergeStateRefusal(pullRequest) {
+  const recordedReasons = Array.isArray(pullRequest?.reasons)
+    ? pullRequest.reasons.filter((reason) => typeof reason === "string")
+    : [];
+  const safeReasons = recordedReasons
+    .map((reason) => mergeRefusalText(reason, MAX_MERGE_REFUSAL_REASON_LENGTH))
+    .filter(Boolean);
+  const reasons = safeReasons.slice(0, MAX_MERGE_REFUSAL_REASONS);
+  const omittedReasonCount = safeReasons.length - reasons.length;
+  const status = mergeRefusalText(
+    pullRequest?.status,
+    MAX_MERGE_REFUSAL_STATE_LENGTH,
+  ) || "unknown";
+  const checkStatus = mergeRefusalText(
+    pullRequest?.checkStatus,
+    MAX_MERGE_REFUSAL_STATE_LENGTH,
+  ) || "unknown";
+  const observed = `status='${status}', checkStatus='${checkStatus}'`;
+  const because = reasons.length > 0
+    ? ` Recorded reasons: ${reasons.join(" / ")}${omittedReasonCount > 0 ? ` / ${omittedReasonCount} more` : ""}`
+    : "";
+  return new Error(
+    `Only an Open / Test OK local PR can be squash merged (${observed}).${because}`,
+  );
+}
 
 function commitMessage(pullRequest) {
   const body = pullRequest.body.trim();
@@ -127,7 +176,7 @@ async function attemptSquashMerge({
   log = (message) => process.stderr.write(`Revisor: ${message}\n`),
 }) {
   if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
-    throw new Error("Only an Open / Test OK local PR can be squash merged.");
+    throw mergeStateRefusal(pullRequest);
   }
   // ベースは審査時の SHA に固定しない。 他 PR のマージで base は常に前進するので、
   // 固定すると 1 本マージするたびに残り全部がマージ不能になる。 進んだ base とは
