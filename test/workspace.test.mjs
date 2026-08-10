@@ -4,10 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { cleanupWorktrees, diffPatchId, prepareLocalWorktrees } from "../src/workspace.mjs";
+import {
+  cleanupWorktrees,
+  diffPatchId,
+  NO_LFS_FILTER_ARGS,
+  prepareLocalWorktrees,
+} from "../src/workspace.mjs";
 
 function git(repoPath, ...args) {
-  const result = spawnSync("git", ["-C", repoPath, ...args], {
+  const result = spawnSync("git", [...NO_LFS_FILTER_ARGS, "-C", repoPath, ...args], {
     encoding: "utf8",
     windowsHide: true,
   });

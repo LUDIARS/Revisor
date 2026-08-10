@@ -18,7 +18,7 @@ import { readGitHubAppCredentials } from "./config.mjs";
 import { GitHubAppClient } from "./github-app.mjs";
 import { githubRemoteUrl, runAuthenticatedGit } from "./authenticated-git.mjs";
 import { RevisorError } from "./errors.mjs";
-import { advanceLocalBranch, cleanupWorktrees, git, NO_LFS_FILTER_ARGS } from "./workspace.mjs";
+import { advanceLocalBranch, cleanupWorktrees, git } from "./workspace.mjs";
 
 async function isAncestor(runGit, rootPath, ancestor, descendant) {
   try {
@@ -86,12 +86,10 @@ export async function reconcileBaseWithRemote({
   const worktrees = { root, head: join(root, "reconcile"), base: join(root, "unused") };
   try {
     await runGit(rootPath, [
-      ...NO_LFS_FILTER_ARGS,
       "worktree", "add", "--detach", worktrees.head, localSha,
     ]);
     try {
       await runGit(worktrees.head, [
-        ...NO_LFS_FILTER_ARGS,
         "-c",
         "user.name=LUDIARS Revisor",
         "-c",

@@ -7,9 +7,15 @@ import test from "node:test";
 import { reconcileBaseWithRemote } from "../src/base-reconcile.mjs";
 import { BaseMovedError, RevisorError } from "../src/errors.mjs";
 import { squashMergeLocalPullRequest } from "../src/local-merge.mjs";
+import { NO_LFS_FILTER_ARGS } from "../src/workspace.mjs";
 
+// フィクスチャ構築は、 この機に git-lfs が入っているかどうかに左右されてはいけない。
+// `.gitattributes` が `filter=lfs` を宣言した時点で、 素の `git add` / `pull` は
+// 開発者の global 設定にある本物の LFS フィルタを起動し、 実在しない OID を取りに
+// ネットワークへ出て失敗する (ssh: Could not resolve host)。 本番と同じやり方で
+// フィルタを空にして、 中身をそのまま記録する。
 function git(repoPath, ...args) {
-  const result = spawnSync("git", ["-C", repoPath, ...args], {
+  const result = spawnSync("git", [...NO_LFS_FILTER_ARGS, "-C", repoPath, ...args], {
     encoding: "utf8",
     windowsHide: true,
   });
@@ -31,7 +37,12 @@ function fixture() {
   git(localPath, "add", ".");
   git(localPath, "commit", "-m", "base");
   const remotePath = join(directory, "GitHub");
-  const clone = spawnSync("git", ["clone", localPath, remotePath], { encoding: "utf8", windowsHide: true });
+  // clone は checkout を伴うので、 ここも本物の LFS smudge を起動させない。
+  const clone = spawnSync(
+    "git",
+    [...NO_LFS_FILTER_ARGS, "clone", localPath, remotePath],
+    { encoding: "utf8", windowsHide: true },
+  );
   if (clone.status !== 0) throw new Error(clone.stderr || clone.stdout);
   git(remotePath, "config", "user.name", "Remote");
   git(remotePath, "config", "user.email", "remote@example.invalid");

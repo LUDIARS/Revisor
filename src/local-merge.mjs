@@ -20,7 +20,6 @@ import {
   cleanupWorktrees,
   diffPatchId,
   git,
-  NO_LFS_FILTER_ARGS,
 } from "./workspace.mjs";
 
 const MAX_MERGE_REFUSAL_REASONS = 5;
@@ -272,14 +271,12 @@ async function attemptSquashMerge({
   };
   try {
     await git(repository.rootPath, [
-      ...NO_LFS_FILTER_ARGS,
       "worktree", "add", "--detach", worktrees.head, baseSha,
     ]);
     try {
       // A squash merge always stages a single-parent result. Git rejects
       // `--no-ff` together with `--squash`, so do not add a fast-forward flag.
       await git(worktrees.head, [
-        ...NO_LFS_FILTER_ARGS,
         "merge", "--squash", "--no-commit", headSha,
       ]);
     } catch (error) {
@@ -292,6 +289,8 @@ async function attemptSquashMerge({
       }
       throw error;
     }
+    // commit も index を洗い直す過程でフィルタを起動する。 worktree add と
+    // merge --squash だけ無効化しても、 最後のこの 1 本で git-lfs 不在に落ちる。
     await git(worktrees.head, [
       "-c",
       "user.name=LUDIARS Revisor",

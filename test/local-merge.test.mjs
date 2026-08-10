@@ -7,9 +7,15 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { MergeConflictError, StaleReviewError } from "../src/errors.mjs";
 import { squashMergeLocalPullRequest } from "../src/local-merge.mjs";
+import { NO_LFS_FILTER_ARGS } from "../src/workspace.mjs";
 
+// フィクスチャ構築は、 この機に git-lfs が入っているかどうかに左右されてはいけない。
+// `.gitattributes` が `filter=lfs` を宣言した時点で、 素の `git add` / `checkout` は
+// 開発者の global 設定にある本物の LFS フィルタを起動し、 実在しない OID を取りに
+// ネットワークへ出て失敗する (ssh: Could not resolve host)。 本番と同じやり方で
+// フィルタを空にして、 中身をそのまま記録する。
 function git(repoPath, ...args) {
-  const result = spawnSync("git", ["-C", repoPath, ...args], {
+  const result = spawnSync("git", [...NO_LFS_FILTER_ARGS, "-C", repoPath, ...args], {
     encoding: "utf8",
     windowsHide: true,
   });

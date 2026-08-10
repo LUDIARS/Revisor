@@ -20,7 +20,17 @@ function assertSafeSha(value, label) {
 }
 
 export async function git(cwd, args, timeoutMs = 120_000) {
-  const result = await runProcess({ command: "git", args, cwd, timeoutMs });
+  // LFS フィルタの無効化は呼び出しごとに足すものではない。 worktree add と
+  // merge --squash だけ塞いでも、 commit・status・merge と個別に落ち続ける
+  // (どれも index を洗い直す過程でフィルタを起動する)。 Revisor の git 操作は
+  // すべてレビュー用の使い捨てコピーに対する読み書きで、 実 LFS blob を必要と
+  // しないので、 この境界でまとめて無効化する。
+  const result = await runProcess({
+    command: "git",
+    args: [...NO_LFS_FILTER_ARGS, ...args],
+    cwd,
+    timeoutMs,
+  });
   if (!result.ok) {
     throw new Error(`git ${args[0]} failed: ${result.stderr.trim() || result.stdout.trim()}`);
   }
@@ -124,8 +134,8 @@ export async function prepareLocalWorktrees(repoPath, request) {
     mergeBase: inspected.mergeBase,
   };
   try {
-    await git(repoPath, [...NO_LFS_FILTER_ARGS, "worktree", "add", "--detach", worktrees.head, inspected.headSha]);
-    await git(repoPath, [...NO_LFS_FILTER_ARGS, "worktree", "add", "--detach", worktrees.base, inspected.mergeBase]);
+    await git(repoPath, ["worktree", "add", "--detach", worktrees.head, inspected.headSha]);
+    await git(repoPath, ["worktree", "add", "--detach", worktrees.base, inspected.mergeBase]);
     return worktrees;
   } catch (error) {
     await cleanupWorktrees(repoPath, worktrees);
