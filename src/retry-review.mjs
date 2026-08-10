@@ -31,14 +31,14 @@ export function retryReviewScope(pullRequest, currentHeadSha) {
   const sameReviewedHead = typeof pullRequest?.reviewedHeadSha === "string"
     && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase();
   if (pullRequest?.intentReviewCompleted !== true
+      || !sameReviewedHead
       || reasons.some((reason) => REVIEW_REASON.test(reason))
       || REVIEW_ERROR.test(String(pullRequest?.error ?? ""))) {
     return { reviewMode: "full", verificationTargets: [] };
   }
   const verificationTargets = failedVerificationTargets(pullRequest);
   const previousPlanWasAdvised = pullRequest?.reviewPlan?.source === "advised";
-  const reuseFailedTargets = sameReviewedHead
-    && !previousPlanWasAdvised
+  const reuseFailedTargets = !previousPlanWasAdvised
     && verificationTargets.length > 0;
   return {
     reviewMode: "verification",

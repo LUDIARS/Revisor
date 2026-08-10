@@ -115,7 +115,7 @@ export class PrReviewQueue {
     job.updatedAt = this.now();
     try {
       await this.reporter.running(job);
-      job.result = await this.run(job.request);
+      job.result = await this.run({ ...job.request, jobId: job.id });
       job.status = "completed";
       job.updatedAt = this.now();
       await this.reporter.completed(job);

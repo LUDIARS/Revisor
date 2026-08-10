@@ -149,6 +149,31 @@ export class LocalPrReporter {
     });
   }
 
+  /**
+   * Checkpoint written the moment the intent review succeeds, ahead of the
+   * remaining stages. `checkStatus` deliberately stays `running`: the review is
+   * not finished, only the part that cannot be repeated cheaply. If the process
+   * dies after this point, `retryReviewScope` sees a completed intent review for
+   * this head and resumes in verification mode instead of paying for the model
+   * review again (spec/feature/crash-recovery.md).
+   */
+  async intentReviewCompleted({ localPrId, jobId, reviewedHeadSha, reviewer, plan }) {
+    const pullRequest = this.store.getPullRequest(localPrId);
+    if (
+      !pullRequest
+      || (jobId != null && pullRequest.jobId !== jobId)
+      || String(pullRequest.headSha).toLowerCase() !== String(reviewedHeadSha).toLowerCase()
+    ) {
+      return;
+    }
+    this.store.updatePullRequest(localPrId, {
+      intentReviewCompleted: true,
+      reviewedHeadSha,
+      reviewer: reviewer ?? null,
+      reviewPlan: plan ?? null,
+    });
+  }
+
   async completed(job) {
     // 追い越された job の結果は診断用にキュー側の履歴へ残るだけで、PR の現在の
     // 判定にも通知にも反映しない。 自動マージも同様: 古いヘッドの test_ok で

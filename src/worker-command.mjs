@@ -39,6 +39,10 @@ export async function runReviewWorker({
       cwd,
       env,
       scheduleWork: (work, options) => stageWorkers.run(work, options),
+      // 短命ワーカーは審査の途中で落ちうる。 intent review が成功した時点で
+      // チェックポイントを書いておくと、 次のワーカーが verification から再開でき、
+      // 最も高いモデルレビューをやり直さずに済む (spec/feature/crash-recovery.md)。
+      onIntentReviewCompleted: (checkpoint) => context.reporter.intentReviewCompleted(checkpoint),
     });
     // 初期化と presence 取得が済んでから ready を返す。 spawn イベントだけでは、
     // 親が先に終わった Windows の子プロセスが実行可能になった証拠にならない。

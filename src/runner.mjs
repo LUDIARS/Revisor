@@ -507,6 +507,24 @@ export async function runPartialVerification({
   };
 }
 
+/**
+ * Records the intent-review checkpoint. A failure here must not fail the
+ * review: the checkpoint only saves work on a later run, and losing it costs
+ * one more model review. It is reported rather than swallowed so a permanently
+ * broken checkpoint does not stay invisible.
+ */
+async function reportIntentReviewCompleted(report, checkpoint) {
+  if (typeof report !== "function") return;
+  try {
+    await report(checkpoint);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `Revisor could not record the intent-review checkpoint for ${checkpoint.localPrId}: ${reason}\n`,
+    );
+  }
+}
+
 export function createPrReviewRunner({
   cwd,
   env = process.env,
@@ -520,6 +538,10 @@ export function createPrReviewRunner({
   scheduleWork = null,
   mutateWorktrees = withWorktreeMutationLock,
   transport = fetch,
+  // Checkpoint for the one stage that cannot be repeated cheaply. Called the
+  // moment the intent review succeeds so that a crash later in the pipeline
+  // does not throw that work away (spec/feature/crash-recovery.md).
+  onIntentReviewCompleted = null,
 } = {}) {
   return async (request) => {
     if (request.repository !== request.headRepository) {
@@ -934,6 +956,17 @@ export function createPrReviewRunner({
       if (!reviewResult.ok) {
         throw new Error("Opposite-model reviewer failed; output was withheld from the Check Run.");
       }
+      // Persist the checkpoint before the remaining stages run. Everything after
+      // this point is cheap to repeat; this is not. Recording it here is what
+      // lets an interrupted review resume in verification mode instead of
+      // paying for the model review again after every restart.
+      await reportIntentReviewCompleted(onIntentReviewCompleted, {
+        localPrId: request.localPrId,
+        jobId: request.jobId,
+        reviewedHeadSha: request.headSha,
+        reviewer,
+        plan,
+      });
       // The expensive intent review is deliberately single-shot. Failing tests
       // enter the narrow autofix loop and never trigger another general review.
       // Anatomia is rerun once after all edits, below, so the final domain and

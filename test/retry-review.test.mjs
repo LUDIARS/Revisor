@@ -24,14 +24,14 @@ test("reruns intent review when the reviewer rejected the prior result", () => {
   }, HEAD).reviewMode, "full");
 });
 
-test("reuses completed intent review after the head changes", () => {
+test("reruns intent review after the head changes", () => {
   assert.deepEqual(retryReviewScope({
     reviewedHeadSha: HEAD,
     intentReviewCompleted: true,
     reasons: ["Anatomia gate(s) did not pass: duplication"],
   }, "b".repeat(40)), {
-    reviewMode: "verification",
-    verificationTargets: ["leakage", "tests", "anatomia", "security"],
+    reviewMode: "full",
+    verificationTargets: [],
   });
 });
 

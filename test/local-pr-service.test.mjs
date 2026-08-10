@@ -262,7 +262,7 @@ test("a Genius decision cannot acknowledge an additional merge blocker", async (
   }
 });
 
-test("re-queues a reviewed local PR against a moved head without repeating intent review", async () => {
+test("re-queues a reviewed local PR against a moved head with a full intent review", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
   const submitted = [];
@@ -313,12 +313,9 @@ test("re-queues a reviewed local PR against a moved head without repeating inten
     const retried = await service.retryPullRequest(pullRequest.id);
     assert.equal(submitted.length, 2);
     assert.equal(submitted[1].headSha, movedHead);
-    assert.equal(submitted[1].reviewMode, "verification");
-    assert.deepEqual(
-      submitted[1].verificationTargets,
-      ["leakage", "tests", "anatomia", "security"],
-    );
-    assert.equal(submitted[1].previousReview.reviewedHeadSha, pullRequest.headSha);
+    assert.equal(submitted[1].reviewMode, "full");
+    assert.deepEqual(submitted[1].verificationTargets, []);
+    assert.equal(submitted[1].previousReview, null);
     assert.equal(retried.headSha, movedHead);
     assert.equal(retried.checkStatus, "queued");
     assert.equal(retried.error, null);

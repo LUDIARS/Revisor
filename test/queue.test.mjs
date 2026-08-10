@@ -101,3 +101,24 @@ test("a forced submission re-runs a settled head but never doubles an active one
   assert.equal(runs.length, 2);
   releases.splice(0).forEach((release) => release());
 });
+
+test("passes the active job identity to the runner", async () => {
+  let received;
+  const queue = new PrReviewQueue(async (submission) => {
+    received = submission;
+    return { conclusion: "success" };
+  }, {
+    reporter: {
+      async queued() {},
+      async running() {},
+      async completed() {},
+      async failed() {},
+    },
+    createId: () => "job-identity",
+  });
+
+  await queue.submit(request(1));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(received.jobId, "job-identity");
+});

@@ -78,7 +78,47 @@ stdout に要約を、復旧不能分は stderr に 1 行ずつ出す。 結果�
 ワーカープールを閉じてから投げ直す。 起動に失敗しながらポートとワーカープロセスだけ
 残る状態を作らない — アドレス解決失敗と同じ後始末の規約に合わせる。
 
+## 4.1 intent review のチェックポイント (2026-08-09 neco 指示)
+
+再投入したレビューを毎回ゼロからやり直すと、**落ちる間隔がレビュー所要時間より短い間は
+永久に完了しない**。2026-08-09 の実測では review worker 3 に対して待ち 16 件、
+Revisor は 24h で incidents 29 / uptime 62.6%、1 レビュー 20〜30 分だった。
+再投入そのものは正しいが、やり直す範囲が広すぎた。
+
+`retryReviewScope()` は以前から `intentReviewCompleted` と `reviewedHeadSha` を見て
+model review を飛ばす `verification` モードを返せる。欠けていたのは**書き込む時点**で、
+これらは `job.result` から (= job 完走時にだけ) 永続化されていた。途中で落ちると何も
+残らず、次回は必ず `full` に戻っていた。
+
+そこで **intent review が成功した直後にチェックポイントを書く**
+(`LocalPrReporter.intentReviewCompleted`)。
+
+配線は審査を実行する側 — 短命ワーカー (`runReviewWorker`, `src/worker-command.mjs`) が
+`createPrReviewRunner` に `onIntentReviewCompleted` を渡す。 サーバは審査を実行しないので
+ここには関与しない (SPEC-DAEMONLESS-WORKER-DRAIN)。 落ちるのはこのワーカーであり、
+チェックポイントを書く主体と落ちる主体が一致していることが要点。
+
+- 高価で繰り返せないのは model review だけである。その後の段階は安い。
+  この 1 点を先に確定させれば、落ちながらでもレビューは完了に向かう。
+- `checkStatus` は `running` のままにする。レビューは終わっていない。
+  ここで `test_ok` にすると、通っていない段階が通ったように見える。
+- チェックポイントの書き込み失敗はレビューを失敗させない。失うのは次回の節約だけで、
+  代償は model review 1 回分に留まる。ただし無言にはせず stderr に出す。
+- head が変われば従来どおり無効になる (`reviewedHeadSha` の一致判定)。
+  rebase や autofix commit で SHA が動いた内容を、審査済みとして扱わない。
+
+残る 3 段階 (anatomia / registered_tests / security) の段階別再開は
+`spec/tasks/2026-08-09-review-stage-flags.md` の範囲。
+
 ## 5. テスト
+
+`test/intent-review-checkpoint.test.mjs`:
+
+- チェックポイントが `intentReviewCompleted` / `reviewedHeadSha` を書き、
+  `checkStatus` は `running` のままであること
+- チェックポイント後に中断された PR が `verification` で再開されること
+- チェックポイント前に中断された PR は `full` のままであること
+- head が変わったらチェックポイントが効かないこと
 
 `test/local-pr-service.test.mjs`:
 
