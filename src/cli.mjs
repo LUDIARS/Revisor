@@ -8,13 +8,28 @@ import {
 } from "./config.mjs";
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
+import { option, runLocalPrCommand } from "./local-pr-commands.mjs";
+import { runReviewWorker } from "./worker-command.mjs";
 import { startRevisor } from "./server.mjs";
 import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 
 function printHelp() {
   process.stdout.write([
     "Usage:",
-    "  revisor serve",
+    "  revisor pr submit --repository <owner/name> --head-ref <branch> --title <text> [--body-file <path>]",
+    "  revisor pr submit --json-file <path>   # same body the HTTP API accepts",
+    "  revisor pr list [--repository <owner/name>] [--json]",
+    "  revisor pr show|retry|close|merge <number> [--reason <text>] [--json]",
+    "  revisor pr merge <number> --bypass --reason <text>   # CLI only: merge without a review",
+    "  revisor pr bypassed [--all] [--json]                 # bypass merges awaiting follow-up review",
+    "  revisor pr bypass-reviewed <number> [--note <text>]",
+    "  revisor repo register --json-file <path>",
+    "  revisor repo list [--json]",
+    "  revisor queue status [--json]",
+    "  revisor sweep [--json]        # auto-merge the Test OK PRs that became mergeable",
+    "  revisor run-worker            # run queued reviews until the queue drains, then exit",
+    "",
+    "  revisor serve                 # optional Web UI; reviews no longer depend on it",
     "  dw ui  # compatibility alias for revisor serve",
     "  revisor config path",
     "  revisor config github-app status",
@@ -46,11 +61,6 @@ function registerShutdown(close) {
   process.once("SIGTERM", shutdown);
 }
 
-function option(args, name) {
-  const index = args.indexOf(name);
-  return index === -1 ? null : args[index + 1] ?? null;
-}
-
 async function readStdin(stream = process.stdin) {
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
@@ -60,6 +70,18 @@ async function readStdin(stream = process.stdin) {
 export async function main(args, { stdin = process.stdin } = {}) {
   if (args.length === 0 || args[0] === "help" || args[0] === "--help") {
     printHelp();
+    return 0;
+  }
+  // 審査キューは記録なので、投入も参照もマージも常駐プロセス無しで完結する。
+  const handled = await runLocalPrCommand(args, { stdin });
+  if (handled !== null) return handled;
+  if (args[0] === "run-worker" && args.length === 1) {
+    const outcome = await runReviewWorker();
+    process.stdout.write(
+      outcome.skipped
+        ? "Revisor worker: another worker is already draining the queue.\n"
+        : `Revisor worker: ${outcome.ran} review(s) completed.\n`,
+    );
     return 0;
   }
   if (args[0] === "config" && args[1] === "path" && args.length === 2) {

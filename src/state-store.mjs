@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { resolveConfigPath } from "./config.mjs";
 import { RevisorError } from "./errors.mjs";
+import { withFileLockSync } from "./file-lock.mjs";
 
 const STATE_PATH_ENV = "REVISOR_STATE_PATH";
 const QA_ELIGIBLE_CHECK_STATUSES = new Set(["queued", "running", "test_ok"]);
@@ -87,6 +88,16 @@ function writeState(path, value) {
   }
 }
 
+/** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
+function mutateState(path, label, run) {
+  return withFileLockSync(path, () => {
+    const state = readState(path);
+    const result = run(state);
+    writeState(path, state);
+    return result;
+  }, { label });
+}
+
 export class LocalPrStore {
   constructor({
     path = resolveStatePath(),
@@ -117,29 +128,28 @@ export class LocalPrStore {
   }
 
   registerRepository(repository) {
-    const state = readState(this.path);
-    const timestamp = this.now();
-    const existing = state.repositories.find((candidate) =>
-      candidate.repository.toLowerCase() === repository.repository.toLowerCase());
-    if (existing) {
-      Object.assign(existing, repository, {
-        id: existing.id,
-        createdAt: existing.createdAt,
+    return mutateState(this.path, "register-repository", (state) => {
+      const timestamp = this.now();
+      const existing = state.repositories.find((candidate) =>
+        candidate.repository.toLowerCase() === repository.repository.toLowerCase());
+      if (existing) {
+        Object.assign(existing, repository, {
+          id: existing.id,
+          createdAt: existing.createdAt,
+          updatedAt: timestamp,
+        });
+        return structuredClone(existing);
+      }
+      const record = {
+        id: this.createId(),
+        ...repository,
+        pushGuard: null,
+        createdAt: timestamp,
         updatedAt: timestamp,
-      });
-      writeState(this.path, state);
-      return structuredClone(existing);
-    }
-    const record = {
-      id: this.createId(),
-      ...repository,
-      pushGuard: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    state.repositories.push(record);
-    writeState(this.path, state);
-    return structuredClone(record);
+      };
+      state.repositories.push(record);
+      return structuredClone(record);
+    });
   }
 
   getRepository(repository) {
@@ -162,30 +172,47 @@ export class LocalPrStore {
   }
 
   createPullRequest(pullRequest) {
-    const state = readState(this.path);
-    const timestamp = this.now();
-    const number = state.nextPullRequestNumber;
-    state.nextPullRequestNumber = number + 1;
-    const record = {
-      id: this.createId(),
-      number,
-      ...pullRequest,
-      status: "open",
-      checkStatus: "queued",
-      mergeCommitSha: null,
-      mergeError: null,
-      lifecycleEvents: [],
-      releaseTag: null,
-      releaseUrl: null,
-      publishedAt: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    state.pullRequests.push(record);
-    writeState(this.path, state);
-    const created = structuredClone(record);
-    this.emitPullRequest("pull_request.created", created);
-    return created;
+    return this.#persistPullRequest(pullRequest, { deduplicate: false }).pullRequest;
+  }
+
+  /** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
+  createPullRequestIfAbsent(pullRequest) {
+    return this.#persistPullRequest(pullRequest, { deduplicate: true });
+  }
+
+  /** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
+  #persistPullRequest(pullRequest, { deduplicate }) {
+    const outcome = mutateState(this.path, "create-pull-request", (state) => {
+      if (deduplicate) {
+        const existing = state.pullRequests.find((candidate) =>
+          candidate.status === "open"
+          && candidate.repository.toLowerCase() === pullRequest.repository.toLowerCase()
+          && candidate.headSha.toLowerCase() === pullRequest.headSha.toLowerCase());
+        if (existing) return { pullRequest: structuredClone(existing), created: false };
+      }
+      const timestamp = this.now();
+      const number = state.nextPullRequestNumber;
+      state.nextPullRequestNumber = number + 1;
+      const record = {
+        id: this.createId(),
+        number,
+        ...pullRequest,
+        status: "open",
+        checkStatus: "queued",
+        mergeCommitSha: null,
+        mergeError: null,
+        lifecycleEvents: [],
+        releaseTag: null,
+        releaseUrl: null,
+        publishedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      state.pullRequests.push(record);
+      return { pullRequest: structuredClone(record), created: true };
+    });
+    if (outcome.created) this.emitPullRequest("pull_request.created", outcome.pullRequest);
+    return outcome;
   }
 
   getPullRequest(id) {
@@ -207,46 +234,55 @@ export class LocalPrStore {
   }
 
   updatePullRequest(id, patch) {
-    const state = readState(this.path);
-    const record = state.pullRequests.find((candidate) => candidate.id === id);
-    if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
-    Object.assign(record, patch, { id: record.id, updatedAt: this.now() });
-    writeState(this.path, state);
-    const updated = structuredClone(record);
-    this.emitPullRequest("pull_request.updated", updated);
-    return updated;
+    return this.updatePullRequestWith(id, () => patch);
+  }
+
+  /** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
+  updatePullRequestWith(id, createPatch) {
+    const outcome = mutateState(this.path, "update-pull-request", (state) => {
+      const record = state.pullRequests.find((candidate) => candidate.id === id);
+      if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
+      const patch = createPatch(structuredClone(record));
+      if (!patch || Object.keys(patch).length === 0) {
+        return { pullRequest: structuredClone(record), updated: false };
+      }
+      Object.assign(record, patch, { id: record.id, updatedAt: this.now() });
+      return { pullRequest: structuredClone(record), updated: true };
+    });
+    if (outcome.updated) this.emitPullRequest("pull_request.updated", outcome.pullRequest);
+    return outcome.pullRequest;
   }
 
   appendPullRequestEvent(id, event) {
-    const state = readState(this.path);
-    const record = state.pullRequests.find((candidate) => candidate.id === id);
-    if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
-    const lifecycleEvents = Array.isArray(record.lifecycleEvents)
-      ? record.lifecycleEvents
-      : [];
-    lifecycleEvents.push({
-      event: String(event.event),
-      message: String(event.message),
-      tone: String(event.tone ?? "idle"),
-      at: this.now(),
+    const updated = mutateState(this.path, "append-pull-request-event", (state) => {
+      const record = state.pullRequests.find((candidate) => candidate.id === id);
+      if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
+      const lifecycleEvents = Array.isArray(record.lifecycleEvents)
+        ? record.lifecycleEvents
+        : [];
+      lifecycleEvents.push({
+        event: String(event.event),
+        message: String(event.message),
+        tone: String(event.tone ?? "idle"),
+        at: this.now(),
+      });
+      record.lifecycleEvents = lifecycleEvents.slice(-MAX_PULL_REQUEST_EVENTS);
+      record.updatedAt = this.now();
+      return structuredClone(record);
     });
-    record.lifecycleEvents = lifecycleEvents.slice(-MAX_PULL_REQUEST_EVENTS);
-    record.updatedAt = this.now();
-    writeState(this.path, state);
-    const updated = structuredClone(record);
     this.emitPullRequest("pull_request.updated", updated);
     return updated;
   }
 
   updatePushGuard(repository, pushGuard) {
-    const state = readState(this.path);
-    const record = state.repositories.find((candidate) =>
-      candidate.repository.toLowerCase() === repository.toLowerCase());
-    if (!record) throw new RevisorError(`Repository '${repository}' is not registered.`);
-    record.pushGuard = pushGuard;
-    record.updatedAt = this.now();
-    writeState(this.path, state);
-    return structuredClone(record);
+    return mutateState(this.path, "update-push-guard", (state) => {
+      const record = state.repositories.find((candidate) =>
+        candidate.repository.toLowerCase() === repository.toLowerCase());
+      if (!record) throw new RevisorError(`Repository '${repository}' is not registered.`);
+      record.pushGuard = pushGuard;
+      record.updatedAt = this.now();
+      return structuredClone(record);
+    });
   }
 
   testWorkflowProducts() {

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { autoMergeDecision, autoMergeRecord } from "./auto-merge.mjs";
 import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
+import { withFileLock, withFileLockSync } from "./file-lock.mjs";
 import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
 import {
@@ -99,6 +100,7 @@ export class LocalPrService {
     this.cliPath = cliPath;
     this.notifyLifecycle = notifyLifecycle;
     this.publicationCoordinator = publicationCoordinator;
+    this.lifecycleLockPath = store.path ? `${store.path}.lifecycle` : null;
     // Read on every decision, not cached: moving the accepted risk threshold has
     // to re-colour and re-sort the dashboard without restarting the service.
     this.loadSettings = loadSettings;
@@ -145,6 +147,43 @@ export class LocalPrService {
     return this.store.getRepository(repository);
   }
 
+  /** @implements SPEC-DAEMONLESS-PERSISTENT-QUEUE */
+  async #reuseSubmittedPullRequest(existing, submission, repository) {
+    // 同一 head の再投稿は既存レビューに相乗りする。 その既存 PR がまだ終局して
+    // いないのに宛先を持たないと (CLI 投稿の後にセッションが投げ直した等)、
+    // 投げ直した側は永久に来ない完了通知を待つことになるので、ここで宛先を
+    // 引き継ぐ。 既に宛先がある場合は奪わない (通知は 1 レビュー 1 通)。
+    const submissionPatch = (current) => {
+      const inFlight = current.checkStatus === "queued" || current.checkStatus === "running";
+      if (!inFlight) return null;
+      const patch = {};
+      if (submission.sessionId && !current.sessionId) patch.sessionId = submission.sessionId;
+      const knownSourceUrls = new Set(
+        (current.sourceLinks ?? []).map((link) => link.url),
+      );
+      const newSourceLinks = (submission.sourceLinks ?? []).filter((link) =>
+        !knownSourceUrls.has(link.url));
+      if (newSourceLinks.length > 0) {
+        patch.sourceLinks = [...(current.sourceLinks ?? []), ...newSourceLinks];
+        patch.body = appendSourceLinks(current.body, newSourceLinks);
+      }
+      return patch;
+    };
+    let reused;
+    if (typeof this.store.updatePullRequestWith === "function") {
+      reused = this.store.updatePullRequestWith(existing.id, submissionPatch);
+    } else {
+      const patch = submissionPatch(existing);
+      reused = patch && Object.keys(patch).length > 0
+        ? this.store.updatePullRequest(existing.id, patch)
+        : existing;
+    }
+    // state 作成後・jobId 記録前に提出プロセスが落ちても、再投稿で queue を補修する。
+    // enqueue は同じ (repo, number, head) を再利用するので、既存 job があっても二重実行しない。
+    const inFlight = reused.checkStatus === "queued" || reused.checkStatus === "running";
+    return inFlight && !reused.jobId ? this.#enqueue(repository, reused) : reused;
+  }
+
   async submitPullRequest(submission) {
     const repository = this.store.getRepository(submission.repository);
     if (!repository) {
@@ -166,31 +205,8 @@ export class LocalPrService {
       repository.repository,
       refs.headSha,
     );
-    if (existing) {
-      // 同一 head の再投稿は既存レビューに相乗りする。 その既存 PR がまだ終局して
-      // いないのに宛先を持たないと (CLI 投稿の後にセッションが投げ直した等)、
-      // 投げ直した側は永久に来ない完了通知を待つことになるので、ここで宛先を
-      // 引き継ぐ。 既に宛先がある場合は奪わない (通知は 1 レビュー 1 通)。
-      const inFlight = existing.checkStatus === "queued" || existing.checkStatus === "running";
-      if (inFlight) {
-        const patch = {};
-        if (submission.sessionId && !existing.sessionId) patch.sessionId = submission.sessionId;
-        const knownSourceUrls = new Set(
-          (existing.sourceLinks ?? []).map((link) => link.url),
-        );
-        const newSourceLinks = (submission.sourceLinks ?? []).filter((link) =>
-          !knownSourceUrls.has(link.url));
-        if (newSourceLinks.length > 0) {
-          patch.sourceLinks = [...(existing.sourceLinks ?? []), ...newSourceLinks];
-          patch.body = appendSourceLinks(existing.body, newSourceLinks);
-        }
-        if (Object.keys(patch).length > 0) {
-          return this.store.updatePullRequest(existing.id, patch);
-        }
-      }
-      return existing;
-    }
-    const pullRequest = this.store.createPullRequest({
+    if (existing) return this.#reuseSubmittedPullRequest(existing, submission, repository);
+    const candidate = {
       repository: repository.repository,
       title: submission.title,
       body: appendSourceLinks(submission.body, submission.sourceLinks),
@@ -205,7 +221,14 @@ export class LocalPrService {
       headSha: refs.headSha,
       baseSha: refs.baseSha,
       sessionId: submission.sessionId ?? null,
-    });
+    };
+    const creation = typeof this.store.createPullRequestIfAbsent === "function"
+      ? this.store.createPullRequestIfAbsent(candidate)
+      : { pullRequest: this.store.createPullRequest(candidate), created: true };
+    if (!creation.created) {
+      return this.#reuseSubmittedPullRequest(creation.pullRequest, submission, repository);
+    }
+    const pullRequest = creation.pullRequest;
     await this.#announceLifecycle("created", pullRequest);
     return this.#enqueue(repository, pullRequest);
   }
@@ -231,22 +254,29 @@ export class LocalPrService {
    * 理由は必須にしない代わりに、 渡されたものは記録して後から辿れるようにする。
    */
   closePullRequest(id, { reason = null } = {}) {
-    const pullRequest = this.store.getPullRequest(id);
-    if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
-    if (pullRequest.status !== "open") {
-      throw new Error(`Only an open local PR can be closed (it is '${pullRequest.status}').`);
-    }
-    if (pullRequest.checkStatus === "queued" || pullRequest.checkStatus === "running") {
-      throw new Error("A local PR under review cannot be closed; wait for the review to finish.");
-    }
+    // 同一プロセスの async merge が lock を持っているとき同期 wait すると、merge の
+    // 継続自体を event loop ごと止める。既存の in-memory guard で即座に拒否する。
     if (this.#merging.has(id)) {
       throw new Error("A local PR being merged cannot be closed; wait for the merge to finish.");
     }
-    return this.store.updatePullRequest(id, {
-      status: "closed",
-      closedAt: new Date().toISOString(),
-      closeReason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
-    });
+    const close = () => {
+      const pullRequest = this.store.getPullRequest(id);
+      if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
+      if (pullRequest.status !== "open") {
+        throw new Error(`Only an open local PR can be closed (it is '${pullRequest.status}').`);
+      }
+      if (pullRequest.checkStatus === "queued" || pullRequest.checkStatus === "running") {
+        throw new Error("A local PR under review cannot be closed; wait for the review to finish.");
+      }
+      return this.store.updatePullRequest(id, {
+        status: "closed",
+        closedAt: new Date().toISOString(),
+        closeReason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+      });
+    };
+    return this.lifecycleLockPath
+      ? withFileLockSync(this.lifecycleLockPath, close, { label: "close-pull-request" })
+      : close();
   }
 
   /**
@@ -403,11 +433,26 @@ export class LocalPrService {
   // `humanApproved` はボードの明示操作かどうか。 既定を true にしているのは、
   // 呼び出し元が HTTP の merge エンドポイント (token / セッション必須) だから。
   // 自動マージ経路だけが false を渡し、 Genius の判断保留を勝手に解けなくする。
-  async mergePullRequest(id, { humanApproved = true } = {}) {
-    return this.publicationCoordinator.run(() => this.#mergeOnce(id, humanApproved));
+  /**
+   * `bypass` は CLI 限定のバイパスマージ。 Revisor / Concordia 自身が落ちて審査を回せない
+   * ときに、まず動作を取り戻すための最小経路で、理由の記録を必須にしている
+   * (復旧後に後追いレビューする対象を、記録から必ず特定できるようにするため)。
+   * HTTP 経路はこの引数を渡さない。
+   */
+  async mergePullRequest(id, { humanApproved = true, bypass = null } = {}) {
+    if (bypass && !String(bypass.reason ?? "").trim()) {
+      throw new Error("A bypass merge requires a reason.");
+    }
+    return this.publicationCoordinator.run(() => this.lifecycleLockPath
+      ? withFileLock(
+        this.lifecycleLockPath,
+        () => this.#mergeOnce(id, humanApproved, bypass),
+        { label: "merge-pull-request" },
+      )
+      : this.#mergeOnce(id, humanApproved, bypass));
   }
 
-  async #mergeOnce(id, humanApproved) {
+  async #mergeOnce(id, humanApproved, bypass = null) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
     // 終局済み (merged / closed) を再びマージしない。 closed を通すと、 取り下げた
@@ -445,6 +490,7 @@ export class LocalPrService {
         pullRequest: approvedPullRequest,
         env: this.env,
         allowSystemFailureOverride,
+        ...(bypass ? { bypass } : {}),
         ...(this.securityScan ? { scan: this.securityScan } : {}),
         ...(this.publisher ? { publish: this.publisher } : {}),
       });
@@ -461,8 +507,22 @@ export class LocalPrService {
         releaseUrl: typeof publication === "object" ? publication.releaseUrl ?? null : null,
         publishedAt: new Date().toISOString(),
         mergedAt: new Date().toISOString(),
+        // 審査を通さずに入った変更は、記録の上で通常のマージと区別できなければならない。
+        // 後追いレビューの対象一覧はこの印から作る。
+        ...(bypass
+          ? {
+            bypassMerge: {
+              reason: String(bypass.reason).trim(),
+              actor: bypass.actor ?? "cli",
+              checkStatusAtMerge: pullRequest.checkStatus,
+              reviewedHeadSha: pullRequest.reviewedHeadSha ?? null,
+              at: new Date().toISOString(),
+              reviewedAfterRecovery: false,
+            },
+          }
+          : {}),
       });
-      await this.#announceLifecycle("merged", merged);
+      await this.#announceLifecycle(bypass ? "bypass_merged" : "merged", merged);
       return merged;
     } catch (error) {
       try {

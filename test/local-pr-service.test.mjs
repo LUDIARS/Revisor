@@ -1122,6 +1122,87 @@ test("stops re-queueing a head that keeps coming back stale", async () => {
   }
 });
 
+// サービス停止中に最小限の対応を通すための CLI 限定経路。 通した事実が記録に残らなければ
+// 後追いレビューの対象を特定できないので、印と理由は必須にする。
+test("a bypass merge lands without a review and is marked for follow-up", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const seen = [];
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async (input) => {
+      seen.push(input);
+      return { mergeCommitSha: "0123456789abcdef0123" };
+    },
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "restore the merge path", body: "", author: "neco",
+      headRef: "feat/local",
+    });
+    // 審査は一度も通っていない。 通常経路ならここで止まる状態。
+    assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
+
+    await assert.rejects(
+      service.mergePullRequest(pullRequest.id, { bypass: { reason: "  " } }),
+      /bypass merge requires a reason/,
+    );
+
+    const merged = await service.mergePullRequest(pullRequest.id, {
+      bypass: { reason: "Revisor 自身が停止しており審査を回せない", actor: "cli" },
+    });
+    assert.equal(merged.status, "merged");
+    assert.equal(seen[0].bypass.reason, "Revisor 自身が停止しており審査を回せない");
+    assert.equal(merged.bypassMerge.checkStatusAtMerge, "queued");
+    assert.equal(merged.bypassMerge.reviewedAfterRecovery, false);
+    assert.equal(merged.bypassMerge.actor, "cli");
+    assert.match(merged.bypassMerge.reason, /審査を回せない/);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("an ordinary merge carries no bypass mark", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async () => ({ mergeCommitSha: "0123456789abcdef0123" }),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "ordinary", body: "", author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: pullRequest.headSha,
+    });
+    const merged = await service.mergePullRequest(pullRequest.id);
+    assert.equal(merged.bypassMerge, undefined);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("the auto-merge sweep ignores legacy draft metadata", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });

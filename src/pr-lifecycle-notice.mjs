@@ -91,6 +91,18 @@ export function pullRequestLifecycleMessage(event, pullRequest) {
     }
     if (pullRequest.releaseTag) lines.push(`リリース: ${plain(pullRequest.releaseTag)}`);
     if (pullRequest.releaseUrl) lines.push(plain(pullRequest.releaseUrl));
+  } else if (event === "bypass_merged") {
+    // 審査を通さずに入った変更は、通知の時点で通常のマージと区別できなければ、
+    // 後追いレビューの起点を人間が見失う。
+    lines.push(`⚠️ Revisor バイパスマージ: ${label}`);
+    if (title) lines.push(title);
+    if (pullRequest.mergeCommitSha) {
+      lines.push(`マージコミット: ${plain(pullRequest.mergeCommitSha).slice(0, 12)}`);
+    }
+    if (pullRequest.bypassMerge?.reason) {
+      lines.push(`理由: ${plain(pullRequest.bypassMerge.reason)}`);
+    }
+    lines.push("審査を通していません。復旧後に後追いレビューが必要です。");
   } else {
     throw new TypeError(`Unknown PR lifecycle event '${event}'.`);
   }
@@ -101,6 +113,7 @@ export function pullRequestLifecycleTone(event) {
   if (event === "review_passed") return "ok";
   if (event === "review_failed") return "bad";
   if (event === "merged") return "merged";
+  if (event === "bypass_merged") return "warn";
   if (event === "review_queued") return "warn";
   return "idle";
 }

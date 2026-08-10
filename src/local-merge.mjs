@@ -174,8 +174,14 @@ async function attemptSquashMerge({
   readPublishedBase = readPublishedBaseSha,
   // stdout は CLI のデータ出力なので、マージ経路の診断行は stderr へ出す。
   log = (message) => process.stderr.write(`Revisor: ${message}\n`),
+  bypass = null,
 }) {
-  if (pullRequest.status !== "open" || pullRequest.checkStatus !== "test_ok") {
+  // バイパスマージ: Revisor / Concordia 自身が落ちていて審査を回せないとき、まず動作を
+  // 取り戻すための CLI 限定経路。 審査「状態」のゲート (Test OK であること・審査済み
+  // ヘッドと一致すること) だけを外し、実 finding を出したセキュリティスキャンは
+  // 通常どおり止める。 外したことは記録に残り、復旧後に後追いレビューできる。
+  // 終局済み (merged / closed) はバイパスでも通さない。
+  if (pullRequest.status !== "open" || (!bypass && pullRequest.checkStatus !== "test_ok")) {
     throw mergeStateRefusal(pullRequest);
   }
   // ベースは審査時の SHA に固定しない。 他 PR のマージで base は常に前進するので、
@@ -192,7 +198,12 @@ async function attemptSquashMerge({
     `refs/heads/${pullRequest.headRef}`,
   ]);
   await assertLocalVersionUnchanged(repository.rootPath, baseSha, headSha);
-  if (headSha.toLowerCase() !== pullRequest.reviewedHeadSha.toLowerCase()) {
+  // バイパスでは審査済みヘッドが存在しないことすらある (一度も審査が通っていない)。
+  // 突き合わせる相手が無い以上、ここは比較そのものを行わない。
+  if (
+    !bypass
+    && headSha.toLowerCase() !== String(pullRequest.reviewedHeadSha).toLowerCase()
+  ) {
     // rebase で SHA だけ変わったヘッドは審査結果を引き継ぐ。差分内容が審査時と
     // 変わっていたら、それは未審査のコードなので再審査へ。
     await assertReviewedContentUnchanged(
@@ -296,7 +307,9 @@ async function attemptSquashMerge({
       baseSha,
       env,
       scan,
-      allowSystemFailureOverride,
+      // スキャン基盤ごと落ちている状況が、そもそもバイパスを使う場面。 実 finding は
+      // バイパスでも止まる (`assertMergeSecurityScan` は findings を無条件で拒否する)。
+      allowSystemFailureOverride: allowSystemFailureOverride || Boolean(bypass),
     });
     await rememberPreparedMerge(repository.rootPath, pullRequest.id, mergeCommitSha);
     const publication = await publish({
