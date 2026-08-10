@@ -15,6 +15,7 @@ import {
 import { scanTextForLeaks } from "./leakage.mjs";
 import { RevisorError } from "./errors.mjs";
 import { prepareLocalVersionFile, writeLocalVersion } from "./local-version.mjs";
+import { resolveVersionRootPath } from "./version-root.mjs";
 import { git } from "./workspace.mjs";
 
 async function releaseChanges(rootPath, previousTag, mergeCommitSha) {
@@ -41,7 +42,9 @@ export async function publishMergedPullRequest({
   env = process.env,
   createClient = (credentials) => new GitHubAppClient(credentials),
 }) {
-  const localVersion = await prepareLocalVersionFile(repository.rootPath);
+  // 版数の正本は登録 checkout。 理由と実害は `version-root.mjs` に書いた。
+  const versionRootPath = resolveVersionRootPath(repository);
+  const localVersion = await prepareLocalVersionFile(versionRootPath);
   const client = createClient(readGitHubAppCredentials(env));
   const token = await client.installationToken(repository.repository);
   const remoteTags = await listRemoteReleaseTags({
@@ -117,7 +120,9 @@ export async function publishMergedPullRequest({
       prerelease: false,
     });
   }
-  await writeLocalVersion(repository.rootPath, tag);
+  // 読み出しと同じ正本へ書き戻す。 隔離リポジトリへ書くと、 次回の publish が
+  // 読む登録 checkout 側が古いままになり、 版数が巻き戻る。
+  await writeLocalVersion(versionRootPath, tag);
   return {
     mergeCommitSha,
     releaseTag: tag,
