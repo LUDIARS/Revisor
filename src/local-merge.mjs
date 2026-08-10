@@ -160,6 +160,20 @@ async function isMergeConflict(worktreePath, message) {
   }
 }
 
+// A retry can run after another process has already advanced the local base
+// beyond the prepared merge.  In that case advancing the branch *to* the
+// prepared commit would be a non-fast-forward update, even though the merge
+// is already present.  Keep the newer local base and only use the normal
+// advance path when the prepared commit is not yet reachable from it.
+async function localBaseContainsPreparedMerge(rootPath, baseSha, mergeCommitSha) {
+  try {
+    const mergeBase = await git(rootPath, ["merge-base", baseSha, mergeCommitSha]);
+    return mergeBase.toLowerCase() === mergeCommitSha.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * squash merge の 1 回分の試行。 GitHub base が独立に進んでいた場合の自動 reconcile
  * (取り込み + 再試行) は wrapper (`squashMergeLocalPullRequest`) が 1 回だけ行う。
@@ -243,12 +257,18 @@ async function attemptSquashMerge({
         preparedTag: prepared.tag,
         env,
       });
-      await advanceLocalBranch(
+      if (!await localBaseContainsPreparedMerge(
         repository.rootPath,
-        pullRequest.baseRef,
         baseSha,
         prepared.mergeCommitSha,
-      );
+      )) {
+        await advanceLocalBranch(
+          repository.rootPath,
+          pullRequest.baseRef,
+          baseSha,
+          prepared.mergeCommitSha,
+        );
+      }
       await forgetPreparedMerge(
         repository.rootPath,
         pullRequest.id,

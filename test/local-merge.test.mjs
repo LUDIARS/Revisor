@@ -389,6 +389,7 @@ test("recovers idempotently when GitHub carried the base beyond the prepared mer
     git(fixture.repoPath, "commit", "-m", "published later");
     const publishedBaseSha = git(fixture.repoPath, "rev-parse", "HEAD");
     git(fixture.repoPath, "checkout", "main");
+    git(fixture.repoPath, "merge", "--ff-only", publishedBaseSha);
 
     const calls = [];
     const publication = await squashMergeLocalPullRequest({
@@ -407,7 +408,8 @@ test("recovers idempotently when GitHub carried the base beyond the prepared mer
     assert.equal(calls.length, 1);
     assert.equal(calls[0].mergeCommitSha, preparedSha);
     assert.equal(publication.mergeCommitSha, preparedSha);
-    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), preparedSha);
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), publishedBaseSha);
+    assert.equal(refSha(fixture.repoPath, preparedRefName(input.pullRequest.id)), null);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
