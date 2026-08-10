@@ -11,6 +11,7 @@ import {
   pullRequestLifecycleTone,
 } from "./pr-lifecycle-notice.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
+import { syncSourceCheckout } from "./source-checkout-sync.mjs";
 import { mergeFailureMessage, writeMergeFailureLog } from "./merge-failure-log.mjs";
 import { prepareMergeRepository } from "./merge-repository.mjs";
 import {
@@ -72,6 +73,7 @@ export class LocalPrService {
     merge = squashMergeLocalPullRequest,
     prepareMerge = prepareMergeRepository,
     logMergeFailure = writeMergeFailureLog,
+    syncCheckout = syncSourceCheckout,
     securityScan,
     publisher,
     prepareVersionFile = prepareRegisteredVersionFile,
@@ -93,6 +95,7 @@ export class LocalPrService {
     this.merge = merge;
     this.prepareMerge = prepareMerge;
     this.logMergeFailure = logMergeFailure;
+    this.syncCheckout = syncCheckout;
     this.securityScan = securityScan;
     this.publisher = publisher;
     this.prepareVersionFile = prepareVersionFile;
@@ -524,6 +527,20 @@ export class LocalPrService {
           }
           : {}),
       });
+      // 隔離 checkout でマージしたので、登録元フォルダの base は取り残される。
+      // 次の PR が「main と競合」になる前に、安全に ff できるときだけ追随させる。
+      // 同期できなくてもマージは成立しているので、理由を残して先へ進む。
+      const sync = await this.syncCheckout({
+        sourceRootPath: repository.rootPath,
+        mergeRootPath,
+        baseRef: pullRequest.baseRef,
+      });
+      if (!sync.synced) {
+        process.stderr.write(
+          `Revisor did not fast-forward ${repository.repository} ${pullRequest.baseRef}`
+          + ` in ${repository.rootPath}: ${sync.reason}\n`,
+        );
+      }
       await this.#announceLifecycle(bypass ? "bypass_merged" : "merged", merged);
       return merged;
     } catch (error) {

@@ -93,19 +93,29 @@ function parseWorktreeList(output) {
 // PR: the parent still records the same commit, so neither the review nor the
 // fast-forward is affected. A changed submodule *pointer* is a tracked change
 // and is still reported.
-async function trackedChanges(worktreePath) {
-  return gitWithLfsFallback(worktreePath, [
+async function trackedChanges(worktreePath, { run = git } = {}) {
+  const args = [
     "status",
     "--porcelain",
     "--untracked-files=no",
     "--ignore-submodules=dirty",
-  ]);
+  ];
+  return run === git ? gitWithLfsFallback(worktreePath, args) : run(worktreePath, args);
 }
 
-async function branchWorktree(repoPath, ref) {
+async function branchWorktree(repoPath, ref, { run = git } = {}) {
   const branch = `refs/heads/${ref}`;
-  const records = parseWorktreeList(await git(repoPath, ["worktree", "list", "--porcelain"]));
+  const records = parseWorktreeList(await run(repoPath, ["worktree", "list", "--porcelain"]));
   return records.find((record) => record.branch === branch)?.worktree ?? null;
+}
+
+export async function isAncestor(repoPath, ancestor, descendant, { run = git } = {}) {
+  try {
+    await run(repoPath, ["merge-base", "--is-ancestor", ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function inspectLocalPullRequest(repoPath, headRef, baseRef) {
@@ -194,16 +204,16 @@ export async function diffPatchId(repoPath, sha, baseSha) {
   return patchId;
 }
 
-export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha) {
+export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha, { run = git } = {}) {
   assertSafeRef(ref, "branch");
-  const current = await git(repoPath, ["rev-parse", "--verify", `refs/heads/${ref}`]);
+  const current = await run(repoPath, ["rev-parse", "--verify", `refs/heads/${ref}`]);
   if (current.toLowerCase() !== expectedSha.toLowerCase()) {
     throw new Error(`Local branch '${ref}' changed while Revisor was working.`);
   }
   if (current.toLowerCase() === nextSha.toLowerCase()) return nextSha;
-  const checkedOutAt = await branchWorktree(repoPath, ref);
+  const checkedOutAt = await branchWorktree(repoPath, ref, { run });
   if (!checkedOutAt) {
-    await git(repoPath, [
+    await run(repoPath, [
       "update-ref",
       `refs/heads/${ref}`,
       nextSha,
@@ -211,11 +221,15 @@ export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha) {
     ]);
     return nextSha;
   }
-  const status = await trackedChanges(checkedOutAt);
+  const status = await trackedChanges(checkedOutAt, { run });
   if (status) {
     throw new Error(`Cannot advance '${ref}'; its worktree is no longer clean.`);
   }
-  await gitWithLfsFallback(checkedOutAt, ["merge", "--ff-only", nextSha]);
+  if (run === git) {
+    await gitWithLfsFallback(checkedOutAt, ["merge", "--ff-only", nextSha]);
+  } else {
+    await run(checkedOutAt, ["merge", "--ff-only", nextSha]);
+  }
   return nextSha;
 }
 

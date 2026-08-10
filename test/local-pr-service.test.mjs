@@ -155,9 +155,9 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     assert.equal(git(mergeRoot, "show", "main:product.txt").replace(/\r\n/g, "\n"), "base\nfeature");
     assert.equal(
       readFileSync(join(fixture.repoPath, "product.txt"), "utf8").replace(/\r\n/g, "\n"),
-      "base\n",
+      "base\nfeature",
     );
-    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "1");
+    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
     assert.equal(git(mergeRoot, "rev-list", "--count", "main"), "2");
     assert.equal(git(mergeRoot, "log", "-1", "--format=%P", "main"), fixture.baseSha);
     // The merge repository deliberately keeps no branch checked out, so HEAD is
@@ -657,7 +657,7 @@ test("merges while untracked files sit in the base worktree", async () => {
     writeFileSync(join(fixture.repoPath, "local-notes.txt"), "scratch\n", "utf8");
     const merged = await service.mergePullRequest(pullRequest.id);
     assert.equal(merged.status, "merged");
-    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "1");
+    assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
     assert.equal(readFileSync(join(fixture.repoPath, "local-notes.txt"), "utf8"), "scratch\n");
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });

@@ -18,16 +18,13 @@ import { readGitHubAppCredentials } from "./config.mjs";
 import { GitHubAppClient } from "./github-app.mjs";
 import { githubRemoteUrl, runAuthenticatedGit } from "./authenticated-git.mjs";
 import { RevisorError } from "./errors.mjs";
-import { advanceLocalBranch, cleanupWorktrees, git, NO_LFS_FILTER_ARGS } from "./workspace.mjs";
-
-async function isAncestor(runGit, rootPath, ancestor, descendant) {
-  try {
-    await runGit(rootPath, ["merge-base", "--is-ancestor", ancestor, descendant]);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import {
+  advanceLocalBranch,
+  cleanupWorktrees,
+  git,
+  isAncestor,
+  NO_LFS_FILTER_ARGS,
+} from "./workspace.mjs";
 
 /**
  * GitHub の base branch をローカル base branch へ取り込む。
@@ -72,11 +69,11 @@ export async function reconcileBaseWithRemote({
   const localSha = await runGit(rootPath, ["rev-parse", "--verify", `refs/heads/${baseRef}`]);
 
   if (remoteSha.toLowerCase() === localSha.toLowerCase()
-    || await isAncestor(runGit, rootPath, remoteSha, localSha)) {
+    || await isAncestor(rootPath, remoteSha, localSha, { run: runGit })) {
     return { action: "none", localSha, remoteSha };
   }
-  if (await isAncestor(runGit, rootPath, localSha, remoteSha)) {
-    await advanceLocalBranch(rootPath, baseRef, localSha, remoteSha);
+  if (await isAncestor(rootPath, localSha, remoteSha, { run: runGit })) {
+    await advanceLocalBranch(rootPath, baseRef, localSha, remoteSha, { run: runGit });
     return { action: "fast_forward", localSha: remoteSha, remoteSha };
   }
 
