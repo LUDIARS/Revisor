@@ -14,7 +14,7 @@ related:
   - ./human-decision-board.md
   - ./crash-recovery.md
   - ./review-gate.md
-updated: 2026-08-06
+updated: 2026-08-10
 ---
 
 # pr-lifecycle — ローカル PR の終局 (マージ / 取り下げ)
@@ -145,6 +145,22 @@ POST /api/local-prs/:id/close  UI セッション
 `test/ui.test.mjs`: board のカードに「取り下げ」ボタンが出て `close` を叩くこと。
 UI は生成した client script の文字列でしか検証できないので、ボタンの表示条件
 (`open` かつ `queued` / `running` 以外) は本体の分岐と合わせて読む必要がある。
+
+## SPEC-STALE-REVIEW-REQUEUE: stale 審査の再投入上限
+
+`StaleReviewError` は、マージ時に審査済み内容と現在ヘッドを安全に比較できないか、
+比較結果が異なるときに発生する。このエラーには判定に使った現在ヘッドを `headSha`
+として付ける。`LocalPrService` は同じ head に対する自動再審査を最大 2 回まで許可し、
+上限を超えたら `action_required` にして人間の判断へ渡す。これにより auto-merge sweep
+が同じ stale な結果を無限に再投入しない。
+
+互換性のため `headSha` を持たない legacy/custom merge 実装の `StaleReviewError` も受け
+入れる。その場合は、マージ試行に入った PR の `headSha` を上限のキーとして使う。
+異なる head は別に数え、head が進んだ正当な再審査を以前の失敗で停止させない。
+
+`LocalPrReporter` は PR の `jobId` と `headSha` の両方に一致する現役 job だけを状態・
+通知・自動マージへ投影する。追い越された job はキュー履歴に残すが、PR の現在の verdict
+を上書きしない。
 
 ## SPEC-LOCAL-PR-SOURCE-LINKS: 投稿元メッセージの保持
 

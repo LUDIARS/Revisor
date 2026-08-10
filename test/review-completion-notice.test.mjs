@@ -32,6 +32,10 @@ function pr(overrides = {}) {
     sessionId: "lictor-abc",
     status: "open",
     checkStatus: "test_ok",
+    // reporter は job の所有権 (jobId + headSha) を見てから書くので、
+    // 現役 job を表す組を fixture に持たせる。
+    headSha: "abc",
+    jobId: "job-1",
     mergeCommitSha: null,
     reasons: [],
     advisories: [],
@@ -136,8 +140,8 @@ test("announces both a completed review and a failed one", async () => {
     },
   });
 
-  await reporter.completed({ request: { localPrId: "pr-1", headSha: "abc" }, result: { conclusion: "success" } });
-  await reporter.failed({ request: { localPrId: "pr-1" }, error: "boom" });
+  await reporter.completed({ id: "job-1", request: { localPrId: "pr-1", headSha: "abc" }, result: { conclusion: "success" } });
+  await reporter.failed({ id: "job-1", request: { localPrId: "pr-1", headSha: "abc" }, error: "boom" });
 
   assert.deepEqual(announced, ["test_ok", "failed"]);
 });
@@ -147,8 +151,8 @@ test("a notification failure never fails the job", async () => {
   const reporter = new LocalPrReporter(makeStore(record), {
     notifyCompletion: () => { throw new Error("concordia down"); },
   });
-  await reporter.completed({ request: { localPrId: "pr-1", headSha: "abc" }, result: { conclusion: "success" } });
-  await reporter.failed({ request: { localPrId: "pr-1" }, error: "boom" });
+  await reporter.completed({ id: "job-1", request: { localPrId: "pr-1", headSha: "abc" }, result: { conclusion: "success" } });
+  await reporter.failed({ id: "job-1", request: { localPrId: "pr-1", headSha: "abc" }, error: "boom" });
 });
 
 test("announces after the automatic merge so the state is final", async () => {
@@ -159,7 +163,7 @@ test("announces after the automatic merge so the state is final", async () => {
     notifyCompletion: () => { order.push("notify"); },
     notifyReviewStatus: (event) => { order.push(event); },
   });
-  await reporter.completed({ request: { localPrId: "pr-1", headSha: "abc" }, result: { conclusion: "success" } });
+  await reporter.completed({ id: "job-1", request: { localPrId: "pr-1", headSha: "abc" }, result: { conclusion: "success" } });
   assert.deepEqual(order, ["review_passed", "auto-merge", "notify"]);
 });
 
@@ -170,10 +174,11 @@ test("announces blocked and worker-failed reviews to the status channel", async 
     notifyReviewStatus: (event) => { statuses.push(event); },
   });
   await reporter.completed({
+    id: "job-1",
     request: { localPrId: "pr-1", headSha: "abc" },
     result: { conclusion: "action_required", reasons: ["unit failed"] },
   });
-  await reporter.failed({ request: { localPrId: "pr-1" }, error: "worker died" });
+  await reporter.failed({ id: "job-1", request: { localPrId: "pr-1", headSha: "abc" }, error: "worker died" });
   assert.deepEqual(statuses, ["review_failed", "review_failed"]);
 });
 

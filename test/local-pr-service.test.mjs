@@ -391,6 +391,89 @@ test("re-reviews an unchanged head and drops the previous outcome", async () => 
   }
 });
 
+// 追い越された job の終局イベントは、その PR の現在の状態にも通知にも触らない。
+// これが漏れると、古いヘッドの結果が現在の審査を上書きし、auto-merge sweep が
+// 60 秒ごとに同じ再審査を積み直す無限ループの起点になる。
+test("a superseded job neither overwrites nor announces the current review", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const runs = [];
+  const releases = [];
+  const announced = [];
+  let supersededHead = null;
+  const queue = new PrReviewQueue(async (request) => {
+    runs.push(request);
+    await new Promise((resolve) => releases.push(resolve));
+    if (request.headSha === supersededHead) {
+      throw new Error(`head SHA changed before review (expected ${supersededHead})`);
+    }
+    return {
+      conclusion: "success",
+      reviewedHeadSha: request.headSha,
+      intentReviewCompleted: true,
+      reviewer: "codex-sol",
+      ci: [],
+    };
+  }, {
+    concurrency: 1,
+    reporter: new LocalPrReporter(store, {
+      notifyCompletion: (pullRequest) => { announced.push(pullRequest.checkStatus); },
+    }),
+  });
+  const service = new LocalPrService({
+    store,
+    queue,
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const submitted = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    supersededHead = submitted.headSha;
+
+    // 最初の job を走らせたまま、ブランチを進めて再投入する。
+    await waitForCheckStatus(store, submitted.id, "running");
+    git(fixture.repoPath, "checkout", "feat/local");
+    writeFileSync(join(fixture.repoPath, "extra.txt"), "feature three\n", "utf8");
+    git(fixture.repoPath, "add", "extra.txt");
+    git(fixture.repoPath, "commit", "-m", "feature three");
+    git(fixture.repoPath, "checkout", "main");
+    const movedHead = git(fixture.repoPath, "rev-parse", "feat/local");
+    const retried = await service.retryPullRequest(submitted.id);
+    assert.equal(retried.headSha, movedHead);
+
+    // 追い越された job をここで失敗させる。 現在の審査 (moved head) は無傷でなければならない。
+    await releaseRun(releases);
+    for (let attempt = 0; attempt < 200 && runs.length < 2; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(runs.length, 2);
+    assert.equal(runs[1].headSha, movedHead);
+    const current = store.getPullRequest(submitted.id);
+    assert.notEqual(current.checkStatus, "failed");
+    assert.equal(current.error, null);
+    assert.equal(current.headSha, movedHead);
+    assert.deepEqual(announced, []);
+
+    // 置き換えた job の結果だけが PR の判定になる。
+    await releaseRun(releases);
+    const settled = await waitForCheckStatus(store, submitted.id, "test_ok");
+    assert.equal(settled.reviewedHeadSha, movedHead);
+    assert.deepEqual(announced, ["test_ok"]);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("refuses to re-queue a merged local PR", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
@@ -969,9 +1052,71 @@ test("a stale review is re-queued automatically on merge", async () => {
     const after = store.getPullRequest(pullRequest.id);
     assert.equal(after.status, "open");
     assert.equal(after.checkStatus, "queued");
+    // A legacy/custom merge can omit StaleReviewError.headSha. The limiter must
+    // still scope that retry to this PR head instead of a shared "unknown" key.
+    assert.deepEqual(after.staleReviewRequeue, {
+      headSha: pullRequest.headSha.toLowerCase(),
+      count: 1,
+    });
     // 再審査は同一 head でも走るよう force 付きで投入される。
     assert.equal(submissions.length, 2);
     assert.deepEqual(submissions[1].options, { force: true });
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// 同じヘッドで stale が返り続けるなら再審査では解けない。 スイープが 60 秒ごとに
+// 同じ再審査を積み直さないよう、上限で人間の判断へ渡す。
+test("stops re-queueing a head that keeps coming back stale", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submissions = [];
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request, options) {
+        submissions.push({ request, options });
+        return { id: `job-${submissions.length}` };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    merge: async ({ pullRequest }) => {
+      throw new StaleReviewError("The head content changed after the review.", {
+        headSha: pullRequest.headSha,
+      });
+    },
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "stale", body: "", author: "neco",
+      headRef: "feat/local",
+    });
+    const restore = () => store.updatePullRequest(pullRequest.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: pullRequest.headSha,
+    });
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      restore();
+      await assert.rejects(service.mergePullRequest(pullRequest.id), StaleReviewError);
+      assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
+    }
+    const requeued = submissions.length;
+
+    restore();
+    await assert.rejects(service.mergePullRequest(pullRequest.id), StaleReviewError);
+    const held = store.getPullRequest(pullRequest.id);
+    assert.equal(held.checkStatus, "action_required");
+    assert.equal(submissions.length, requeued, "the bounded PR must not be re-queued again");
+    assert.match(held.reasons.join(" "), /自動再審査を停止/);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

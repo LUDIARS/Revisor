@@ -29,6 +29,10 @@ import {
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
+// 同じヘッドに対して自動再審査を許す回数。 1 回目は「審査中にヘッドが動いた」等の
+// 正当な取りこぼしを拾うため必要で、それを超えて同じ判定が返るなら再審査では解けない。
+const STALE_REQUEUE_LIMIT = 2;
+
 function reviewRequest(repository, pullRequest, options = {}) {
   return {
     localPrId: pullRequest.id,
@@ -285,6 +289,24 @@ export class LocalPrService {
     return { scanned: interrupted.length, recovered, failed };
   }
 
+  /**
+   * 同一ヘッドに対する自動再審査の回数を数え、上限内なら 1 回分を確保する。
+   *
+   * ヘッドが動いた再審査は正当な作業 (autofix コミット等) なので数え直す。
+   * 数えるのは「同じヘッドのまま stale が返り続ける」場合だけ。
+   */
+  #admitStaleRequeue(id, headSha) {
+    const key = headSha ? String(headSha).toLowerCase() : "unknown";
+    const record = this.store.getPullRequest(id);
+    const previous = record?.staleReviewRequeue ?? null;
+    const count = previous && previous.headSha === key ? previous.count : 0;
+    if (count >= STALE_REQUEUE_LIMIT) return false;
+    this.store.updatePullRequest(id, {
+      staleReviewRequeue: { headSha: key, count: count + 1 },
+    });
+    return true;
+  }
+
   async #requeue(pullRequest, { announceFailure = true } = {}) {
     const repository = this.store.getRepository(pullRequest.repository);
     if (!repository) {
@@ -464,7 +486,26 @@ export class LocalPrService {
         throw error;
       }
       // 審査後に差分内容が変わったヘッドは、新しい内容をそのまま再審査に回す。
+      // ただし同じヘッドで何度も stale 判定が返るのは、再審査では解けない事態
+      // (審査済み SHA の消失など) が起きている証拠なので、そこで自動再投入を打ち切って
+      // 人間の判断へ渡す。 60 秒周期のスイープが同じ再審査を無限に積み続けるのを防ぐ。
       if (error instanceof StaleReviewError) {
+        // Built-in merge checks attach the resolved current head to the error.
+        // Keep injected or legacy merge implementations on the same per-head
+        // policy: they may still throw the older, message-only error shape.
+        // `pullRequest` is the record admitted to this merge attempt, so it is
+        // the safe fallback rather than sharing a global "unknown" counter.
+        if (!this.#admitStaleRequeue(id, error.headSha ?? pullRequest.headSha)) {
+          const held = this.store.updatePullRequest(id, {
+            checkStatus: "action_required",
+            reasons: [
+              `${error.message} 同じヘッドで再審査を ${STALE_REQUEUE_LIMIT} 回試しても解消しないため、`
+              + "自動再審査を停止しました。",
+            ],
+          });
+          await this.#announceLifecycle("review_failed", held);
+          throw error;
+        }
         await this.#requeue(pullRequest);
         throw error;
       }

@@ -14,10 +14,13 @@ export class MergeConflictError extends RevisorError {
 }
 
 // 審査後にヘッドの差分内容が変わった。新しい内容での再審査で解消できる。
+// 自動再審査を対象ヘッド単位で数えて頭打ちにするため、判定に使ったヘッドを持つ。
+/** @implements SPEC-STALE-REVIEW-REQUEUE */
 export class StaleReviewError extends RevisorError {
-  constructor(message, options) {
+  constructor(message, { headSha = null, ...options } = {}) {
     super(message, options);
     this.name = "StaleReviewError";
+    this.headSha = headSha;
   }
 }
 

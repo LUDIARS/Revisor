@@ -65,21 +65,44 @@ export class LocalPrReporter {
     notifyCompletion = null,
     notifyReviewStatus = null,
   } = {}) {
-    if (!store || typeof store.updatePullRequest !== "function") {
-      throw new TypeError("Local PR reporter requires a state store.");
+    // 現役 job 判定 (`#isCurrent`) も通知も、PR レコードを読めることが前提。
+    // 読めない store を黙って受け取ると、supersession ガードが素通りして
+    // 古い job が現在の審査結果を上書きする経路が復活する。
+    if (
+      !store
+      || typeof store.updatePullRequest !== "function"
+      || typeof store.getPullRequest !== "function"
+    ) {
+      throw new TypeError("Local PR reporter requires a readable and writable state store.");
     }
     if (notifyReviewStatus !== null && typeof notifyReviewStatus !== "function") {
       throw new TypeError("Review status notifier must be a function.");
-    }
-    // 通知は終局状態の PR レコードを読んで組み立てる。読めない store を黙って
-    // 受け取ると、送信側の catch に飲まれて「通知が一度も来ない」だけになる。
-    if ((notifyCompletion || notifyReviewStatus) && typeof store.getPullRequest !== "function") {
-      throw new TypeError("PR notices require a state store that can read pull requests.");
     }
     this.store = store;
     this.afterCompleted = afterCompleted;
     this.notifyCompletion = notifyCompletion;
     this.notifyReviewStatus = notifyReviewStatus;
+  }
+
+  /**
+   * この job が今もその PR の現役 job かを判定する。
+   *
+   * retry / 再投入は同じ localPrId に別 job を作るので、古い job の
+   * `running` / `completed` / `failed` をそのまま書くと、新しい審査の状態を
+   * 古いヘッドの結果で上書きしてしまう。 これは 60 秒周期の auto-merge sweep と
+   * 噛み合うと終わらない: sweep が stale な test_ok をマージしようとして
+   * `StaleReviewError` → 再投入 → 古い job が再び古い結果で test_ok を復元 →
+   * 次の sweep がまた同じ判定、という無限再投入になる。
+   *
+   * 所有権は `queued` が書く `jobId` が正本。 ヘッド SHA も併せて見るのは、
+   * job が別でも同一ヘッドを指す再投入と、ヘッドが動いた再投入を区別するため。
+   */
+  #isCurrent(job) {
+    const pullRequest = this.store.getPullRequest(job.request.localPrId);
+    if (!pullRequest) return false;
+    if (pullRequest.jobId !== job.id) return false;
+    return String(pullRequest.headSha).toLowerCase()
+      === String(job.request.headSha).toLowerCase();
   }
 
   // 終局状態に着いたときだけ、投稿元セッションへ 1 回知らせる。通知は best-effort:
@@ -120,12 +143,17 @@ export class LocalPrReporter {
   }
 
   async running(job) {
+    if (!this.#isCurrent(job)) return;
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: "running",
     });
   }
 
   async completed(job) {
+    // 追い越された job の結果は診断用にキュー側の履歴へ残るだけで、PR の現在の
+    // 判定にも通知にも反映しない。 自動マージも同様: 古いヘッドの test_ok で
+    // マージを走らせない。
+    if (!this.#isCurrent(job)) return;
     const passed = job.result?.conclusion === "success";
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: passed ? "test_ok" : "action_required",
@@ -174,6 +202,9 @@ export class LocalPrReporter {
   }
 
   async failed(job) {
+    // 追い越された job の失敗で現在の審査を `failed` に落とすと、投稿元には
+    // 古いヘッドの失敗通知が届き、board 上も進行中の審査が失敗に見える。
+    if (!this.#isCurrent(job)) return;
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: "failed",
       error: job.error || "The local review worker failed.",

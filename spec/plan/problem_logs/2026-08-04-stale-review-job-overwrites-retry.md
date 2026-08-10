@@ -1,7 +1,7 @@
 # Stale review job overwrites a retried local PR
 
 - Date: 2026-08-04
-- Status: investigating
+- Status: fixed (2026-08-10)
 - Area: local PR review queue lifecycle
 - Severity: review result and notification can describe a superseded head
 
@@ -76,3 +76,30 @@ policy.
 Retry local PR #200 on its latest head. Until the reporter guard is implemented,
 notifications from older queued jobs must be checked against the head SHA before
 being treated as the current verdict.
+
+## 2026-08-10 無限再投入としての再発と修正
+
+未実装のまま残っていた supersession ガードが、 60 秒周期の auto-merge sweep と
+噛み合って終わらない再投入になっていた:
+
+1. sweep が open / test_ok を拾ってマージ → 審査済み内容と現在ヘッドが違えば
+   `StaleReviewError`
+2. `local-pr-service` が `#requeue` で force 再投入 (新 job)
+3. 追い越された古い job が終わると、 `LocalPrReporter` が `localPrId` だけを見て
+   **古い `reviewedHeadSha` のまま test_ok を復元**
+4. 次の sweep が再び同じ stale 判定に着き、 2 へ戻る
+
+修正は 2 層:
+
+- `LocalPrReporter` に `#isCurrent(job)` を追加し、 PR の現在の `jobId` と `headSha`
+  に一致する job の `running` / `completed` / `failed` だけを反映する。 所有権は
+  `queued` が書く `jobId` が正本。 追い越された job は状態も通知も自動マージも起こさない。
+  reporter は PR を読めない store を受け付けなくなった (ガードが素通りするため)。
+- 同一ヘッドへの自動再審査を `STALE_REQUEUE_LIMIT` (2) で頭打ちにし、 超えたら
+  `action_required` で人間の判断へ渡す。 ヘッドが動いた再審査は正当なので数え直す。
+  判定に使ったヘッドは `StaleReviewError.headSha` で運ぶ。
+
+回帰条件はどちらも `test/local-pr-service.test.mjs`:
+追い越された job が現在の審査を上書きも通知もしないこと、 同じヘッドの stale が
+上限を超えたら再投入せず `action_required` に落ちること。
+セッション方針によりこの session ではテストを実行していない (Revisor の登録テストで検証する)。

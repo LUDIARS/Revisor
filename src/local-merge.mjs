@@ -85,12 +85,13 @@ async function assertReviewedContentUnchanged(rootPath, reviewedHeadSha, headSha
   } catch (error) {
     throw new StaleReviewError(
       "The reviewed head is gone and the current head cannot be compared to it; a new review is required.",
-      { cause: error },
+      { cause: error, headSha },
     );
   }
   if (!unchanged) {
     throw new StaleReviewError(
       "The head content changed after the review; a new review is required.",
+      { headSha },
     );
   }
 }
