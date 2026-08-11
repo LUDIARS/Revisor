@@ -14,6 +14,7 @@ import { squashMergeLocalPullRequest } from "./local-merge.mjs";
 import { syncSourceCheckout } from "./source-checkout-sync.mjs";
 import { mergeFailureMessage, writeMergeFailureLog } from "./merge-failure-log.mjs";
 import { prepareMergeRepository } from "./merge-repository.mjs";
+import { probeBaseMergeability } from "./submit-probe.mjs";
 import {
   approvedPullRequestForManualMerge,
   canBypassPreMergeSystemFailure,
@@ -81,6 +82,7 @@ export class LocalPrService {
     installGuard = installPushGuard,
     merge = squashMergeLocalPullRequest,
     prepareMerge = prepareMergeRepository,
+    probeMergeability = probeBaseMergeability,
     logMergeFailure = writeMergeFailureLog,
     syncCheckout = syncSourceCheckout,
     securityScan,
@@ -103,6 +105,7 @@ export class LocalPrService {
     this.installGuard = installGuard;
     this.merge = merge;
     this.prepareMerge = prepareMerge;
+    this.probeMergeability = probeMergeability;
     this.logMergeFailure = logMergeFailure;
     this.syncCheckout = syncCheckout;
     this.securityScan = securityScan;
@@ -253,7 +256,39 @@ export class LocalPrService {
     }
     const pullRequest = creation.pullRequest;
     await this.#announceLifecycle("created", pullRequest);
+    // 載らない head を審査へ通すと、モデルレビューもテストも走らせた末に取り込みで
+    // 落ちる。 判定は取り込みとまったく同じ手順で行い、 結果は捨てる (載せ替えの本番は
+    // 取り込み時)。
+    const probe = await this.#probeBaseMergeability(repository, pullRequest);
+    if (probe?.status === "conflict") {
+      return this.store.updatePullRequest(pullRequest.id, {
+        checkStatus: "action_required",
+        reasons: [probe.reason],
+      });
+    }
     return this.#enqueue(repository, pullRequest);
+  }
+
+  /**
+   * 提出時の早期チェック。 判定できなかった場合は審査へ進める — 取り込み時に改めて
+   * 判定されるので、 ここで止めると判定器の不調が提出そのものを塞いでしまう。
+   */
+  async #probeBaseMergeability(repository, pullRequest) {
+    if (typeof this.probeMergeability !== "function") return null;
+    try {
+      const mergeRepository = await this.prepareMerge({
+        repository,
+        pullRequest,
+        statePath: this.store.path,
+      });
+      return await this.probeMergeability({
+        mergeRepository,
+        baseRef: pullRequest.baseRef,
+        headSha: pullRequest.headSha,
+      });
+    } catch {
+      return null;
+    }
   }
 
   async retryPullRequest(id, { fastLane = false } = {}) {
