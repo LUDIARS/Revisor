@@ -78,6 +78,7 @@ export function pullRequestLifecycleMessage(event, pullRequest) {
     lines.push(`✅ Revisor 審査通過: ${label}`);
     if (title) lines.push(title);
     lines.push("Open / Test OK です。");
+    lines.push("テスト開始OK / マージOKです。");
   } else if (event === "review_queued") {
     lines.push(`🔁 Revisor 再審査: ${label}`);
     if (title) lines.push(title);

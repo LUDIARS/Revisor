@@ -38,7 +38,7 @@ export function reviewCompletionMessage(pullRequest) {
     } else {
       lines.push(`✅ Revisor レビュー完了: ${label} は Open / Test OK です (マージ可能)。`);
       // Test OK のまま open な PR は Concordia の TestWorkflow フォーラムに載る。
-      lines.push("動作確認は Discord の TestWorkflow フォーラムのスレッドで記録してください。");
+      lines.push("Discord の TestWorkflow フォーラムには「テスト開始OK」「マージOK」と投稿されます。動作確認はそのスレッドで記録してください。");
     }
   } else if (pullRequest.checkStatus === "failed") {
     lines.push(`⚠️ Revisor レビュー失敗: ${label} は審査を完了できませんでした。`);

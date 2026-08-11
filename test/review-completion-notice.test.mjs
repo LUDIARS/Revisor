@@ -50,6 +50,8 @@ test("names the verdict for each terminal state", () => {
   assert.match(ok, /Test OK/);
   // Test OK の PR は TestWorkflow フォーラムに載るので、そこへ誘導する。
   assert.match(ok, /TestWorkflow/);
+  assert.match(ok, /テスト開始OK/);
+  assert.match(ok, /マージOK/);
   assert.match(
     reviewCompletionMessage(pr({ checkStatus: "action_required", reasons: ["tests failed"] })),
     /マージできません[\s\S]*tests failed/,
@@ -75,7 +77,8 @@ test("reports an automatic merge instead of pointing at a forum thread", () => {
 test("legacy draft metadata still points to the TestWorkflow thread", () => {
   const draft = reviewCompletionMessage(pr({ draft: true }));
   assert.match(draft, /Test OK/);
-  assert.match(draft, /フォーラムのスレッドで記録/);
+  assert.match(draft, /フォーラムには/);
+  assert.match(draft, /マージOK/);
   assert.doesNotMatch(draft, /draft を外して/);
 });
 

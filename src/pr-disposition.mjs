@@ -1,4 +1,7 @@
-import { isHumanOverrideableReviewHold } from "./human-decision.mjs";
+import {
+  hasConcreteReviewFailure,
+  isHumanOverrideableReviewHold,
+} from "./human-decision.mjs";
 import { riskBandOf } from "./merge-risk.mjs";
 
 // The dashboard's central question is "which of these needs me?". That answer is
@@ -25,19 +28,34 @@ function classifyDecision(pullRequest, blockers) {
     return "in_review";
   }
   if (pullRequest.checkStatus === "failed") return "failed";
+  if (hasConcreteReviewFailure(pullRequest)) return "failed";
   if (pullRequest.checkStatus !== "test_ok") return "needs_human";
   return blockers.length > 0 ? "needs_human" : "auto_ok";
 }
 
 function blockersOf(pullRequest, thresholds) {
   const blockers = [];
-  // A worker failure leaves its message on `error` rather than in `reasons`, and
-  // it is the only thing that explains the card, so it belongs in the list too.
-  if (pullRequest.checkStatus === "failed" && pullRequest.error) {
+  // Worker failures and concrete `action_required` failures may leave their
+  // evidence on `error` rather than in `reasons`. It is the only thing that
+  // explains those cards, so it belongs in the list too.
+  if (
+    (pullRequest.checkStatus === "failed" || pullRequest.checkStatus === "action_required")
+    && pullRequest.error
+  ) {
     blockers.push(String(pullRequest.error));
   }
   if (pullRequest.mergeError) blockers.push(String(pullRequest.mergeError));
-  for (const reason of pullRequest.reasons ?? []) blockers.push(reason);
+  const reasons = pullRequest.reasons ?? [];
+  const failedTestCount = Array.isArray(pullRequest.ci)
+    ? pullRequest.ci.filter((entry) => entry?.status === "failed").length
+    : 0;
+  if (
+    failedTestCount > 0
+    && !reasons.some((reason) => /registered test case\(s\) failed/.test(String(reason)))
+  ) {
+    blockers.push(`${failedTestCount} registered test case(s) failed`);
+  }
+  for (const reason of reasons) blockers.push(reason);
   if (pullRequest.humanQuestion) blockers.push(pullRequest.humanQuestion);
   const risk = pullRequest.mergeRisk;
   if (risk && typeof risk.score === "number" && risk.score > thresholds.riskThreshold) {

@@ -25,7 +25,13 @@ function pr(overrides = {}) {
 
 test("formats every Discord lifecycle transition", () => {
   assert.match(pullRequestLifecycleMessage("created", pr()), /PR 発行[\s\S]*feat\/discord-pr-notifications → main/);
-  assert.match(pullRequestLifecycleMessage("review_passed", pr()), /審査通過[\s\S]*Test OK/);
+  const passed = pullRequestLifecycleMessage("review_passed", pr());
+  assert.match(passed, /審査通過[\s\S]*Test OK/);
+  assert.match(passed, /テスト開始OK/);
+  assert.match(passed, /マージOK/);
+  const draft = pullRequestLifecycleMessage("review_passed", pr({ draft: true }));
+  assert.match(draft, /テスト開始OK/);
+  assert.match(draft, /マージOK/);
   assert.match(
     pullRequestLifecycleMessage("review_failed", pr({ reasons: ["unit failed"] })),
     /審査失敗[\s\S]*unit failed/,

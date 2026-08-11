@@ -114,7 +114,13 @@ export const PR_VIEW_SOURCE = `
         (pr.autoMerge.merged ? 'マージ済み' : '見送り') + ' — ' + pr.autoMerge.reason);
     }
     wrapper.append(list);
-    wrapper.append(block('人間の判断が必要な理由', listOf(pr.decision.blockers, '判断待ちの理由はありません。')));
+    const blockerTitle = pr.decision.state === 'failed'
+      ? '審査失敗の理由'
+      : '人間の判断が必要な理由';
+    const emptyBlockerMessage = pr.decision.state === 'failed'
+      ? '審査失敗の理由は記録されていません。'
+      : '判断待ちの理由はありません。';
+    wrapper.append(block(blockerTitle, listOf(pr.decision.blockers, emptyBlockerMessage)));
     wrapper.append(block('マージリスクの内訳', factorsOf(pr.mergeRisk)));
     wrapper.append(block('動作確認の必要性', runtimeOf(pr.runtimeVerification)));
     return wrapper;

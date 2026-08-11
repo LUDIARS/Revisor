@@ -32,6 +32,8 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   const page = renderPrBoardPage("session-nonce");
   assert.match(page, /選択した PR の詳細/);
   assert.match(page, /block\('判断', decisionOf\(pr\)\)/);
+  assert.match(page, /pr\.decision\.state === 'failed'/);
+  assert.match(page, /'審査失敗の理由'/);
   assert.match(page, /block\('レビュー計画', planOf\(pr\.reviewPlan\)\)/);
   assert.match(page, /block\('テスト', testsOf\(pr\)\)/);
   assert.match(page, /block\('変更内容', changedFilesOf\(pr, openChangedFiles\)\)/);
@@ -384,6 +386,11 @@ function renderCard(pr) {
   return view(fakeDocument())(pr, null, () => {});
 }
 
+function renderDecision(pr) {
+  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn decisionOf;`);
+  return view(fakeDocument())(pr);
+}
+
 function renderOverview(pr) {
   const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn overviewOf;`);
   return view(fakeDocument())(pr);
@@ -480,6 +487,58 @@ test("the menu card keeps the plain decision label for states other than needs_h
   });
   assert.deepEqual(flatten(card), ["#7", "自動マージ可", "Revisor", "自動マージ可の PR"]);
   assert.equal(card.dataset.tone, "ok");
+});
+
+test("the decision detail distinguishes failures from human decisions", () => {
+  const base = {
+    mergeRisk: null,
+    runtimeVerification: null,
+    autoMerge: null,
+  };
+  const failed = renderDecision({
+    ...base,
+    decision: {
+      state: "failed",
+      label: "審査が失敗",
+      blockers: ["1 registered test case(s) failed"],
+      riskScore: null,
+      riskThreshold: 15,
+      autoMergeEnabled: false,
+      autoMergeEligible: false,
+    },
+  });
+  assert.equal(flatten(failed).includes("審査失敗の理由"), true);
+  assert.equal(flatten(failed).includes("人間の判断が必要な理由"), false);
+
+  const unexplainedFailure = renderDecision({
+    ...base,
+    decision: {
+      state: "failed",
+      label: "審査が失敗",
+      blockers: [],
+      riskScore: null,
+      riskThreshold: 15,
+      autoMergeEnabled: false,
+      autoMergeEligible: false,
+    },
+  });
+  assert.equal(flatten(unexplainedFailure).includes("審査失敗の理由は記録されていません。"), true);
+  assert.equal(flatten(unexplainedFailure).includes("判断待ちの理由はありません。"), false);
+
+  const needsHuman = renderDecision({
+    ...base,
+    decision: {
+      state: "needs_human",
+      label: "人間の判断が必要",
+      blockers: ["target domain is still missing"],
+      riskScore: null,
+      riskThreshold: 15,
+      autoMergeEnabled: false,
+      autoMergeEligible: false,
+    },
+  });
+  assert.equal(flatten(needsHuman).includes("人間の判断が必要な理由"), true);
+  assert.equal(flatten(needsHuman).includes("審査失敗の理由"), false);
 });
 
 test("a Test OK PR overrides a human-decision label with a green Test OK badge", () => {

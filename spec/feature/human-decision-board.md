@@ -13,7 +13,7 @@ related:
   - ../architecture.md
   - ./merge-risk.md
   - ./pr-lifecycle.md
-updated: 2026-08-06
+updated: 2026-08-11
 ---
 
 # human-decision-board — 判断待ちを先頭に出すダッシュボード
@@ -35,8 +35,8 @@ updated: 2026-08-06
 
 | state | 条件 | 表示 |
 |---|---|---|
-| `needs_human` | 審査済みだがブロッカーがある / `action_required` | 人間の判断が必要 (bad) |
-| `failed` | `checkStatus: failed` | 審査が失敗 (bad) |
+| `needs_human` | Genius 判断、対象ドメイン確認、レビュー基盤障害、merge conflict の rebase など人の選択・作業が必要 | 人間の判断が必要 (bad) |
+| `failed` | `checkStatus: failed`、または客観的な失敗証拠を持つ `action_required` | 審査が失敗 (bad) |
 | `in_review` | `queued` / `running` | 審査中 (warn) |
 | `auto_ok` | 審査通過・ブロッカー無し | 自動マージ可 (ok) |
 | `merged` | `status: merged` | マージ済み (idle) |
@@ -44,6 +44,10 @@ updated: 2026-08-06
 
 ブロッカーはマージブロック理由、人間への確認、閾値超過のマージリスク、
 必要な動作確認、そしてワーカー失敗時の `error`。すべて右ペインの詳細に文言として出す。
+登録テスト失敗、Anatomia gate / architecture 違反、leakage / security finding など
+客観的な**レビュー失敗**は `action_required` でも `failed` に分類し、「人間の判断が必要」で
+片づけない。審査通過後の merge conflict は review failure へ戻さず、rebase が必要な
+`needs_human` として残す。右ペインの見出しも failed なら「審査失敗の理由」に切り替える。
 左ペインは対象を素早く選ぶための 3 項目に絞り、詳細では「なぜ止まっているか」が
 隠れないようにする。
 

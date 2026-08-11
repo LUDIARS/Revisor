@@ -180,6 +180,45 @@ test("a settled review always says why it is waiting", () => {
   );
 });
 
+test("objective action_required evidence is a review failure, not a human judgment", () => {
+  const failed = decidePullRequest(pullRequest({
+    checkStatus: "action_required",
+    reasons: ["1 registered test case(s) failed"],
+    ci: [{ name: "unit", status: "failed", exitCode: 1 }],
+  }), SETTINGS);
+  assert.equal(failed.decision.state, "failed");
+  assert.equal(failed.decision.label, "審査が失敗");
+  assert.ok(failed.decision.blockers.includes("1 registered test case(s) failed"));
+});
+
+test("objective failure evidence is never omitted from the decision blockers", () => {
+  const failedTest = decidePullRequest(pullRequest({
+    checkStatus: "action_required",
+    reasons: [],
+    ci: [{ name: "unit", status: "failed", exitCode: 1 }],
+  }), SETTINGS);
+  assert.equal(failedTest.decision.state, "failed");
+  assert.ok(failedTest.decision.blockers.includes("1 registered test case(s) failed"));
+
+  const leakageError = decidePullRequest(pullRequest({
+    checkStatus: "action_required",
+    reasons: [],
+    error: "Autofix introduced potential information leakage",
+  }), SETTINGS);
+  assert.equal(leakageError.decision.state, "failed");
+  assert.ok(leakageError.decision.blockers.includes(leakageError.error));
+});
+
+test("a merge conflict remains a human rebase decision, not a review failure", () => {
+  const reason = "The head conflicts with the current 'main'; rebase the branch and submit a new review.";
+  const conflicted = decidePullRequest(pullRequest({
+    checkStatus: "action_required",
+    reasons: [reason],
+  }), SETTINGS);
+  assert.equal(conflicted.decision.state, "needs_human");
+  assert.ok(conflicted.decision.blockers.includes(reason));
+});
+
 test("a running review is neither a decision nor a failure", () => {
   for (const checkStatus of ["queued", "running"]) {
     assert.equal(

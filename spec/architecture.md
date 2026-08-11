@@ -152,8 +152,8 @@ SHAs, workflow status, CI outcomes, projected Anatomia data, leakage locations,
 the security scan outcome and its finding locations, the review plan, the
 merge-risk and runtime-verification assessments, the automatic merge outcome,
 and the final reviewed SHA. The test workflow is a derived view containing the
-latest Open PR per repository while it is `queued`, `running`, or
-`test_ok`. The first two states are early-QA candidates for the current head;
+  latest Open PR per repository while it is `queued`, `running`, or
+  `test_ok`. The first two states are early-QA candidates for the current head;
 only `Open / Test OK` means the review gate has passed.
 
 The number is global rather than per-repository because it is used on its own to

@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   approvedPullRequestForManualMerge,
   canBypassPreMergeSystemFailure,
+  GENIUS_HUMAN_DECISION_REASON,
+  hasConcreteReviewFailure,
   isHumanOverrideableReviewHold,
 } from "../src/human-decision.mjs";
 
@@ -82,4 +84,33 @@ test("does not relabel concrete review evidence as a system failure", () => {
       reasons: [reason],
     })), false, reason);
   }
+});
+
+test("separates objective action_required failures from actual human decisions", () => {
+  for (const reason of [
+    "1 registered test case(s) failed",
+    "Anatomia gate(s) did not pass: rule_conformance",
+    "1 changed architecture rule violation(s) remain",
+  ]) {
+    assert.equal(hasConcreteReviewFailure(pullRequest({
+      checkStatus: "action_required",
+      error: null,
+      reasons: [reason],
+    })), true, reason);
+  }
+  assert.equal(hasConcreteReviewFailure(pullRequest({
+    checkStatus: "action_required",
+    error: null,
+    reasons: ["target domain is still missing"],
+  })), false);
+  assert.equal(hasConcreteReviewFailure(pullRequest({
+    checkStatus: "action_required",
+    error: null,
+    reasons: [GENIUS_HUMAN_DECISION_REASON],
+  })), false);
+  assert.equal(hasConcreteReviewFailure(pullRequest({
+    checkStatus: "action_required",
+    error: null,
+    reasons: ["The head conflicts with the current 'main'; rebase the branch and submit a new review."],
+  })), false);
 });

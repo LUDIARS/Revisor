@@ -13,7 +13,7 @@ status: implemented
 related:
   - ../architecture.md
   - ./crash-recovery.md
-updated: 2026-08-10
+updated: 2026-08-11
 ---
 
 # pr-lifecycle-notice — PR ライフサイクルの外向き通知
@@ -52,6 +52,8 @@ local PR は Revisor のダッシュボードにしか現れない。 投稿元�
 **審査結果とマージは別イベント。** 自動マージが審査通過の直後に走る場合でも、
 `review_passed` を先に出してから `merged` を出す (`completed` は auto-merge の**前**に
 審査結果を通知する)。
+`review_passed` は Test OK で「テスト開始OK / マージOK」も明示し、
+Concordia の TestWorkflow フォーラム側の遷移投稿と同じ可否を伝える。
 
 **同じ状態遷移で 2 通出さない。** 復旧不能な中断レビュー
 (`recoverInterruptedReviews`) は、`#enqueue` の失敗通知を `announceFailure: false` で

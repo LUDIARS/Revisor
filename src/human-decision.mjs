@@ -7,12 +7,42 @@ const SYSTEM_REVIEW_REASON_PATTERNS = [
   /^the security scan produced no usable result$/,
 ];
 
+// A conflict happens after review has passed. It still needs a person to rebase
+// the branch, but must not be presented as failed review evidence.
+const MERGE_CONFLICT_REASON_PATTERN =
+  /^The head conflicts with the current '.+'; rebase the branch and submit a new review\.$/;
+
 const PRE_MERGE_SYSTEM_FAILURE_PATTERN =
   /pre-merge security scan (?:did not complete|produced no usable result)/i;
 const HARD_FAILURE_PATTERN =
   /information leakage|registered test|security finding\(s\)|actual finding/i;
 const SYSTEM_FAILURE_PATTERN =
   /Anatomia|review investigation failed|reviewer failed|security scan|ENOENT|spawn|timed? out|unavailable|not configured|is not a function|could not (?:start|read|resolve|load)/i;
+
+function isHumanAttentionReason(reason) {
+  return reason === GENIUS_HUMAN_DECISION_REASON
+    || reason === "target domain is still missing"
+    || MERGE_CONFLICT_REASON_PATTERN.test(reason)
+    || SYSTEM_REVIEW_REASON_PATTERNS.some((pattern) => pattern.test(reason));
+}
+
+/**
+ * `action_required` is a transport status shared by two different outcomes:
+ * an actual person-facing decision and objective failing evidence. Keep those
+ * separate so a failed test, gate, leakage scan, or policy check is never shown
+ * as though the operator merely needed to make a judgment call.
+ */
+export function hasConcreteReviewFailure(pullRequest) {
+  if (pullRequest?.checkStatus !== "action_required") return false;
+  if (Array.isArray(pullRequest.ci)
+    && pullRequest.ci.some((entry) => entry?.status === "failed")) {
+    return true;
+  }
+  const error = typeof pullRequest.error === "string" ? pullRequest.error.trim() : "";
+  if (error && HARD_FAILURE_PATTERN.test(error)) return true;
+  const reasons = Array.isArray(pullRequest.reasons) ? pullRequest.reasons : [];
+  return reasons.some((reason) => !isHumanAttentionReason(reason));
+}
 
 /**
  * True when the only thing holding this PR back is the Genius card confirmation

@@ -1238,7 +1238,7 @@ test("the auto-merge sweep ignores legacy draft metadata", async () => {
       mergeRisk: { score: 5, factors: [] },
       reasons: [],
     });
-    // 同一 head の再投稿は既存 PR に相乗りするので、legacy PR には別ブランチを使う。
+    // 同一 head の再投稿は既存 PR に相乗りするので、draft PR には別ブランチを使う。
     git(fixture.repoPath, "checkout", "-b", "feat/draft", "feat/local");
     writeFileSync(join(fixture.repoPath, "draft.txt"), "draft\n", "utf8");
     git(fixture.repoPath, "add", "draft.txt");
