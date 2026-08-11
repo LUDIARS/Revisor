@@ -19,7 +19,22 @@ class FakeWorker extends EventEmitter {
   }
 }
 
-test("dispatches one active job per child worker", async () => {
+/** まだ結果を返していない配布分。 どのワーカーへ配られたかは決め打ちしない。 */
+function pendingDispatches(workers, settled) {
+  return workers.flatMap((worker) => worker.messages
+    .filter((message) => !settled.has(message.id))
+    .map((message) => ({ worker, message })));
+}
+
+function settle({ worker, message }, settled, result) {
+  settled.add(message.id);
+  worker.emit("message", { type: "result", id: message.id, result });
+}
+
+// fast lane の予約枠は、 fast の待ちが無くても standard へ貸さない (既存仕様。
+// 4 本目のテスト "standard tasks cannot consume capacity reserved for the fast lane"
+// と同じ扱い)。 size 2 で予約 1 なら standard の同時実行は 1 本になる。
+test("runs one standard job at a time while a slot stays reserved for the fast lane", async () => {
   const created = [new FakeWorker(), new FakeWorker()];
   const available = [...created];
   const pool = new PrReviewWorkerPool({
@@ -31,30 +46,29 @@ test("dispatches one active job per child worker", async () => {
     })(),
     forkWorker: () => available.shift(),
   });
+  const settled = new Set();
   const first = pool.run({ number: 1 });
   const second = pool.run({ number: 2 });
   const third = pool.run({ number: 3 });
-  const [workerOne, workerTwo] = created;
-  assert.equal(workerOne.messages.length, 1);
-  assert.equal(workerTwo.messages.length, 1);
-  workerOne.emit("message", {
-    type: "result",
-    id: workerOne.messages[0].id,
-    result: 1,
-  });
+
+  assert.equal(pool.state().workers.fastLaneReserved, 1);
+  assert.equal(pool.state().running.length, 1);
+  assert.equal(pool.state().queued.length, 2);
+  assert.equal(pendingDispatches(created, settled).length, 1);
+
+  settle(pendingDispatches(created, settled)[0], settled, 1);
   assert.equal(await first, 1);
-  assert.equal(workerOne.messages.length, 2);
-  workerTwo.emit("message", {
-    type: "result",
-    id: workerTwo.messages[0].id,
-    result: 2,
-  });
-  workerOne.emit("message", {
-    type: "result",
-    id: workerOne.messages[1].id,
-    result: 3,
-  });
-  assert.deepEqual(await Promise.all([second, third]), [2, 3]);
+
+  // 1 本終わって初めて次が出る。 配布先のワーカーは固定しない。
+  const secondDispatch = pendingDispatches(created, settled);
+  assert.equal(secondDispatch.length, 1);
+  settle(secondDispatch[0], settled, 2);
+  assert.equal(await second, 2);
+
+  const thirdDispatch = pendingDispatches(created, settled);
+  assert.equal(thirdDispatch.length, 1);
+  settle(thirdDispatch[0], settled, 3);
+  assert.equal(await third, 3);
   await pool.close();
 });
 
@@ -148,13 +162,20 @@ test("fast work stays within its split capacity instead of borrowing standard sl
     cwd: process.cwd(),
     forkWorker: () => available.shift(),
   });
+  const settled = new Set();
   const first = pool.run({ number: 1 }, { reviewLane: "fast" });
   const second = pool.run({ number: 2 }, { reviewLane: "fast" });
   assert.equal(pool.state().running.length, 1);
   assert.equal(pool.state().queued.length, 1);
-  const worker = created.find((candidate) => candidate.messages.length === 1);
-  worker.emit("message", { type: "result", id: worker.messages[0].id, result: 1 });
-  worker.emit("message", { type: "result", id: worker.messages[1].id, result: 2 });
-  await Promise.all([first, second]);
+
+  settle(pendingDispatches(created, settled)[0], settled, 1);
+  assert.equal(await first, 1);
+
+  // 2 本目は 1 本目が終わってから配られる。 同じワーカーとは限らないので、
+  // 実際に配られた先から読む (messages[1] の決め打ちが TypeError の原因だった)。
+  const secondDispatch = pendingDispatches(created, settled);
+  assert.equal(secondDispatch.length, 1);
+  settle(secondDispatch[0], settled, 2);
+  assert.equal(await second, 2);
   await pool.close();
 });

@@ -189,6 +189,9 @@ test("persists only the safe Anatomia gate projection", async () => {
   const record = pr({ checkStatus: "queued" });
   const reporter = new LocalPrReporter(makeStore(record));
   await reporter.completed({
+    // 所有権ガード (#isCurrent) は jobId も見る。 id を落とすと現役 job と見なされず、
+    // 何も書かれないまま素通りする (この 1 件だけ id が無くて落ちていた)。
+    id: "job-1",
     request: { localPrId: "pr-1", headSha: "abc" },
     result: {
       conclusion: "action_required",

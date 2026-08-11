@@ -4,6 +4,12 @@ import { retryReviewScope } from "../src/retry-review.mjs";
 
 const HEAD = "a".repeat(40);
 
+// 審査結果の引き継ぎ (fdb8fdc) で reusedReview が返るようになった。 どの head の結果を
+// 再利用したかは verification の前提そのものなので、 期待値にも含めて固定する。
+function reused(reviewedHeadSha, currentHeadSha, matchedBy = "head_sha") {
+  return { reviewedHeadSha, currentHeadSha, matchedBy };
+}
+
 test("rechecks only failed deterministic gates on an unchanged reviewed head", () => {
   assert.deepEqual(retryReviewScope({
     reviewedHeadSha: HEAD,
@@ -13,6 +19,7 @@ test("rechecks only failed deterministic gates on an unchanged reviewed head", (
   }, HEAD), {
     reviewMode: "verification",
     verificationTargets: ["tests", "security"],
+    reusedReview: reused(HEAD, HEAD),
   });
 });
 
@@ -43,6 +50,7 @@ test("keeps a completed intent review and deterministically rechecks a settled h
   }, HEAD), {
     reviewMode: "verification",
     verificationTargets: ["leakage", "tests", "anatomia", "security"],
+    reusedReview: reused(HEAD, HEAD),
   });
 });
 
@@ -55,6 +63,7 @@ test("rechecks every deterministic gate when the previous plan was advised", () 
   }, HEAD), {
     reviewMode: "verification",
     verificationTargets: ["leakage", "tests", "anatomia", "security"],
+    reusedReview: reused(HEAD, HEAD),
   });
 });
 

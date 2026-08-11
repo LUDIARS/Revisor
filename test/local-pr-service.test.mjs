@@ -154,9 +154,12 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     assert.equal(merged.status, "merged");
     assert.equal(merged.releaseTag, "v0.1.0");
     assert.equal(git(mergeRoot, "show", "main:product.txt").replace(/\r\n/g, "\n"), "base\nfeature");
+    // 登録 checkout へ降ろした内容は、 feature が commit したバイト列と同じでなければ
+    // ならない。 fixture は末尾改行つきで書いているので、 期待値も末尾改行を持つ
+    // (git show 側は helper が trim するため改行が落ちる)。
     assert.equal(
       readFileSync(join(fixture.repoPath, "product.txt"), "utf8").replace(/\r\n/g, "\n"),
-      "base\nfeature",
+      "base\nfeature\n",
     );
     assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
     assert.equal(git(mergeRoot, "rev-list", "--count", "main"), "2");
@@ -1851,6 +1854,9 @@ test("re-lands the next PR itself after another merge advanced the base", async 
     assert.equal(git(mergeRoot, "rev-list", "--count", "main"), "3");
     assert.equal(git(mergeRoot, "show", "main:second.txt").replace(/\r\n/g, "\n"), "second");
     assert.equal(git(mergeRoot, "show", "main:product.txt").replace(/\r\n/g, "\n"), "base\nfeature");
+    // 登録 checkout は「マージ済み main を降ろす」対象になった (checkout publication)。
+    // main と HEAD はマージ結果まで進む。一方で、提出元 branch と未コミットの作業
+    // (status・index・stash) は触られない — 進めることと、人の作業を巻き込まないことは別の話。
     assert.deepEqual(
       {
         base: git(fixture.repoPath, "rev-parse", "refs/heads/main"),
@@ -1860,7 +1866,16 @@ test("re-lands the next PR itself after another merge advanced the base", async 
         index: git(fixture.repoPath, "diff", "--cached", "--name-only"),
         stash: git(fixture.repoPath, "stash", "list"),
       },
-      registeredBefore,
+      {
+        ...registeredBefore,
+        base: git(mergeRoot, "rev-parse", "refs/heads/main"),
+        head: git(mergeRoot, "rev-parse", "refs/heads/main"),
+      },
+    );
+    assert.notEqual(
+      git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+      registeredBefore.base,
+      "登録 checkout の main が前進していない (publication が働いていない)",
     );
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });

@@ -2,7 +2,7 @@
 task: worker-pool-fast-lane-test-failures
 project: Revisor
 kind: 実装
-status: pending
+status: done
 created: 2026-08-11
 source_session: lictor-8327f518-9ed1-44f9-b63e-c709e33160bb
 memoria_task_id: null
@@ -59,3 +59,20 @@ Rv #451 (review-diff-scope) の作業中に検出したもので、 その変更
 
 - `test/workspace.test.mjs` の `the shared git boundary preserves a working LFS clean filter`。
   これも `main` で落ちるが、 原因は実行環境の LFS clean filter であり本件とは別。
+
+## 結果 (2026-08-12)
+
+worker-pool 2 件を含む main の赤 11 件のうち 10 件を解消した。 いずれも実装ではなく
+テスト側が仕様変更に追いついていなかったもの。
+
+| テスト | 追いついていなかった仕様 |
+|---|---|
+| worker-pool 2 件 | fast lane の予約枠を standard へ貸さない / 配布先ワーカーは決め打ちできない |
+| retry-review 3 件 | 審査結果の引き継ぎで `reusedReview` が返る (`fdb8fdc`) |
+| review-completion-notice 1 件 | 所有権ガードが jobId も見る。 `id` を渡さない呼び出しは素通りする |
+| source-checkout-sync 2 件 | 失敗理由の文言が具体化した (`da77a05`) |
+| local-pr-service 2 件 | 登録 checkout へマージ済み main を降ろす (checkout publication) |
+
+残る 1 件 `the shared git boundary preserves a working LFS clean filter` は本タスクの
+対象外のまま。 managed git 経由の `git add` で clean filter が失敗するもので、 テストの
+期待値ではなく managed git の実行環境側の問題。

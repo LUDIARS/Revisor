@@ -70,7 +70,8 @@ test("leaves a checked-out base alone when the tree is dirty", async () => {
   });
   const result = await syncSourceCheckout({ ...inputs(), run });
   assert.equal(result.synced, false);
-  assert.match(result.reason, /uncommitted/);
+  // 文言は「どの branch のどこが問題か」を名指しする形になった (da77a05)。
+  assert.match(result.reason, /worktree is no longer clean/);
   assert.ok(!run.calls.some((call) => call.args.startsWith("merge --ff-only")));
 });
 
@@ -123,5 +124,6 @@ test("reports a git failure instead of throwing", async () => {
   const run = fakeGit({}, { fail: new Set(["fetch"]) });
   const result = await syncSourceCheckout({ ...inputs(), run });
   assert.equal(result.synced, false);
-  assert.match(result.reason, /fetch failed/);
+  // 失敗した git コマンドをそのまま名指しする (da77a05)。
+  assert.match(result.reason, /git fetch --no-tags failed/);
 });
