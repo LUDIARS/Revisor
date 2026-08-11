@@ -379,7 +379,7 @@ export const PR_VIEW_SOURCE = `
     definition(list, 'complexity score', pr.anatomia.baselineComplexityScore === null
       ? '計画により未計測'
       : pr.anatomia.complexityScoreDelta === null
-        ? '比較対象の基準関数がないため未計測'
+        ? '比較対象の基準関数を確認できないため未計測'
         : pr.anatomia.baselineComplexityScore
           + ' → ' + (pr.anatomia.baselineComplexityScore + pr.anatomia.complexityScoreDelta)
           + ' (Δ ' + pr.anatomia.complexityScoreDelta + ')');

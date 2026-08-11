@@ -108,6 +108,8 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 の 3 つ。時間の大半は前 2 つなので、実測上の節約はここで得られる。
 ベースラインが無い審査では `complexityScoreDelta` は `null` になり、
 複雑度低下によるブロックは発生しない。
+保存済みレビューにベースラインスコアだけがあり、対応する関数数を 0 より大きい数値として
+確認できない場合も、比較可能な実測ベースラインとは扱わず `complexityScoreDelta` を `null` にする。
 
 ### autofix 後の再計画
 

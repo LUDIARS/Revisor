@@ -178,3 +178,48 @@ test("does not treat Anatomia's neutral score as a complexity baseline", async (
   assert.equal(result.complexityScoreDelta, null);
   assert.deepEqual(result.reasons, []);
 });
+
+test("does not compare against a persisted baseline without a function count", async () => {
+  const result = await runPartialVerification({
+    request: {
+      repository: "LUDIARS/Revisor",
+      number: 338,
+      headSha: "b".repeat(40),
+      reviewMode: "verification",
+      verificationTargets: [],
+      testCases: [],
+      previousReview: {
+        reviewedHeadSha: "a".repeat(40),
+        intentReviewCompleted: true,
+        reviewer: "codex-sol",
+        anatomia: {
+          ...passingAnalysis(85),
+          baselineComplexityScore: 100,
+        },
+        leakage: { totalFindings: 0 },
+        ci: [],
+        security: { status: "passed", totalFindings: 0 },
+        runtimeVerification: { score: 100, required: false, factors: [], evidence: [] },
+      },
+    },
+    submitted: {
+      classification: classifyChange({
+        changedPaths: ["src/runner.mjs"],
+        unifiedDiff: "",
+      }),
+    },
+    settings: { costValidationModeEnabled: false },
+    worktrees: { head: "head-worktree", base: "base-worktree", mergeBase: "merge-base" },
+    anatomiaCliPath: "anatomia-cli",
+    env: {},
+    runSecurity: async () => {
+      throw new Error("security is not a target in this fixture");
+    },
+    complexityDropThreshold: 10,
+  });
+
+  assert.equal(result.baselineComplexityScore, 100);
+  assert.equal(result.baselineComplexityFunctionCount, null);
+  assert.equal(result.complexityScoreDelta, null);
+  assert.deepEqual(result.reasons, []);
+});

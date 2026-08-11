@@ -389,6 +389,11 @@ function renderOverview(pr) {
   return view(fakeDocument())(pr);
 }
 
+function renderAnalysis(pr) {
+  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn analysisOf;`);
+  return view(fakeDocument())(pr);
+}
+
 function flatten(node) {
   const own = node.textContent ? [node.textContent] : [];
   return [...own, ...(node.children ?? []).flatMap(flatten)];
@@ -398,6 +403,23 @@ function firstNode(node, predicate) {
   if (predicate(node)) return node;
   return (node.children ?? []).map((child) => firstNode(child, predicate)).find(Boolean) ?? null;
 }
+
+test("the analysis panel marks an unmeasured complexity comparison clearly", () => {
+  const rendered = renderAnalysis({
+    anatomia: {
+      source: "anatomia-cli",
+      baselineComplexityScore: 100,
+      complexityScoreDelta: null,
+      domain: { hasTargetDomain: true, targetDomains: [] },
+      quality: { changedOrphans: [] },
+      architecture: { changedViolations: [] },
+    },
+  });
+  assert.equal(
+    flatten(rendered).includes("比較対象の基準関数を確認できないため未計測"),
+    true,
+  );
+});
 
 test("the test panel shows the output of failed cases only", () => {
   const rendered = renderTests({

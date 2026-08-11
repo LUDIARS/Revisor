@@ -231,7 +231,9 @@ function buildGateResult({
   // A repository with no analyzed functions has Anatomia's neutral score of
   // 100. That score is not a comparable baseline for a newly introduced code
   // area, so only a measured baseline may enforce a complexity regression.
-  const complexityScoreDelta = baseline && baseline.quality.complexity.functions !== 0
+  const complexityScoreDelta = baseline
+    && typeof baseline.quality.complexity.functions === "number"
+    && baseline.quality.complexity.functions > 0
     ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
     : null;
   const { reasons: gateReasons, advisories } = gateOutcome({
