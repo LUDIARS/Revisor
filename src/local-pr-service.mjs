@@ -22,7 +22,7 @@ import {
 } from "./human-decision.mjs";
 import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
-import { inspectLocalPullRequest, git } from "./workspace.mjs";
+import { diffPatchId, inspectLocalPullRequest, git } from "./workspace.mjs";
 import { retryReviewScope } from "./retry-review.mjs";
 import { appendSourceLinks } from "./source-links.mjs";
 import {
@@ -59,6 +59,7 @@ function reviewRequest(repository, reviewRepository, pullRequest, options = {}) 
     reviewMode: options.reviewMode ?? "full",
     verificationTargets: options.verificationTargets ?? [],
     previousReview: options.previousReview ?? null,
+    reviewedContentUnchanged: options.reviewedContentUnchanged === true,
     reviewLane: normalizeReviewLane(pullRequest.reviewLane),
   };
 }
@@ -409,6 +410,32 @@ export class LocalPrService {
   }
 
   /**
+   * 審査済みヘッドと現在ヘッドが「同じ内容」か。
+   *
+   * base が動くたびに載せ替えが要る運用では、 SHA 一致を条件にすると再提出のたびに
+   * 全段階をやり直すことになる。 モデルレビューが最も高いので、 内容が変わっていない
+   * 載せ替えでそれを払い直すのは無駄。 判定は merge-base からの差分の指紋
+   * (`git patch-id --stable`) で、 SHA だけ変わったヘッドを同一内容として扱う。
+   *
+   * 比較できない場合 (審査済み SHA が GC された等) は false を返す。 未知の内容を
+   * 「審査済み」と見なす側に倒さない。
+   */
+  async #reviewedContentUnchanged(repository, pullRequest, refs) {
+    const reviewed = pullRequest.reviewedHeadSha;
+    if (typeof reviewed !== "string" || !reviewed) return false;
+    if (reviewed.toLowerCase() === refs.headSha.toLowerCase()) return true;
+    try {
+      const [reviewedPatchId, currentPatchId] = await Promise.all([
+        diffPatchId(repository.rootPath, reviewed, refs.baseSha),
+        diffPatchId(repository.rootPath, refs.headSha, refs.baseSha),
+      ]);
+      return Boolean(reviewedPatchId) && reviewedPatchId === currentPatchId;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * 同一ヘッドに対する自動再審査の回数を数え、上限内なら 1 回分を確保する。
    *
    * ヘッドが動いた再審査は正当な作業 (autofix コミット等) なので数え直す。
@@ -448,7 +475,9 @@ export class LocalPrService {
       );
     }
     await assertLocalVersionUnchanged(repository.rootPath, refs.baseSha, refs.headSha);
-    let scope = retryReviewScope(pullRequest, refs.headSha);
+    let scope = retryReviewScope(pullRequest, refs.headSha, {
+      reviewedContentUnchanged: await this.#reviewedContentUnchanged(repository, pullRequest, refs),
+    });
     const previousValidationMode = [...(pullRequest.reviewPlan?.validationMode?.skipped ?? [])].sort();
     const currentValidationMode = pullRequest.reviewPlan
       ? validationModeSkips(this.loadSettings())

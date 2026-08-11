@@ -397,8 +397,12 @@ export async function runPartialVerification({
 }) {
   const previous = request.previousReview;
   const targets = new Set(request.verificationTargets ?? []);
-  const sameReviewedHead = typeof previous.reviewedHeadSha === "string"
-    && previous.reviewedHeadSha.toLowerCase() === request.headSha.toLowerCase();
+  // 載せ替えで SHA だけ変わったヘッドも同一内容として扱う。 判定は提出側が patch-id で
+  // 行い、 request で渡ってくる (`local-pr-service.mjs`)。
+  const sameReviewedHead = request.reviewedContentUnchanged === true || (
+    typeof previous.reviewedHeadSha === "string"
+    && previous.reviewedHeadSha.toLowerCase() === request.headSha.toLowerCase()
+  );
   let analysis = targets.has("anatomia") ? null : previousAnalysis(previous);
   if (!targets.has("anatomia") && !analysis) {
     throw new Error("Partial verification requires the previous Anatomia result.");

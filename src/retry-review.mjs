@@ -26,10 +26,21 @@ export function failedVerificationTargets(pullRequest) {
   return [...targets];
 }
 
-export function retryReviewScope(pullRequest, currentHeadSha) {
+/**
+ * 再審査で何をやり直すかを決める。
+ *
+ * 引き継ぎの条件は「審査したときと**内容**が同じ」であって、SHA が同じことではない。
+ * base が動くたびに載せ替えが要る運用で SHA 一致を条件にすると、載せ替えのたびに
+ * 最も高いモデルレビューを払い直すことになる。呼び出し側が内容一致を判定して
+ * `reviewedContentUnchanged` で渡す (`local-pr-service.mjs` が patch-id で見る)。
+ * 渡されなければ従来どおり SHA 一致だけで判断する。
+ */
+export function retryReviewScope(pullRequest, currentHeadSha, { reviewedContentUnchanged } = {}) {
   const reasons = Array.isArray(pullRequest?.reasons) ? pullRequest.reasons : [];
-  const sameReviewedHead = typeof pullRequest?.reviewedHeadSha === "string"
-    && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase();
+  const sameReviewedHead = reviewedContentUnchanged ?? (
+    typeof pullRequest?.reviewedHeadSha === "string"
+    && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase()
+  );
   if (pullRequest?.intentReviewCompleted !== true
       || !sameReviewedHead
       || reasons.some((reason) => REVIEW_REASON.test(reason))
@@ -45,5 +56,16 @@ export function retryReviewScope(pullRequest, currentHeadSha) {
     verificationTargets: reuseFailedTargets
       ? verificationTargets
       : [...ALL_DETERMINISTIC_TARGETS],
+    // 何を飛ばしたかを外に出す。 黙って飛ばすと、通っていない段階が通ったように
+    // 見える事故になる。 SHA が変わっているのに引き継いだ場合は特に、根拠 (内容一致)
+    // が記録に残っている必要がある。
+    reusedReview: {
+      reviewedHeadSha: pullRequest.reviewedHeadSha ?? null,
+      currentHeadSha: String(currentHeadSha),
+      matchedBy: pullRequest?.reviewedHeadSha
+        && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase()
+        ? "head_sha"
+        : "diff_content",
+    },
   };
 }
