@@ -5,6 +5,10 @@ import {
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
 import { publishPendingPublications } from "./publish-pending.mjs";
+import {
+  assertRepositoryWorkflow,
+  resolveRepositoryWorkflow,
+} from "./repository-workflow.mjs";
 import { createReviewContext } from "./review-context.mjs";
 
 const LOCAL_COMMANDS = new Set([
@@ -19,6 +23,7 @@ const LOCAL_COMMANDS = new Set([
   "pr:bypass-reviewed",
   "repo:register",
   "repo:list",
+  "repo:set-workflow",
   "queue:status",
   "sweep",
   "publish-pending",
@@ -214,7 +219,19 @@ export async function runLocalPrCommand(args, {
     const repositories = store.listRepositories();
     write(json
       ? repositories
-      : repositories.map((entry) => `${entry.repository}  ${entry.rootPath}`).join("\n"));
+      : repositories.map((entry) =>
+        `${entry.repository}  ${resolveRepositoryWorkflow(entry, env)}  ${entry.rootPath}`)
+        .join("\n"));
+    return 0;
+  }
+  // 属性 1 つの変更。 登録本文を作り直させないために専用コマンドにしてある。
+  if (scope === "repo" && action === "set-workflow") {
+    const name = rest[0];
+    if (!name) throw new Error("repo set-workflow requires <owner/name> <revisor|github>.");
+    const workflow = assertRepositoryWorkflow(rest[1], "workflow");
+    const updated = store.updateRepositoryWorkflow(name, workflow);
+    if (!updated) throw new Error(`Repository '${name}' is not registered.`);
+    write(json ? updated : `${updated.repository} now publishes with the ${workflow} workflow`);
     return 0;
   }
   if (scope === "queue" && action === "status") {

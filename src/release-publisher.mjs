@@ -6,7 +6,9 @@ import {
   pushPublishedCommit,
 } from "./git-publication.mjs";
 import { publishWithoutGitHub } from "./deferred-publication.mjs";
+import { publishWithGitHubWorkflow } from "./github-workflow-publication.mjs";
 import { resolveGitHubAccess } from "./github-reachability.mjs";
+import { resolveRepositoryWorkflow, WORKFLOW_GITHUB } from "./repository-workflow.mjs";
 import { prepareRelease } from "./release-preparation.mjs";
 import { PUBLICATION_PUBLISHED } from "./publication-state.mjs";
 import { prepareLocalVersionFile, writeLocalVersion } from "./local-version.mjs";
@@ -23,10 +25,22 @@ export async function publishMergedPullRequest({
   env = process.env,
   readCredentials = readGitHubAppCredentials,
   createClient = (credentials) => new GitHubAppClient(credentials),
+  publishGitHubWorkflow = publishWithGitHubWorkflow,
 }) {
   // 版数の正本は登録 checkout。 理由と実害は `version-root.mjs` に書いた。
   const versionRootPath = resolveVersionRootPath(repository);
   const localVersion = await prepareLocalVersionFile(versionRootPath);
+  // 明示保留は経路より先に効く。 どちらの workflow でも GitHub へは一切触れない。
+  if (!deferPush && resolveRepositoryWorkflow(repository, env) === WORKFLOW_GITHUB) {
+    return publishGitHubWorkflow({
+      repository,
+      pullRequest,
+      mergeCommitSha,
+      preparedTag,
+      localVersion,
+      env,
+    });
+  }
   const access = await resolveGitHubAccess({
     repository,
     env,

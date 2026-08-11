@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { CHANGE_KINDS } from "./change-classification.mjs";
 import { reviewLaneFromOptIn, REVIEW_LANES } from "./review-lane.mjs";
+import { assertRepositoryWorkflow } from "./repository-workflow.mjs";
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
@@ -214,7 +215,12 @@ export function validateRepositoryRegistration(body) {
   if (new Set(testCases.map((candidate) => candidate.name)).size !== testCases.length) {
     throw new Error("Test case names must be unique.");
   }
-  return { repository, rootPath, baseRef, testCases };
+  // 未指定は「指定なし」のまま残す。 ここで既定値を埋めると org 既定
+  // (`REVISOR_ORG_WORKFLOWS`) がリポ個別指定に負けて効かなくなる。
+  const workflow = body.workflow === undefined || body.workflow === null
+    ? null
+    : assertRepositoryWorkflow(body.workflow, "workflow");
+  return { repository, rootPath, baseRef, testCases, ...(workflow ? { workflow } : {}) };
 }
 
 export function validatePullRequestSubmission(body) {

@@ -91,6 +91,37 @@ revisor pr bypassed                      # 後追いレビュー待ち一覧
 revisor pr bypass-reviewed <number> --note "<確認結果>"
 ```
 
+## 公開ワークフローの選択
+
+org ごとに公開経路が違う。 LUDIARS は GitHub App + Release 管理 (Revisor Workflow)、
+MELPOT は全 private で通常 push が通り App を入れる理由が無い (GitHub Workflow)。
+どちらで送るかは登録リポジトリの `workflow` 属性で決める
+(設計: `spec/plan/workflow-selection-design.md`)。
+
+```
+revisor repo list                                        # workflow 列付き
+revisor repo set-workflow <owner/name> <revisor|github>
+```
+
+- 優先順は **リポ個別指定 > org 既定 > グローバル既定 (`revisor`)**。 org 既定は環境変数
+  `REVISOR_ORG_WORKFLOWS` (例 `MELPOT=github`、 複数はカンマ区切り)。 誤記は既定へ落とさず
+  設定エラーとして投げる — 黙って `revisor` に戻ると、 公開が理由の見えないまま保留され続ける。
+- `repo register` の JSON 本文でも `"workflow": "github"` を指定できる。 未指定は「指定なし」で
+  保存されるので、 後から org 既定を効かせられる。
+- `workflow = "github"` は GitHub App を使わない。 登録 checkout の `origin` が指す先へ、
+  その環境の git 資格情報でマージコミット (とリリースタグ) を fast-forward push するだけで、
+  remote tags 照会も GitHub Release 作成も行わない。 push が失敗したら保留 (deferred) に落ち、
+  ローカルマージは完結する — 後送は `revisor publish-pending` が同じ経路で再試行する。 `origin`
+  は対象と一致する `github.com` の HTTPS または GitHub SSH URL だけを使う。origin が無い場合は
+  対象リポジトリの HTTPS URL へフォールバックし、それ以外の origin は資格情報を渡さず設定エラーにする。
+- `.revisor-version` ゲート・審査ゲート・セキュリティスキャン・タグ選定は両者で共通。
+
+MELPOT の既存登録を移行する例:
+
+```
+revisor repo set-workflow MELPOT/KuzuSurvivors github
+```
+
 ## 入力の形
 
 `pr submit` と `repo register` は HTTP API と同じ JSON 本文を第一級の入力にしている

@@ -152,6 +152,19 @@ export class LocalPrStore {
     });
   }
 
+  // 公開ワークフローだけを差し替える。 再登録 (`repo register`) を通すと test_cases
+  // など登録本文の全項目を書き直す必要があり、 属性 1 つの変更には重すぎる。
+  updateRepositoryWorkflow(repository, workflow) {
+    return mutateState(this.path, "update-repository-workflow", (state) => {
+      const existing = state.repositories.find((candidate) =>
+        candidate.repository.toLowerCase() === String(repository).toLowerCase());
+      if (!existing) return null;
+      existing.workflow = workflow;
+      existing.updatedAt = this.now();
+      return structuredClone(existing);
+    });
+  }
+
   getRepository(repository) {
     const record = readState(this.path).repositories.find((candidate) =>
       candidate.repository.toLowerCase() === String(repository).toLowerCase());
