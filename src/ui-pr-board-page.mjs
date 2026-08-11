@@ -237,6 +237,13 @@ const CONTROLLER_SOURCE = `
       close.addEventListener('click', () => runAction(close, pr.id, 'close'));
       wrapper.append(close);
     }
+    if (pr.status === 'open' && pr.checkStatus === 'queued' && pr.reviewLane !== 'fast') {
+      const fastLane = document.createElement('button');
+      fastLane.className = 'secondary';
+      fastLane.textContent = 'ファストレーンへ移動';
+      fastLane.addEventListener('click', () => runAction(fastLane, pr.id, 'fast-lane'));
+      wrapper.append(fastLane);
+    }
     return wrapper;
   }
 
@@ -298,6 +305,9 @@ const CONTROLLER_SOURCE = `
       element('span', null, entry.status === 'running'
         ? '実行中' + (entry.workerId ? ' (' + entry.workerId + ')' : '')
         : '待機中'),
+      ...(entry.reviewLane === 'fast' || request.reviewLane === 'fast'
+        ? [element('span', 'warn', 'ファストレーン')]
+        : []),
     );
     return item;
   }

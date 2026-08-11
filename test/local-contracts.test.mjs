@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  validateFastLanePromotion,
   validatePullRequestSubmission,
   validateRepositoryRegistration,
+  validateReviewRetry,
 } from "../src/local-contracts.mjs";
 
 const PR_CONTENT = [
@@ -69,9 +71,37 @@ test("normalizes argv test cases and local PR metadata", () => {
     reviewers: [],
     headRef: "feat/local-pr",
     baseRef: undefined,
+    reviewLane: "standard",
     // 投稿元セッション未指定 = 完了通知の宛先なし (CLI / スクリプト投稿)。
     sessionId: null,
   });
+});
+
+test("uses the fast lane only after an explicit boolean opt-in", () => {
+  assert.equal(validatePullRequestSubmission(pullRequestInput()).reviewLane, "standard");
+  assert.equal(validatePullRequestSubmission(pullRequestInput({ fast_lane: false })).reviewLane, "standard");
+  assert.equal(validatePullRequestSubmission(pullRequestInput({ fast_lane: true })).reviewLane, "fast");
+  assert.throws(
+    () => validatePullRequestSubmission(pullRequestInput({ fast_lane: "true" })),
+    /fast_lane must be a boolean/,
+  );
+});
+
+test("validates optional retry and promotion bodies at the local API boundary", () => {
+  assert.deepEqual(validateReviewRetry(null), { fastLane: false });
+  assert.deepEqual(validateReviewRetry({ fast_lane: true }), { fastLane: true });
+  assert.throws(() => validateReviewRetry([]), /Request body must be an object/);
+  assert.throws(() => validateReviewRetry({ fast_lane: "true" }), /must be a boolean/);
+
+  assert.deepEqual(validateFastLanePromotion(null), { sessionId: null });
+  assert.deepEqual(
+    validateFastLanePromotion({ session_id: "lictor-owner" }),
+    { sessionId: "lictor-owner" },
+  );
+  assert.throws(
+    () => validateFastLanePromotion({ session_id: "x".repeat(129) }),
+    /session_id is invalid/,
+  );
 });
 
 test("validates Discord and Slack source links", () => {

@@ -27,6 +27,7 @@ const BODY = `
         <div class="field"><label for="pr-head">head branch</label><input id="pr-head" required placeholder="feat/local-change"></div>
         <div class="field"><label for="pr-author">author</label><input id="pr-author" required value="local"></div>
         <div class="field"><label for="pr-labels">labels (comma separated)</label><input id="pr-labels"></div>
+        <div class="field"><label class="check"><input id="pr-fast-lane" type="checkbox">ファストレーンを明示的に使う</label><span class="note">新しい実装をすぐ試したい場合だけ選択します。未選択の PR は通常キューへ入ります。</span></div>
         <div class="field"><label for="pr-body">PR内容</label><textarea id="pr-body" required placeholder="## 実装内容&#10;- 実装したことを具体的に記載する。&#10;&#10;## 受け入れ条件&#10;- 満たすべき条件を具体的に記載する。"></textarea></div>
         <button type="submit">PR を登録して審査開始</button>
         <p id="pr-message" role="status"></p>
@@ -86,9 +87,12 @@ const CONTROLLER_SOURCE = `
       queue.textContent = [
         'running: ' + jobs.running,
         'queued: ' + jobs.queued,
+        'standard: ' + (jobs.lanes?.standard || 0),
+        'fast: ' + (jobs.lanes?.fast || 0),
         '',
         ...jobs.jobs.slice(0, 20).map((job) =>
-          job.status + '  ' + job.request.repository + '#' + job.request.number + '  ' + job.id),
+          '[' + job.reviewLane + '] ' + job.status + '  '
+            + job.request.repository + '#' + job.request.number + '  ' + job.id),
       ].join('\\n');
       renderRepositories(repositories.repositories, prs.pullRequests, releases.projects);
     } catch (error) {
@@ -111,6 +115,7 @@ const CONTROLLER_SOURCE = `
           labels: document.querySelector('#pr-labels').value
             .split(',').map((label) => label.trim()).filter(Boolean),
           head_ref: document.querySelector('#pr-head').value,
+          fast_lane: document.querySelector('#pr-fast-lane').checked,
         }),
       });
       prMessage.textContent = 'PR を登録しました。';

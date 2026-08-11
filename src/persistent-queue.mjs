@@ -46,6 +46,13 @@ export class PersistentPrReviewQueue {
     return job;
   }
 
+  /** @implements SPEC-REVIEW-FAST-LANE-AUTHORITY */
+  async promote(localPrId) {
+    const job = await this.jobs.promote(localPrId);
+    await this.#wake();
+    return job;
+  }
+
   /**
    * ワーカーの起動失敗で投入そのものを失敗させない。 job は記録済みなので、次の投入や
    * `revisor run-worker` の手動実行、`revisor sweep` から必ず拾い直せる。

@@ -38,6 +38,7 @@ test("stores settings and encrypts local workflow secrets", () => {
       fallbackReviewer: "codex-sol",
       concordiaContextEnabled: true,
       workerCount: 1,
+      fastLaneSlots: 0,
       largeReviewLineThreshold: 1_000,
       multiDomainReviewThreshold: 3,
       costValidationModeEnabled: false,
@@ -64,6 +65,7 @@ test("stores settings and encrypts local workflow secrets", () => {
       fallbackReviewer: "claude-opus",
       concordiaContextEnabled: false,
       workerCount: 3,
+      fastLaneSlots: 2,
       largeReviewLineThreshold: 750,
       multiDomainReviewThreshold: 2,
       costValidationModeEnabled: true,
@@ -118,6 +120,19 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.equal(rawConfig.includes("workflow-secret"), false);
     assert.equal(rawConfig.includes("revisor.example.com"), false);
     assert.equal(readSettings(state.env).workerCount, 3);
+    assert.equal(readSettings(state.env).fastLaneSlots, 2);
+    assert.throws(() => writeSettings({
+      anatomiaFolder: "E:/Document/Ars/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+      fastLaneSlots: 1,
+    }, state.env), /leave one standard review slot/);
+    assert.throws(() => writeSettings({
+      anatomiaFolder: "E:/Document/Ars/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 2,
+      fastLaneSlots: 2,
+    }, state.env), /leave one standard review slot/);
     assert.equal(readSettings(state.env).largeReviewLineThreshold, 750);
     assert.equal(readSettings(state.env).multiDomainReviewThreshold, 2);
     assert.equal(readSettings(state.env).costValidationModeEnabled, true);

@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { CHANGE_KINDS } from "./change-classification.mjs";
+import { reviewLaneFromOptIn, REVIEW_LANES } from "./review-lane.mjs";
 
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SAFE_REF = /^(?!\/)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
@@ -234,6 +235,7 @@ export function validatePullRequestSubmission(body) {
     reviewers: stringList(body.reviewers, "reviewers"),
     headRef: gitRef(body.head_ref, "head_ref"),
     baseRef: body.base_ref === undefined ? undefined : gitRef(body.base_ref, "base_ref"),
+    reviewLane: reviewLaneFromOptIn(body.fast_lane),
     // Concordia session that submitted the PR. Reviews run locally and take
     // minutes, so the submitter is told the verdict through Concordia instead of
     // polling for it. Optional: CLI and script submissions have no session, and
@@ -245,5 +247,25 @@ export function validatePullRequestSubmission(body) {
       || (typeof body.session_id === "string" && !body.session_id.trim())
       ? null
       : text(body.session_id, "session_id", 128),
+  };
+}
+
+export function validateFastLanePromotion(body) {
+  if (body === undefined || body === null) return { sessionId: null };
+  object(body, "Request body");
+  return {
+    sessionId: body.session_id === undefined
+      || body.session_id === null
+      || (typeof body.session_id === "string" && !body.session_id.trim())
+      ? null
+      : text(body.session_id, "session_id", 128),
+  };
+}
+
+export function validateReviewRetry(body) {
+  if (body === undefined || body === null) return { fastLane: false };
+  object(body, "Request body");
+  return {
+    fastLane: reviewLaneFromOptIn(body.fast_lane) === REVIEW_LANES.FAST,
   };
 }

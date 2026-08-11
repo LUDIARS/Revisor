@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from "node:path";
 import { RevisorError } from "./errors.mjs";
 import { withFileLock } from "./file-lock.mjs";
+import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
 import { resolveStatePath } from "./state-store.mjs";
 
 // 審査キューの正本。 常駐プロセスの in-memory キューだったものをファイルへ移した。
@@ -19,7 +20,38 @@ export function resolveJobsPath(env = process.env) {
 }
 
 function emptyJobs() {
-  return { version: 1, jobs: [] };
+  return { version: 1, nextFastLaneSequence: 1, jobs: [] };
+}
+
+function storedFastLaneSequence(job) {
+  return Number.isSafeInteger(job.fastLaneSequence) && job.fastLaneSequence > 0
+    ? job.fastLaneSequence
+    : null;
+}
+
+function canonicalizeFastLaneSequence(value) {
+  let lastSequence = value.jobs.reduce(
+    (maximum, job) => Math.max(maximum, storedFastLaneSequence(job) ?? 0),
+    0,
+  );
+  const missing = value.jobs
+    .filter((job) => job.reviewLane === REVIEW_LANES.FAST && !storedFastLaneSequence(job))
+    .sort((left, right) => {
+      const leftTime = left.fastLaneEnteredAt ?? left.createdAt;
+      const rightTime = right.fastLaneEnteredAt ?? right.createdAt;
+      return leftTime.localeCompare(rightTime);
+    });
+  for (const job of missing) job.fastLaneSequence = ++lastSequence;
+  value.nextFastLaneSequence = Number.isSafeInteger(value.nextFastLaneSequence)
+    && value.nextFastLaneSequence > lastSequence
+    ? value.nextFastLaneSequence
+    : lastSequence + 1;
+}
+
+function takeFastLaneSequence(value) {
+  const sequence = value.nextFastLaneSequence;
+  value.nextFastLaneSequence += 1;
+  return sequence;
 }
 
 function readJobs(path) {
@@ -29,6 +61,14 @@ function readJobs(path) {
     if (!value || value.version !== 1 || !Array.isArray(value.jobs)) {
       throw new Error("invalid schema");
     }
+    for (const job of value.jobs) {
+      job.reviewLane = normalizeReviewLane(job.reviewLane ?? job.request?.reviewLane);
+      job.request = { ...job.request, reviewLane: job.reviewLane };
+      if (job.reviewLane === REVIEW_LANES.FAST && !job.fastLaneEnteredAt) {
+        job.fastLaneEnteredAt = job.createdAt;
+      }
+    }
+    canonicalizeFastLaneSequence(value);
     return value;
   } catch (error) {
     throw new RevisorError(`Revisor job queue is unreadable: ${path}`, { cause: error });
@@ -100,17 +140,28 @@ export class JobStore {
       }
       if (existing) value.jobs.splice(value.jobs.indexOf(existing), 1);
       const timestamp = this.now();
+      const reviewLane = normalizeReviewLane(request.reviewLane);
       const job = {
         id: this.createId(),
         key,
         localPrId: request.localPrId,
-        request,
+        reviewLane,
+        request: {
+          ...request,
+          reviewLane,
+        },
         status: "queued",
         attempts: 0,
         claimedPid: null,
         error: null,
         createdAt: timestamp,
         updatedAt: timestamp,
+        fastLaneEnteredAt: reviewLane === REVIEW_LANES.FAST
+          ? timestamp
+          : null,
+        fastLaneSequence: reviewLane === REVIEW_LANES.FAST
+          ? takeFastLaneSequence(value)
+          : null,
       };
       value.jobs.push(job);
       trim(value, this.maxJobs);
@@ -122,11 +173,32 @@ export class JobStore {
    * 実行できる job を 1 つ確保する。 確保と同時に pid を書くので、ワーカーが死んだ job は
    * `reclaimAbandoned` から見分けられる。
    */
-  async claimNext() {
+  async claimNext({ reviewLane = null } = {}) {
+    const selectedLane = reviewLane === null ? null : normalizeReviewLane(reviewLane);
     return this.#mutate((value) => {
       const job = value.jobs
-        .filter((candidate) => candidate.status === "queued")
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
+        .filter((candidate) => candidate.status === "queued"
+          && (selectedLane === null
+            || normalizeReviewLane(candidate.reviewLane ?? candidate.request?.reviewLane)
+              === selectedLane))
+        .sort((left, right) => {
+          if (selectedLane === null) {
+            const leftLane = normalizeReviewLane(left.reviewLane ?? left.request?.reviewLane);
+            const rightLane = normalizeReviewLane(right.reviewLane ?? right.request?.reviewLane);
+            if (leftLane !== rightLane) return leftLane === REVIEW_LANES.FAST ? -1 : 1;
+          }
+          const orderedLane = selectedLane
+            ?? normalizeReviewLane(left.reviewLane ?? left.request?.reviewLane);
+          const leftOrder = orderedLane === REVIEW_LANES.FAST
+            ? storedFastLaneSequence(left)
+            : left.createdAt;
+          const rightOrder = orderedLane === REVIEW_LANES.FAST
+            ? storedFastLaneSequence(right)
+            : right.createdAt;
+          return orderedLane === REVIEW_LANES.FAST
+            ? leftOrder - rightOrder
+            : leftOrder.localeCompare(rightOrder);
+        })[0];
       if (!job) return null;
       job.status = "running";
       job.attempts += 1;
@@ -134,6 +206,27 @@ export class JobStore {
       job.updatedAt = this.now();
       return structuredClone(job);
     }, "claim");
+  }
+
+  /** @implements SPEC-REVIEW-FAST-LANE-DURABILITY */
+  async promote(localPrId) {
+    return this.#mutate((value) => {
+      const job = value.jobs.find((candidate) =>
+        candidate.localPrId === localPrId && candidate.status === "queued");
+      if (!job) {
+        throw new RevisorError(`Queued review job for local PR '${localPrId}' was not found.`);
+      }
+      if (job.reviewLane === REVIEW_LANES.FAST) return structuredClone(job);
+      job.reviewLane = REVIEW_LANES.FAST;
+      job.request = { ...job.request, reviewLane: REVIEW_LANES.FAST };
+      // Promotion joins the tail of the existing fast FIFO instead of jumping
+      // ahead based on the older standard-lane submission timestamp.
+      const timestamp = this.now();
+      job.fastLaneEnteredAt = timestamp;
+      job.fastLaneSequence = takeFastLaneSequence(value);
+      job.updatedAt = timestamp;
+      return structuredClone(job);
+    }, "promote-fast-lane");
   }
 
   async settle(id, { status, error = null }) {
@@ -191,6 +284,14 @@ export class JobStore {
     return {
       queued: jobs.filter((job) => job.status === "queued").length,
       running: jobs.filter((job) => job.status === "running").length,
+      lanes: {
+        standard: jobs.filter((job) =>
+          (job.status === "queued" || job.status === "running")
+          && job.reviewLane === REVIEW_LANES.STANDARD).length,
+        fast: jobs.filter((job) =>
+          (job.status === "queued" || job.status === "running")
+          && job.reviewLane === REVIEW_LANES.FAST).length,
+      },
       jobs,
     };
   }

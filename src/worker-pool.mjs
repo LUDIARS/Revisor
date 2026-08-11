@@ -1,9 +1,15 @@
 import { fork } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {
+  fastLaneReservation,
+  normalizeReviewLane,
+  REVIEW_LANES,
+} from "./review-lane.mjs";
 
 const WORKER_ENTRY = fileURLToPath(new URL("./worker-entry.mjs", import.meta.url));
 
+/** @implements SPEC-REVIEW-FAST-LANE-CAPACITY */
 export class PrReviewWorkerPool {
   #workers = new Set();
   #idle = [];
@@ -20,6 +26,7 @@ export class PrReviewWorkerPool {
     createId = randomUUID,
     now = () => new Date().toISOString(),
     onStateChange = () => {},
+    fastLaneSlots,
     forkWorker = () => fork(WORKER_ENTRY, [], {
       cwd,
       env,
@@ -31,6 +38,7 @@ export class PrReviewWorkerPool {
       throw new TypeError("PR review worker count must be a positive integer.");
     }
     this.size = size;
+    this.fastLaneReservation = fastLaneReservation(size, fastLaneSlots);
     this.createId = createId;
     this.now = now;
     this.onStateChange = onStateChange;
@@ -38,7 +46,7 @@ export class PrReviewWorkerPool {
     for (let index = 0; index < size; index += 1) this.#spawn();
   }
 
-  run(request, { priority = 1 } = {}) {
+  run(request, { priority = 1, reviewLane = REVIEW_LANES.STANDARD } = {}) {
     if (this.#closing) return Promise.reject(new Error("PR review worker pool is closing."));
     if (!Number.isInteger(priority) || priority < 0) {
       return Promise.reject(new TypeError("PR review task priority must be a non-negative integer."));
@@ -48,6 +56,7 @@ export class PrReviewWorkerPool {
         id: this.createId(),
         request,
         priority,
+        reviewLane: normalizeReviewLane(reviewLane),
         status: "queued",
         createdAt: this.now(),
         startedAt: null,
@@ -58,7 +67,12 @@ export class PrReviewWorkerPool {
       // Stable priority insertion: a ready model review must not wait behind
       // diagnostics that were queued first, while equal-priority tasks retain
       // their arrival order.
-      const index = this.#waiting.findIndex((candidate) => candidate.priority > priority);
+      const index = this.#waiting.findIndex((candidate) => {
+        if (candidate.reviewLane !== task.reviewLane) {
+          return task.reviewLane === REVIEW_LANES.FAST;
+        }
+        return candidate.priority > priority;
+      });
       if (index === -1) this.#waiting.push(task);
       else this.#waiting.splice(index, 0, task);
       this.#notifyState();
@@ -70,6 +84,7 @@ export class PrReviewWorkerPool {
     return {
       workers: {
         configured: this.size,
+        fastLaneReserved: this.fastLaneReservation,
         idle: this.#idle.length,
         running: this.#active.size,
       },
@@ -144,8 +159,18 @@ export class PrReviewWorkerPool {
 
   #dispatch() {
     while (!this.#closing && this.#idle.length > 0 && this.#waiting.length > 0) {
+      const standardRunning = [...this.#active.values()].filter((task) =>
+        task.reviewLane === REVIEW_LANES.STANDARD).length;
+      const fastRunning = this.#active.size - standardRunning;
+      const standardCapacity = this.size - this.fastLaneReservation;
+      const fastCapacity = this.fastLaneReservation;
+      const taskIndex = this.#waiting.findIndex((task) =>
+        task.reviewLane === REVIEW_LANES.FAST
+          ? fastRunning < fastCapacity
+          : standardRunning < standardCapacity);
+      if (taskIndex === -1) return;
       const worker = this.#idle.shift();
-      const task = this.#waiting.shift();
+      const [task] = this.#waiting.splice(taskIndex, 1);
       task.worker = worker;
       task.workerId = this.#workerIds.get(worker) ?? "worker";
       task.status = "running";
@@ -178,6 +203,7 @@ export class PrReviewWorkerPool {
       number: Number.isInteger(request.number) ? request.number : null,
       localPrId: typeof request.localPrId === "string" ? request.localPrId : null,
       priority: task.priority,
+      reviewLane: task.reviewLane,
       status: task.status,
       createdAt: task.createdAt,
       startedAt: task.startedAt,

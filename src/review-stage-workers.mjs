@@ -43,6 +43,7 @@ export class ReviewStageWorkers {
     env = process.env,
     createPool = (options) => new PrReviewWorkerPool(options),
     onStateChange = () => {},
+    fastLaneSlots,
   }) {
     if (typeof onStateChange !== "function") {
       throw new TypeError("Review-stage worker state listener must be a function.");
@@ -54,16 +55,17 @@ export class ReviewStageWorkers {
         size,
         cwd,
         env,
+        fastLaneSlots,
         onStateChange: () => this.#notifyState(),
       }),
     ]));
   }
 
-  run(work, { priority = 1 } = {}) {
+  run(work, { priority = 1, reviewLane } = {}) {
     const queue = queueForStage(work?.stage);
     if (!queue) return Promise.reject(new Error(`Unsupported review work stage '${work?.stage}'.`));
     const pool = this.pools.get(queue.id);
-    return pool.run(work, { priority });
+    return pool.run(work, { priority, reviewLane });
   }
 
   state() {

@@ -139,6 +139,7 @@ export class LocalPrReporter {
     this.store.updatePullRequest(job.request.localPrId, {
       jobId: job.id,
       checkStatus: "queued",
+      reviewLane: job.request.reviewLane ?? "standard",
     });
   }
 

@@ -16,10 +16,12 @@ import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 function printHelp() {
   process.stdout.write([
     "Usage:",
-    "  revisor pr submit --repository <owner/name> --head-ref <branch> --title <text> [--body-file <path>]",
+    "  revisor pr submit --repository <owner/name> --head-ref <branch> --title <text> [--body-file <path>] [--fast-lane]",
     "  revisor pr submit --json-file <path>   # same body the HTTP API accepts",
     "  revisor pr list [--repository <owner/name>] [--json]",
-    "  revisor pr show|retry|close|merge <number> [--reason <text>] [--json]",
+    "  revisor pr show|close|merge <number> [--reason <text>] [--json]",
+    "  revisor pr retry <number> [--fast-lane] [--json]",
+    "  revisor pr fast-lane <number> [--session-id <id>] [--json]",
     "  revisor pr merge <number> --bypass --reason <text>   # CLI only: merge without a review",
     "  revisor pr bypassed [--all] [--json]                 # bypass merges awaiting follow-up review",
     "  revisor pr bypass-reviewed <number> [--note <text>]",

@@ -74,12 +74,143 @@ test("authenticates and creates a local PR without a GitHub head", async () => {
     assert.equal(output.status, 202);
     assert.equal(submitted.repository, "LUDIARS/Revisor");
     assert.equal(submitted.headRef, "feat/local-workflow");
+    assert.equal(submitted.reviewLane, "standard");
     assert.equal("headSha" in submitted, false);
     assert.deepEqual(JSON.parse(output.body).pullRequest, {
       id: "pr-1",
       number: 1,
       checkStatus: "queued",
     });
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("accepts an explicit fast-lane submission and authenticated queued promotion", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const calls = [];
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {
+      async submitPullRequest(value) {
+        calls.push(["submit", value.reviewLane]);
+        return { id: "pr-1", reviewLane: value.reviewLane };
+      },
+      async promotePullRequest(id, options) {
+        calls.push(["promote", id, options.sessionId]);
+        return { id, reviewLane: "fast" };
+      },
+    },
+  });
+  try {
+    const submitted = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({
+        repository: "LUDIARS/Revisor",
+        title: "ファストレーンで審査する",
+        body: "## 実装内容\n- 明示指定を追加する。\n\n## 受け入れ条件\n- 通常時は使用しない。",
+        head_ref: "feat/fast",
+        fast_lane: true,
+      }),
+    }), submitted);
+    assert.equal(submitted.status, 202);
+
+    const promoted = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs/pr-1/fast-lane",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({ session_id: "lictor-owner" }),
+    }), promoted);
+    assert.equal(promoted.status, 200);
+    assert.deepEqual(calls, [
+      ["submit", "fast"],
+      ["promote", "pr-1", "lictor-owner"],
+    ]);
+
+    const malformed = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs/pr-1/fast-lane",
+      headers: { authorization: "Bearer workflow-token" },
+      body: "{",
+    }), malformed);
+    assert.equal(malformed.status, 400);
+    assert.deepEqual(calls, [
+      ["submit", "fast"],
+      ["promote", "pr-1", "lictor-owner"],
+    ]);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("manual retry uses the fast lane only for a strict fresh opt-in", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const calls = [];
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: {
+      async retryPullRequest(id, options) {
+        calls.push([id, options.fastLane]);
+        return { id, reviewLane: options.fastLane ? "fast" : "standard" };
+      },
+    },
+  });
+  try {
+    const standard = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs/pr-1/retry",
+      headers: { authorization: "Bearer workflow-token" },
+    }), standard);
+    assert.equal(standard.status, 202);
+
+    const fast = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs/pr-1/retry",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({ fast_lane: true }),
+    }), fast);
+    assert.equal(fast.status, 202);
+
+    const invalid = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs/pr-1/retry",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({ fast_lane: "true" }),
+    }), invalid);
+    assert.equal(invalid.status, 400);
+
+    const malformedWorkflow = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/local-prs/pr-1/retry",
+      headers: { authorization: "Bearer workflow-token" },
+      body: "{",
+    }), malformedWorkflow);
+    assert.equal(malformedWorkflow.status, 400);
+
+    const malformedUi = response();
+    await handler(request({
+      method: "POST",
+      url: "/api/local-prs/pr-1/retry",
+      headers: { "x-revisor-session": "ui-token" },
+      body: "{",
+    }), malformedUi);
+    assert.equal(malformedUi.status, 400);
+    assert.deepEqual(calls, [["pr-1", false], ["pr-1", true]]);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }
@@ -240,6 +371,7 @@ test("still requires the token for every mutating local API request", async () =
     localPrService: {
       mergePullRequest: async () => ({ id: "pr-1", status: "merged" }),
       retryPullRequest: async () => ({ id: "pr-1" }),
+      promotePullRequest: async () => ({ id: "pr-1", reviewLane: "fast" }),
       closePullRequest: () => ({ id: "pr-1", status: "closed" }),
     },
   });
@@ -247,6 +379,7 @@ test("still requires the token for every mutating local API request", async () =
     for (const url of [
       "/v1/local-prs/pr-1/merge",
       "/v1/local-prs/pr-1/retry",
+      "/v1/local-prs/pr-1/fast-lane",
       "/v1/local-prs/pr-1/close",
       "/v1/repositories",
     ]) {

@@ -39,6 +39,11 @@ const BODY = `
         <span class="note">Anatomia・登録テスト・モデルレビュー・セキュリティ診断は専用 queue を持ち、この数ずつ並列実行します。</span>
       </div>
       <div class="field">
+        <label for="fast-lane-slots">ファストレーン予約枠（worker が2以上なら1〜2）</label>
+        <input id="fast-lane-slots" type="number" min="0" max="2" step="1" required>
+        <span class="note">通常審査へは貸し出しません。worker が1のときは0（利用不可）にしてください。</span>
+      </div>
+      <div class="field">
         <fieldset>
           <legend>コスト・品質・速度の検証モードで省略する工程</legend>
           <label class="check"><input id="cost-validation-review" type="checkbox">Review / 自動修正を skipped</label>
@@ -202,6 +207,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
     document.querySelector('#anatomia-review-gate').checked = state.settings.anatomiaReviewGateEnabled;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
+    document.querySelector('#fast-lane-slots').value = String(state.settings.fastLaneSlots);
     document.querySelector('#large-review-line-threshold').value =
       String(state.settings.largeReviewLineThreshold);
     document.querySelector('#multi-domain-review-threshold').value =
@@ -268,6 +274,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
           anatomiaReviewGateEnabled: document.querySelector('#anatomia-review-gate').checked,
           workerCount: Number(document.querySelector('#worker-count').value),
+          fastLaneSlots: Number(document.querySelector('#fast-lane-slots').value),
           largeReviewLineThreshold:
             Number(document.querySelector('#large-review-line-threshold').value),
           multiDomainReviewThreshold:

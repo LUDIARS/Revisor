@@ -3,8 +3,10 @@ import { createServer } from "node:http";
 import { bearerToken, tokenMatches } from "./auth.mjs";
 import { readAllowedHosts, readWorkflowToken } from "./config.mjs";
 import {
+  validateFastLanePromotion,
   validatePullRequestSubmission,
   validateRepositoryRegistration,
+  validateReviewRetry,
 } from "./local-contracts.mjs";
 import { isLoopbackAddress, isLoopbackHost } from "./host-policy.mjs";
 import { PrEventStream } from "./pr-event-stream.mjs";
@@ -139,10 +141,26 @@ export function createRequestHandler({
       }
       const retry = /^\/v1\/local-prs\/([^/]+)\/retry$/.exec(url.pathname);
       if (request.method === "POST" && retry) {
+        const retryOptions = validateReviewRetry(
+          await readJsonBody(request, { optional: true }),
+        );
         const pullRequest = await localPrService.retryPullRequest(
           decodeURIComponent(retry[1]),
+          retryOptions,
         );
         sendJson(response, 202, { pullRequest });
+        return;
+      }
+      const fastLane = /^\/v1\/local-prs\/([^/]+)\/fast-lane$/.exec(url.pathname);
+      if (request.method === "POST" && fastLane) {
+        const promotion = validateFastLanePromotion(
+          await readJsonBody(request, { optional: true }),
+        );
+        const pullRequest = await localPrService.promotePullRequest(
+          decodeURIComponent(fastLane[1]),
+          promotion,
+        );
+        sendJson(response, 200, { pullRequest });
         return;
       }
       const detail = /^\/v1\/local-prs\/([^/]+)$/.exec(url.pathname);

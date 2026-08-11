@@ -33,3 +33,55 @@ test("a following flag cannot satisfy the required bypass reason", async () => {
   );
   assert.equal(mergeCalled, false);
 });
+
+test("promotes a queued PR through the explicit fast-lane command", async () => {
+  const writes = [];
+  const pullRequest = {
+    id: "pr-7",
+    number: 7,
+    repository: "LUDIARS/Revisor",
+    status: "open",
+    checkStatus: "queued",
+    title: "ファストレーン対応",
+  };
+  let request;
+  const code = await runLocalPrCommand(
+    ["pr", "fast-lane", "7", "--session-id", "lictor-owner", "--json"],
+    {
+      stdout: { write(value) { writes.push(value); } },
+      createContext: () => ({
+        store: { listPullRequests: () => [pullRequest] },
+        jobs: {},
+        localPrService: {
+          async promotePullRequest(id, options) {
+            request = { id, ...options };
+            return { ...pullRequest, reviewLane: "fast" };
+          },
+        },
+      }),
+    },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(request, { id: "pr-7", sessionId: "lictor-owner" });
+  assert.equal(JSON.parse(writes.join("")).reviewLane, "fast");
+});
+
+test("rejects an oversized promotion session before calling the service", async () => {
+  let promoted = false;
+  await assert.rejects(
+    () => runLocalPrCommand(
+      ["pr", "fast-lane", "7", "--session-id", "x".repeat(129)],
+      {
+        createContext: () => ({
+          store: { listPullRequests: () => [{ id: "pr-7", number: 7 }] },
+          jobs: {},
+          localPrService: {
+            async promotePullRequest() { promoted = true; },
+          },
+        }),
+      },
+    ),
+    /session_id is invalid/,
+  );
+  assert.equal(promoted, false);
+});

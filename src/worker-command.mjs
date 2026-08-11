@@ -3,6 +3,7 @@ import { createReviewContext } from "./review-context.mjs";
 import { createPrReviewRunner } from "./runner.mjs";
 import { ReviewStageWorkers } from "./review-stage-workers.mjs";
 import { workerPresencePath } from "./worker-spawn.mjs";
+import { drainReviewJobs } from "./review-job-scheduler.mjs";
 
 /**
  * 短命ワーカー。 キューが空になるまで審査を回して終わる。
@@ -34,7 +35,12 @@ export async function runReviewWorker({
   let stageWorkers;
   let ran = 0;
   try {
-    stageWorkers = createStageWorkers({ size: context.settings.workerCount, cwd, env });
+    stageWorkers = createStageWorkers({
+      size: context.settings.workerCount,
+      fastLaneSlots: context.settings.fastLaneSlots,
+      cwd,
+      env,
+    });
     const runner = createRunner({
       cwd,
       env,
@@ -59,12 +65,13 @@ export async function runReviewWorker({
       await context.reporter.failed({ ...job, error: job.error });
     }
     for (;;) {
-      for (;;) {
-        const job = await context.jobs.claimNext();
-        if (!job) break;
-        ran += 1;
-        await runOne({ job, context, runner });
-      }
+      const drained = await drainReviewJobs({
+        jobs: context.jobs,
+        concurrency: context.settings.workerCount,
+        reservation: context.settings.fastLaneSlots,
+        run: (job) => runOne({ job, context, runner }),
+      });
+      ran += drained.ran;
       // 60 秒周期のスイープの置き換え。 base が進んで squash が通るようになった Test OK は
       // 「誰かが審査を終えた直後」に拾えれば足りる。 常駐タイマーは要らない。
       const summary = await context.localPrService.sweepAutoMerge();
@@ -77,7 +84,16 @@ export async function runReviewWorker({
       // その窓の投入はこの worker が拾い、解放後の投入は投入側が新しい worker を起こす。
       release();
       release = null;
-      if (context.jobs.state().queued === 0) return { ran, skipped: false };
+      const queuedState = context.jobs.state();
+      if (queuedState.queued === 0) return { ran, skipped: false };
+      const hasRunnableStandard = queuedState.jobs.some((job) =>
+        job.status === "queued" && (job.reviewLane ?? job.request?.reviewLane) !== "fast");
+      if (drained.heldFast > 0 && !hasRunnableStandard) {
+        log(
+          `Revisor worker held ${drained.heldFast} fast-lane job(s): no fast-lane slot is configured.`,
+        );
+        return { ran, skipped: false, heldFast: drained.heldFast };
+      }
       release = tryAcquireLock(presencePath, { label: "review-worker" });
       if (!release) return { ran, skipped: false };
     }

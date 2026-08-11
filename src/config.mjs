@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { decryptString, encryptString, isEncryptedBlob } from "./crypto.mjs";
 import { RevisorError } from "./errors.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
+import { defaultFastLaneSlots, fastLaneReservation } from "./review-lane.mjs";
 
 const LOCAL_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CONFIG_PATH_ENV = "REVISOR_CONFIG_PATH";
@@ -39,6 +40,7 @@ function defaults() {
     fallbackReviewer: "codex-sol",
     concordiaContextEnabled: true,
     workerCount: 1,
+    fastLaneSlots: 0,
     largeReviewLineThreshold: 1_000,
     multiDomainReviewThreshold: 3,
     costValidationModeEnabled: false,
@@ -164,6 +166,18 @@ export function readSettings(env = process.env) {
   const costValidationSkipAnatomiaDomain = typeof value.costValidationSkipAnatomiaDomain === "boolean"
     ? value.costValidationSkipAnatomiaDomain
     : legacyCostValidationMode;
+  const workerCount = Number.isInteger(value.workerCount)
+    && value.workerCount >= 1
+    && value.workerCount <= 8
+    ? value.workerCount
+    : base.workerCount;
+  let fastLaneSlots = defaultFastLaneSlots(workerCount);
+  try {
+    fastLaneSlots = fastLaneReservation(workerCount, value.fastLaneSlots);
+  } catch {
+    // Legacy configs have no fastLaneSlots. Invalid persisted values are not
+    // allowed to steal the last standard slot; fall back to the safe default.
+  }
   return {
     anatomiaFolder: typeof value.anatomiaFolder === "string"
       ? value.anatomiaFolder
@@ -173,11 +187,8 @@ export function readSettings(env = process.env) {
       ? "claude-opus"
       : base.fallbackReviewer,
     concordiaContextEnabled: value.concordiaContextEnabled !== false,
-    workerCount: Number.isInteger(value.workerCount)
-      && value.workerCount >= 1
-      && value.workerCount <= 8
-      ? value.workerCount
-      : base.workerCount,
+    workerCount,
+    fastLaneSlots,
     largeReviewLineThreshold: Number.isInteger(value.largeReviewLineThreshold)
       && value.largeReviewLineThreshold >= 1
       ? value.largeReviewLineThreshold
@@ -237,6 +248,14 @@ export function writeSettings(settings, env = process.env) {
   const workerCount = Number(settings.workerCount);
   if (!Number.isInteger(workerCount) || workerCount < 1 || workerCount > 8) {
     throw new RevisorError("Worker count must be an integer from 1 to 8.");
+  }
+  const fastLaneSlots = settings.fastLaneSlots === undefined
+    ? defaultFastLaneSlots(workerCount)
+    : Number(settings.fastLaneSlots);
+  try {
+    fastLaneReservation(workerCount, fastLaneSlots);
+  } catch (error) {
+    throw new RevisorError(error instanceof Error ? error.message : String(error));
   }
   const current = readSettings(env);
   const skipCostValidation = (key) => {
@@ -332,6 +351,7 @@ export function writeSettings(settings, env = process.env) {
     fallbackReviewer: settings.fallbackReviewer,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,
+    fastLaneSlots,
     largeReviewLineThreshold,
     multiDomainReviewThreshold,
     costValidationModeEnabled: costValidationSkipReview

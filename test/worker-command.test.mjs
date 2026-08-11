@@ -15,16 +15,21 @@ test("a job submitted during the final sweep is drained without another wake", a
   let closed = false;
   const job = {
     id: "job-late",
-    request: { localPrId: "pr-1", headSha: "a".repeat(40) },
+    status: "queued",
+    reviewLane: "standard",
+    request: { localPrId: "pr-1", headSha: "a".repeat(40), reviewLane: "standard" },
   };
   const context = {
-    settings: { workerCount: 1 },
+    settings: { workerCount: 1, fastLaneSlots: 0 },
     jobs: {
       path: join(directory, "jobs.json"),
       async reclaimAbandoned() { return { requeued: [], exhausted: [] }; },
-      async claimNext() { return queued.shift() ?? null; },
+      async claimNext({ reviewLane }) {
+        const index = queued.findIndex((entry) => entry.reviewLane === reviewLane);
+        return index < 0 ? null : queued.splice(index, 1)[0];
+      },
       async settle(id, outcome) { settled.push({ id, ...outcome }); },
-      state() { return { queued: queued.length }; },
+      state() { return { queued: queued.length, jobs: queued.map((entry) => ({ ...entry })) }; },
     },
     reporter: {
       async running() {},

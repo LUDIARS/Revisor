@@ -63,6 +63,13 @@ submissions stay local. Concordia owns the Discord credentials, so Revisor only
 resolves Concordia from the Excubitor catalog and never stores a Discord webhook
 or token.
 
+Review submissions use the standard lane by default. For a change that must be
+reviewed promptly for early product validation, opt in with `fast_lane: true` or
+`revisor pr submit ... --fast-lane`. Move an existing queued PR with
+`revisor pr fast-lane <number>`. Manual retries require `--fast-lane` again;
+without it they return to the standard lane. The reserved lane is unavailable
+when only one worker is configured.
+
 The Codex Security scan runs at most once per review pass and once right before
 the squash merge. It never re-runs after the opposite-provider autofix; the
 pre-merge scan covers those edits. Findings at or above the configured severity

@@ -570,7 +570,7 @@ export function createPrReviewRunner({
           number: request.number,
           localPrId: request.localPrId,
           options,
-        }, { priority });
+        }, { priority, reviewLane: request.reviewLane });
       };
       // This binding is intentionally per PR. A pool task must always carry
       // the local PR identity that owns it, never an ambient mutable request.

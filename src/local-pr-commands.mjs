@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import {
+  validateFastLanePromotion,
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
@@ -10,6 +11,7 @@ const LOCAL_COMMANDS = new Set([
   "pr:list",
   "pr:show",
   "pr:retry",
+  "pr:fast-lane",
   "pr:close",
   "pr:merge",
   "pr:bypassed",
@@ -61,6 +63,7 @@ function submissionBody(args, jsonBody) {
     head_ref: option(args, "--head-ref"),
     ...(option(args, "--base-ref") ? { base_ref: option(args, "--base-ref") } : {}),
     ...(option(args, "--session-id") ? { session_id: option(args, "--session-id") } : {}),
+    ...(args.includes("--fast-lane") ? { fast_lane: true } : {}),
   };
 }
 
@@ -120,8 +123,19 @@ export async function runLocalPrCommand(args, {
   }
   if (scope === "pr" && action === "retry") {
     const pullRequest = findByNumber(store, rest[0]);
-    const queued = await localPrService.retryPullRequest(pullRequest.id);
+    const queued = await localPrService.retryPullRequest(pullRequest.id, {
+      fastLane: args.includes("--fast-lane"),
+    });
     write(json ? queued : `Re-queued ${summarize(queued)}`);
+    return 0;
+  }
+  if (scope === "pr" && action === "fast-lane") {
+    const pullRequest = findByNumber(store, rest[0]);
+    const promotion = validateFastLanePromotion({
+      session_id: option(args, "--session-id"),
+    });
+    const promoted = await localPrService.promotePullRequest(pullRequest.id, promotion);
+    write(json ? promoted : `Moved ${summarize(promoted)} to the fast lane`);
     return 0;
   }
   if (scope === "pr" && action === "close") {
@@ -193,7 +207,10 @@ export async function runLocalPrCommand(args, {
   }
   if (scope === "queue" && action === "status") {
     const state = jobs.state();
-    write(json ? state : `queued=${state.queued} running=${state.running} jobs=${state.jobs.length}`);
+    write(json
+      ? state
+      : `queued=${state.queued} running=${state.running} standard=${state.lanes?.standard ?? 0}`
+        + ` fast=${state.lanes?.fast ?? 0} jobs=${state.jobs.length}`);
     return 0;
   }
   if (scope === "sweep" && action === undefined) {

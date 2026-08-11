@@ -34,6 +34,7 @@ test("routes each review concern to its own dedicated pool", async () => {
   const states = [];
   const workers = new ReviewStageWorkers({
     size: 2,
+    fastLaneSlots: 1,
     cwd: process.cwd(),
     createPool: (options) => {
       const pool = new FakePool(options);
@@ -50,12 +51,16 @@ test("routes each review concern to its own dedicated pool", async () => {
   ];
   await Promise.all(stages.map((stage, index) => workers.run(
     { stage, number: index + 1 },
-    { priority: index },
+    { priority: index, reviewLane: index === 0 ? "fast" : "standard" },
   )));
 
   assert.equal(pools.length, 4);
   assert.deepEqual(pools.map((pool) => pool.work[0]?.work.stage), stages);
   assert.deepEqual(pools.map((pool) => pool.work[0]?.options.priority), [0, 1, 2, 3]);
+  assert.deepEqual(pools.map((pool) => pool.options.fastLaneSlots), [1, 1, 1, 1]);
+  assert.deepEqual(pools.map((pool) => pool.work[0]?.options.reviewLane), [
+    "fast", "standard", "standard", "standard",
+  ]);
   assert.deepEqual(workers.state().queues.map((queue) => queue.id), [
     "anatomia", "tests", "review", "security",
   ]);

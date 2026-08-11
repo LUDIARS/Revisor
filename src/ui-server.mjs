@@ -11,6 +11,7 @@ import {
 } from "./config.mjs";
 import { resolveAnatomiaCli } from "./anatomia.mjs";
 import {
+  validateReviewRetry,
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
@@ -48,7 +49,7 @@ export function sendJson(response, status, body) {
   send(response, status, "application/json; charset=utf-8", JSON.stringify(body));
 }
 
-export async function readJsonBody(request) {
+export async function readJsonBody(request, { optional = false } = {}) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
@@ -56,8 +57,10 @@ export async function readJsonBody(request) {
     if (size > MAX_BODY_BYTES) throw new Error("Request body is too large.");
     chunks.push(chunk);
   }
+  const body = Buffer.concat(chunks).toString("utf8");
+  if (optional && body.length === 0) return null;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(body);
   } catch (error) {
     throw new Error("Request body must be valid JSON.", { cause: error });
   }
@@ -276,9 +279,22 @@ export function createUiRequestHandler({
       }
       const retry = /^\/api\/local-prs\/([^/]+)\/retry$/.exec(url.pathname);
       if (request.method === "POST" && retry) {
+        const retryOptions = validateReviewRetry(
+          await readJsonBody(request, { optional: true }),
+        );
         sendJson(response, 202, {
           pullRequest: await localPrService.retryPullRequest(
             decodeURIComponent(retry[1]),
+            retryOptions,
+          ),
+        });
+        return;
+      }
+      const fastLane = /^\/api\/local-prs\/([^/]+)\/fast-lane$/.exec(url.pathname);
+      if (request.method === "POST" && fastLane) {
+        sendJson(response, 200, {
+          pullRequest: await localPrService.promotePullRequest(
+            decodeURIComponent(fastLane[1]),
           ),
         });
         return;

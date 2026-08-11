@@ -242,6 +242,7 @@ test("renders a dedicated token-free settings page", () => {
   assert.match(page, /Anatomiaフォルダ/);
   assert.match(page, /id="anatomia-review-gate"/);
   assert.match(page, /各レビュー工程の並列 worker 数/);
+  assert.match(page, /id="fast-lane-slots"/);
   assert.match(page, /許可Host/);
   assert.match(page, /暗号化config/);
   assert.match(page, /プロダクト登録/);
@@ -279,6 +280,7 @@ test("the settings page owns the review scale thresholds", () => {
   assert.match(page, /id="cost-validation-genius"/);
   assert.match(page, /id="cost-validation-anatomia-domain"/);
   assert.match(page, /各レビュー工程の並列 worker 数/);
+  assert.match(page, /fastLaneSlots:/);
   assert.match(page, /costValidationSkipReview:/);
   assert.match(page, /costValidationSkipGenius:/);
   assert.match(page, /anatomiaReviewGateEnabled:/);

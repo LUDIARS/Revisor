@@ -1,0 +1,45 @@
+{
+  "name": "review-queue-scheduling",
+  "description": "Durable local review-job lane assignment and bounded execution capacity. Standard and fast work retain independent FIFO order and fixed worker partitions across the outer PR scheduler and each review-stage pool.",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/(?:job-store|persistent-queue|review-job-scheduler|review-lane|review-stage-workers|worker-command|worker-pool)\\.mjs$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:job-store|persistent-queue|review-job-scheduler|review-lane|review-stage-workers|worker-command|worker-pool)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:job-store|review-job-scheduler|review-stage-workers|worker-command|worker-pool)\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)src/local-contracts\\.mjs$",
+      "namePattern": "^(validateFastLanePromotion|validateReviewRetry)$"
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the review-queue-scheduling domain: durable lane assignment, independent FIFO order, explicit promotion, and fixed standard/fast capacity partitions.",
+  "source": "spec-draft",
+  "mechanics": [
+    "durable-review-lane",
+    "fast-lane-promotion",
+    "lane-fifo-order",
+    "reserved-worker-partition",
+    "daemonless-queue-drain"
+  ],
+  "specRefs": [
+    "review-fast-lane — SPEC-REVIEW-FAST-LANE-DURABILITY",
+    "review-fast-lane — SPEC-REVIEW-FAST-LANE-CAPACITY",
+    "review-fast-lane — SPEC-REVIEW-FAST-LANE-AUTHORITY",
+    "daemonless-cli — SPEC-DAEMONLESS-PERSISTENT-QUEUE",
+    "daemonless-cli — SPEC-DAEMONLESS-WORKER-DRAIN"
+  ],
+  "rationale": "Lane persistence and worker admission change together: the durable job record determines which fixed capacity partition may execute it. Keeping these mechanics in one domain prevents queue ordering, restart recovery, and stage-worker admission from interpreting the lane differently. PR lifecycle state, HTTP authorization, and UI rendering remain delegated to their existing domains.",
+  "updatedAt": "2026-08-11T00:00:00.000Z"
+}

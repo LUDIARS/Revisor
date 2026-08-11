@@ -28,6 +28,7 @@ import {
   assertLocalVersionUnchanged,
   prepareRegisteredVersionFile,
 } from "./local-version.mjs";
+import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -50,6 +51,7 @@ function reviewRequest(repository, pullRequest, options = {}) {
     reviewMode: options.reviewMode ?? "full",
     verificationTargets: options.verificationTargets ?? [],
     previousReview: options.previousReview ?? null,
+    reviewLane: normalizeReviewLane(pullRequest.reviewLane),
   };
 }
 
@@ -184,10 +186,20 @@ export class LocalPrService {
     // state 作成後・jobId 記録前に提出プロセスが落ちても、再投稿で queue を補修する。
     // enqueue は同じ (repo, number, head) を再利用するので、既存 job があっても二重実行しない。
     const inFlight = reused.checkStatus === "queued" || reused.checkStatus === "running";
-    return inFlight && !reused.jobId ? this.#enqueue(repository, reused) : reused;
+    const repaired = inFlight && !reused.jobId
+      ? await this.#enqueue(repository, reused)
+      : reused;
+    if (
+      submission.reviewLane === REVIEW_LANES.FAST
+      && normalizeReviewLane(repaired.reviewLane) !== REVIEW_LANES.FAST
+    ) {
+      return this.promotePullRequest(repaired.id, { sessionId: submission.sessionId ?? null });
+    }
+    return repaired;
   }
 
   async submitPullRequest(submission) {
+    if (submission.reviewLane === REVIEW_LANES.FAST) this.#assertFastLaneAvailable();
     const repository = this.store.getRepository(submission.repository);
     if (!repository) {
       throw new Error(`Repository '${submission.repository}' is not registered.`);
@@ -224,6 +236,7 @@ export class LocalPrService {
       headSha: refs.headSha,
       baseSha: refs.baseSha,
       sessionId: submission.sessionId ?? null,
+      reviewLane: normalizeReviewLane(submission.reviewLane),
     };
     const creation = typeof this.store.createPullRequestIfAbsent === "function"
       ? this.store.createPullRequestIfAbsent(candidate)
@@ -236,15 +249,41 @@ export class LocalPrService {
     return this.#enqueue(repository, pullRequest);
   }
 
-  async retryPullRequest(id) {
+  async retryPullRequest(id, { fastLane = false } = {}) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
     if (pullRequest.status !== "open") {
       throw new Error("Only an open local PR can be reviewed again.");
     }
-    const queued = await this.#requeue(pullRequest);
+    if (typeof fastLane !== "boolean") throw new Error("fast_lane must be a boolean.");
+    if (fastLane) this.#assertFastLaneAvailable();
+    const queued = await this.#requeue(pullRequest, {
+      reviewLane: fastLane ? REVIEW_LANES.FAST : REVIEW_LANES.STANDARD,
+    });
     await this.#announceLifecycle("review_queued", queued);
     return queued;
+  }
+
+  /** @implements SPEC-REVIEW-FAST-LANE-AUTHORITY */
+  async promotePullRequest(id, { sessionId = null } = {}) {
+    const pullRequest = this.store.getPullRequest(id);
+    if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
+    if (pullRequest.status !== "open" || pullRequest.checkStatus !== "queued") {
+      throw new Error("Only a queued open local PR can be moved to the fast lane.");
+    }
+    if (sessionId && pullRequest.sessionId && sessionId !== pullRequest.sessionId) {
+      throw new Error("Only the submitting Concordia session can promote this local PR.");
+    }
+    if (normalizeReviewLane(pullRequest.reviewLane) === REVIEW_LANES.FAST) {
+      return pullRequest;
+    }
+    this.#assertFastLaneAvailable();
+    await this.queue.promote(id);
+    return this.store.updatePullRequest(id, {
+      reviewLane: REVIEW_LANES.FAST,
+      fastLanePromotedAt: new Date().toISOString(),
+      fastLaneRequestedBySessionId: sessionId,
+    });
   }
 
   /**
@@ -307,7 +346,10 @@ export class LocalPrService {
       try {
         // 復旧失敗の通知はここが唯一の担当。 #enqueue に送らせると、直後に上書き
         // する enqueue 側の理由で 1 通出てから復旧理由でもう 1 通出てしまう。
-        await this.#requeue(pullRequest, { announceFailure: false });
+        await this.#requeue(pullRequest, {
+          announceFailure: false,
+          allowActiveSameHead: true,
+        });
         recovered.push({ id: pullRequest.id, repository: pullRequest.repository, number: pullRequest.number });
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -342,7 +384,11 @@ export class LocalPrService {
     return true;
   }
 
-  async #requeue(pullRequest, { announceFailure = true } = {}) {
+  async #requeue(pullRequest, {
+    announceFailure = true,
+    allowActiveSameHead = false,
+    reviewLane = normalizeReviewLane(pullRequest.reviewLane),
+  } = {}) {
     const repository = this.store.getRepository(pullRequest.repository);
     if (!repository) {
       throw new Error(`Repository '${pullRequest.repository}' is not registered.`);
@@ -353,6 +399,12 @@ export class LocalPrService {
       pullRequest.headRef,
       pullRequest.baseRef,
     );
+    const active = pullRequest.checkStatus === "queued" || pullRequest.checkStatus === "running";
+    if (!allowActiveSameHead && active && refs.headSha === pullRequest.headSha) {
+      throw new Error(
+        "A local PR under review cannot be re-queued at the same head; wait for it to finish.",
+      );
+    }
     await assertLocalVersionUnchanged(repository.rootPath, refs.baseSha, refs.headSha);
     let scope = retryReviewScope(pullRequest, refs.headSha);
     const previousValidationMode = [...(pullRequest.reviewPlan?.validationMode?.skipped ?? [])].sort();
@@ -375,6 +427,7 @@ export class LocalPrService {
         // review is that supersession, so keeping the old merge error would
         // leave the re-approved PR permanently un-mergeable on the board.
         mergeError: null,
+        reviewLane: normalizeReviewLane(reviewLane),
       }),
       // The refs may be unchanged, and the queue caches settled jobs by exact
       // head, so an unforced re-review would resolve to the run being retried.
@@ -688,6 +741,14 @@ export class LocalPrService {
           }`,
         }),
       });
+    }
+  }
+
+  #assertFastLaneAvailable() {
+    if ((this.loadSettings().fastLaneSlots ?? 0) < 1) {
+      throw new Error(
+        "Fast lane is unavailable: configure at least 2 workers and reserve 1 or 2 fast-lane slots.",
+      );
     }
   }
 }

@@ -301,6 +301,7 @@ test("re-queues a reviewed local PR against a moved head with a full intent revi
       intentReviewCompleted: true,
       reviewer: "codex-sol",
       reasons: ["1 changed architecture rule violation(s) remain"],
+      reviewLane: "fast",
     });
 
     git(fixture.repoPath, "checkout", "feat/local");
@@ -316,6 +317,7 @@ test("re-queues a reviewed local PR against a moved head with a full intent revi
     assert.equal(submitted[1].reviewMode, "full");
     assert.deepEqual(submitted[1].verificationTargets, []);
     assert.equal(submitted[1].previousReview, null);
+    assert.equal(submitted[1].reviewLane, "standard", "manual retry needs a fresh fast opt-in");
     assert.equal(retried.headSha, movedHead);
     assert.equal(retried.checkStatus, "queued");
     assert.equal(retried.error, null);
@@ -1607,6 +1609,80 @@ test("refuses to close a local PR while its squash merge is in flight", async ()
       () => service.closePullRequest(pullRequest.id),
       /Only an open local PR can be closed/,
     );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("promotes only queued work and records the requesting session", async () => {
+  let record = {
+    id: "pr-1",
+    status: "open",
+    checkStatus: "queued",
+    reviewLane: "standard",
+    sessionId: "lictor-owner",
+  };
+  const promoted = [];
+  const service = new LocalPrService({
+    store: {
+      getPullRequest: () => structuredClone(record),
+      updatePullRequest(id, patch) {
+        assert.equal(id, record.id);
+        record = { ...record, ...patch };
+        return structuredClone(record);
+      },
+    },
+    queue: {
+      async promote(id) { promoted.push(id); },
+    },
+    loadSettings: () => ({ fastLaneSlots: 1 }),
+  });
+
+  await assert.rejects(
+    () => service.promotePullRequest("pr-1", { sessionId: "lictor-other" }),
+    /Only the submitting Concordia session/,
+  );
+  const fast = await service.promotePullRequest("pr-1", { sessionId: "lictor-owner" });
+  assert.deepEqual(promoted, ["pr-1"]);
+  assert.equal(fast.reviewLane, "fast");
+  assert.equal(fast.fastLaneRequestedBySessionId, "lictor-owner");
+});
+
+test("refuses a manual retry while the durable review job is still active", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  let submissions = 0;
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit() {
+        submissions += 1;
+        return { id: `job-${submissions}` };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    for (const checkStatus of ["queued", "running"]) {
+      store.updatePullRequest(pullRequest.id, { checkStatus });
+      await assert.rejects(
+        () => service.retryPullRequest(pullRequest.id),
+        /under review cannot be re-queued at the same head/,
+      );
+      assert.equal(submissions, 1);
+    }
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
