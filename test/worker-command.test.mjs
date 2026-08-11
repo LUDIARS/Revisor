@@ -37,6 +37,9 @@ test("a job submitted during the final sweep is drained without another wake", a
       async failed() {},
     },
     localPrService: {
+      async recoverInterruptedReviews() {
+        return { scanned: 0, recovered: [], failed: [] };
+      },
       async sweepAutoMerge() {
         sweepCount += 1;
         if (sweepCount === 1) queued.push(job);
@@ -61,6 +64,41 @@ test("a job submitted during the final sweep is drained without another wake", a
     assert.equal(closed, true);
     assert.equal(completed.length, 1);
     assert.deepEqual(settled, [{ id: "job-late", status: "completed" }]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("recovers interrupted local PR reviews when the worker starts", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-worker-recovery-"));
+  const messages = [];
+  let recoveries = 0;
+  const context = {
+    settings: { workerCount: 1, fastLaneSlots: 0 },
+    jobs: {
+      path: join(directory, "jobs.json"),
+      async reclaimAbandoned() { return { requeued: [], exhausted: [] }; },
+      async claimNext() { return null; },
+      state() { return { queued: 0, jobs: [] }; },
+    },
+    reporter: { async failed() {} },
+    localPrService: {
+      async recoverInterruptedReviews() {
+        recoveries += 1;
+        return { scanned: 2, recovered: [{ id: "pr-1" }], failed: [{ id: "pr-2" }] };
+      },
+      async sweepAutoMerge() { return { attempted: 0, merged: 0, failed: 0 }; },
+    },
+  };
+  try {
+    await runReviewWorker({
+      createContext: () => context,
+      createStageWorkers: () => ({ state() { return { queues: [] }; }, async close() {} }),
+      createRunner: () => async () => ({}),
+      log: (message) => messages.push(message),
+    });
+    assert.equal(recoveries, 1);
+    assert.ok(messages.includes("Revisor worker recovered interrupted reviews: recovered=1 failed=1"));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

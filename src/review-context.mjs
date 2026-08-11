@@ -74,6 +74,7 @@ export function createReviewContext({
     return new LocalPrService({
       store,
       queue,
+      jobs,
       env,
       notifyLifecycle: announceLifecycle,
       publicationCoordinator,

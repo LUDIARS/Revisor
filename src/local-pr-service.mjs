@@ -85,6 +85,7 @@ export class LocalPrService {
   constructor({
     store,
     queue,
+    jobs = null,
     installGuard = installPushGuard,
     merge = squashMergeLocalPullRequest,
     prepareMerge = prepareMergeRepository,
@@ -108,6 +109,7 @@ export class LocalPrService {
     }
     this.store = store;
     this.queue = queue;
+    this.jobs = jobs ?? queue.jobs ?? null;
     this.installGuard = installGuard;
     this.merge = merge;
     this.prepareMerge = prepareMerge;
@@ -374,9 +376,9 @@ export class LocalPrService {
   /**
    * プロセス再起動で失われたレビューを拾い直す。
    *
-   * キューは in-memory なので、起動直後に `queued` / `running` が残っている PR は
-   * 定義上どのワーカーにも属していない (= 実行中の job は存在しない)。 時間しきい値は
-   * 不要で、この 2 状態がそのまま「中断された」ことの証明になる。 復旧しないと
+   * 永続ジョブが `queued` / `running` なら、その PR は既にキューまたはワーカーに属するため
+   * 再投入してはいけない。反対に、実行中の job が無いこの 2 状態は「中断された」ことの
+   * 証明になる。時間しきい値は不要で、復旧しないと
    * `queue.submit` の再投入ガード (`queued` / `running` は force 無しで弾く) により
    * 永久に動かないゾンビとして残り続ける。
    *
@@ -386,7 +388,8 @@ export class LocalPrService {
   async recoverInterruptedReviews() {
     const interrupted = this.store.listPullRequests().filter((pullRequest) =>
       pullRequest.status === "open"
-      && (pullRequest.checkStatus === "running" || pullRequest.checkStatus === "queued"));
+      && (pullRequest.checkStatus === "running" || pullRequest.checkStatus === "queued")
+      && !this.#hasActiveReviewJob(pullRequest.id, { unknownIsActive: false }));
 
     const recovered = [];
     const failed = [];
@@ -474,7 +477,12 @@ export class LocalPrService {
       pullRequest.baseRef,
     );
     const active = pullRequest.checkStatus === "queued" || pullRequest.checkStatus === "running";
-    if (!allowActiveSameHead && active && refs.headSha === pullRequest.headSha) {
+    if (
+      !allowActiveSameHead
+      && active
+      && refs.headSha === pullRequest.headSha
+      && this.#hasActiveReviewJob(pullRequest.id)
+    ) {
       throw new Error(
         "A local PR under review cannot be re-queued at the same head; wait for it to finish.",
       );
@@ -510,6 +518,15 @@ export class LocalPrService {
       { force: true },
       { announceFailure, requestOptions: { ...scope, previousReview } },
     );
+  }
+
+  #hasActiveReviewJob(pullRequestId, { unknownIsActive = true } = {}) {
+    // 永続ジョブが無い queued / running は、ワーカー死亡後の古い PR 状態でしかない。
+    // jobs が渡されない旧来の queue 実装では安全側に倒して従来の再投入拒否を維持する。
+    if (!this.jobs || typeof this.jobs.list !== "function") return unknownIsActive;
+    return this.jobs.list().some((job) =>
+      (job.localPrId ?? job.request?.localPrId) === pullRequestId
+      && (job.status === "queued" || job.status === "running"));
   }
 
   async #enqueue(repository, pullRequest, options, {

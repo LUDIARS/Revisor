@@ -12,6 +12,7 @@ import test from "node:test";
 import { MergeConflictError, StaleReviewError } from "../src/errors.mjs";
 import { LocalPrReporter } from "../src/local-reporter.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
+import { JobStore } from "../src/job-store.mjs";
 import { resolveMergeRepositoryPath } from "../src/merge-repository.mjs";
 import { PrReviewQueue } from "../src/queue.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
@@ -1648,18 +1649,20 @@ test("promotes only queued work and records the requesting session", async () =>
   assert.equal(fast.fastLaneRequestedBySessionId, "lictor-owner");
 });
 
-test("refuses a manual retry while the durable review job is still active", async () => {
+test("retries a queued local PR when no durable review job remains", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
-  let submissions = 0;
+  const jobs = new JobStore({ path: join(fixture.directory, "jobs.json") });
+  const submissions = [];
   const service = new LocalPrService({
     store,
     queue: {
-      async submit() {
-        submissions += 1;
-        return { id: `job-${submissions}` };
+      async submit(request) {
+        submissions.push(request);
+        return { id: `job-${submissions.length}` };
       },
     },
+    jobs,
     installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
   });
   try {
@@ -1675,14 +1678,106 @@ test("refuses a manual retry while the durable review job is still active", asyn
       author: "neco",
       headRef: "feat/local",
     });
+    store.updatePullRequest(pullRequest.id, { checkStatus: "queued" });
+
+    const retried = await service.retryPullRequest(pullRequest.id);
+
+    assert.equal(submissions.length, 2);
+    assert.equal(retried.checkStatus, "queued");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("does not recover a local PR that still has a durable review job", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const jobs = new JobStore({ path: join(fixture.directory, "jobs.json") });
+  let submissions = 0;
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit() {
+        submissions += 1;
+        return { id: `job-${submissions}` };
+      },
+    },
+    jobs,
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    await jobs.enqueue({
+      localPrId: pullRequest.id,
+      repository: pullRequest.repository,
+      number: pullRequest.number,
+      headSha: pullRequest.headSha,
+    });
+
+    const recovery = await service.recoverInterruptedReviews();
+
+    assert.deepEqual(recovery, { scanned: 0, recovered: [], failed: [] });
+    assert.equal(submissions, 1);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses a manual retry while the durable review job is still active", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  let submissions = 0;
+  const jobs = new JobStore({ path: join(fixture.directory, "jobs.json") });
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit() {
+        submissions += 1;
+        return { id: `job-${submissions}` };
+      },
+    },
+    jobs,
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    await jobs.enqueue({
+      localPrId: pullRequest.id,
+      repository: pullRequest.repository,
+      number: pullRequest.number,
+      headSha: pullRequest.headSha,
+    });
     for (const checkStatus of ["queued", "running"]) {
+      if (checkStatus === "running") await jobs.claimNext();
       store.updatePullRequest(pullRequest.id, { checkStatus });
       await assert.rejects(
         () => service.retryPullRequest(pullRequest.id),
         /under review cannot be re-queued at the same head/,
       );
-      assert.equal(submissions, 1);
     }
+    assert.equal(submissions, 1);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

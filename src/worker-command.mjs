@@ -69,6 +69,11 @@ export async function runReviewWorker({
     for (const job of reclaimed.exhausted) {
       await context.reporter.failed({ ...job, error: job.error });
     }
+    const recovered = await context.localPrService.recoverInterruptedReviews();
+    log(
+      `Revisor worker recovered interrupted reviews: recovered=${recovered.recovered.length}`
+      + ` failed=${recovered.failed.length}`,
+    );
     for (;;) {
       const drained = await drainReviewJobs({
         jobs: context.jobs,
