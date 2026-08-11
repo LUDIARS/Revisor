@@ -153,3 +153,41 @@ test("reuses its persistent base while refreshing only the source head", async (
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
+
+test("serializes concurrent preparation of the same merge repository", async () => {
+  const fixture = repositoryFixture();
+  const statePath = join(fixture.directory, "state", "revisor.state.json");
+  const repository = {
+    repository: "LUDIARS/Product",
+    rootPath: fixture.sourceRoot,
+  };
+  const pullRequest = {
+    headRef: "feat/local",
+    baseRef: "main",
+  };
+  let inFlight = 0;
+  let maximumInFlight = 0;
+  const runGit = async (cwd, args) => {
+    inFlight += 1;
+    maximumInFlight = Math.max(maximumInFlight, inFlight);
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      return git(cwd, ...args);
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  try {
+    const [first, second] = await Promise.all([
+      prepareMergeRepository({ repository, pullRequest, statePath, runGit }),
+      prepareMergeRepository({ repository, pullRequest, statePath, runGit }),
+    ]);
+
+    assert.equal(first.rootPath, second.rootPath);
+    assert.equal(maximumInFlight, 1);
+    assert.equal(git(first.rootPath, "rev-parse", "refs/heads/main"), fixture.baseSha);
+    assert.equal(git(first.rootPath, "rev-parse", "refs/heads/feat/local"), fixture.headSha);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});

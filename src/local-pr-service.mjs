@@ -36,7 +36,13 @@ const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 // 正当な取りこぼしを拾うため必要で、それを超えて同じ判定が返るなら再審査では解けない。
 const STALE_REQUEUE_LIMIT = 2;
 
-function reviewRequest(repository, pullRequest, options = {}) {
+/**
+ * `rootPath` は登録元 checkout (head の在処であり autofix の反映先)、
+ * `reviewRootPath` は審査の差分起点となる base ref を持つ merge repository。
+ * 登録元の base ref は追随前の古い位置に留まりうるので、 差分の起点にはしない
+ * (`spec/feature/review-diff-scope.md`)。
+ */
+function reviewRequest(repository, reviewRepository, pullRequest, options = {}) {
   return {
     localPrId: pullRequest.id,
     repository: repository.repository,
@@ -47,6 +53,7 @@ function reviewRequest(repository, pullRequest, options = {}) {
     baseRef: pullRequest.baseRef,
     baseSha: pullRequest.baseSha,
     rootPath: repository.rootPath,
+    reviewRootPath: reviewRepository.rootPath,
     testCases: repository.testCases,
     reviewMode: options.reviewMode ?? "full",
     verificationTargets: options.verificationTargets ?? [],
@@ -441,7 +448,18 @@ export class LocalPrService {
     requestOptions = {},
   } = {}) {
     try {
-      await this.queue.submit(reviewRequest(repository, pullRequest, requestOptions), options);
+      // 審査の差分起点は、実際に squash 先となる merge repository の base ref から読む。
+      // 登録元 checkout はマージのたびには追随しないので、 そちらを起点にすると他 PR が
+      // マージしたぶんまでこの PR の変更として審査へ渡る (`review-diff-scope.md`)。
+      const reviewRepository = await this.prepareMerge({
+        repository,
+        pullRequest,
+        statePath: this.store.path,
+      });
+      await this.queue.submit(
+        reviewRequest(repository, reviewRepository, pullRequest, requestOptions),
+        options,
+      );
     } catch (error) {
       const failed = this.store.updatePullRequest(pullRequest.id, {
         checkStatus: "failed",

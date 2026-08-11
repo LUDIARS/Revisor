@@ -5,11 +5,14 @@ export class RevisorError extends Error {
   }
 }
 
-// マージ時にベースと競合した。再審査では直らず、ブランチ側の rebase / 修正が必要。
+// 現在の base の上へ載せ替えたら競合した。 Revisor は自動解決しないので、 提出元が
+// 解消する必要がある。 返せるのは衝突したファイルの一覧まで
+// (`spec/feature/review-diff-scope.md` 規則 3)。
 export class MergeConflictError extends RevisorError {
-  constructor(message, options) {
+  constructor(message, { conflictedPaths = [], ...options } = {}) {
     super(message, options);
     this.name = "MergeConflictError";
+    this.conflictedPaths = conflictedPaths;
   }
 }
 

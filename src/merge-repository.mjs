@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { withFileLock } from "./file-lock.mjs";
 import { assertSafeRef, git } from "./workspace.mjs";
 
 const MERGE_REPOSITORIES_DIRECTORY = "merge-repositories";
@@ -141,44 +142,54 @@ export async function prepareMergeRepository({
   );
   const mergeRoot = resolveMergeRepositoryPath({ repository, statePath });
   await mkdir(repositoriesRoot, { recursive: true });
-  if (!await pathExists(mergeRoot)) {
-    await initializeMergeRepository({
-      repositoriesRoot,
-      mergeRoot,
-      repository,
-      baseRef: pullRequest.baseRef,
-      runGit,
-    });
-  }
+  // Review admission now prepares this repository too, so two independent
+  // submissions can reach first-time initialization or fetch concurrently.
+  // Serialize the whole prepare transaction across processes: existence checks
+  // alone cannot prevent two staging clones from racing to the same rename.
+  const preparationLockPath = join(
+    repositoriesRoot,
+    `${repositoryDirectoryName(repository)}.prepare`,
+  );
+  return withFileLock(preparationLockPath, async () => {
+    if (!await pathExists(mergeRoot)) {
+      await initializeMergeRepository({
+        repositoriesRoot,
+        mergeRoot,
+        repository,
+        baseRef: pullRequest.baseRef,
+        runGit,
+      });
+    }
 
-  await assertMergeRepositoryIdentity(mergeRoot, repository, runGit);
-  // A registration may be updated to a moved checkout. The isolated repository
-  // follows that explicit registration, but no Git operation runs in the source.
-  await runGit(mergeRoot, [
-    "remote",
-    "set-url",
-    SOURCE_REMOTE,
-    resolve(repository.rootPath),
-  ]);
-  await runGit(mergeRoot, [
-    "fetch",
-    "--no-tags",
-    "--force",
-    SOURCE_REMOTE,
-    `+refs/heads/${pullRequest.headRef}:refs/heads/${pullRequest.headRef}`,
-  ], 300_000);
-  // The merge base is initialized once and thereafter owned by Revisor. It is
-  // deliberately never refreshed from the registered checkout; publication and
-  // GitHub reconciliation are the only operations allowed to advance it.
-  await runGit(mergeRoot, [
-    "rev-parse",
-    "--verify",
-    `refs/heads/${pullRequest.baseRef}`,
-  ]);
+    await assertMergeRepositoryIdentity(mergeRoot, repository, runGit);
+    // A registration may be updated to a moved checkout. The isolated repository
+    // follows that explicit registration, but no Git operation runs in the source.
+    await runGit(mergeRoot, [
+      "remote",
+      "set-url",
+      SOURCE_REMOTE,
+      resolve(repository.rootPath),
+    ]);
+    await runGit(mergeRoot, [
+      "fetch",
+      "--no-tags",
+      "--force",
+      SOURCE_REMOTE,
+      `+refs/heads/${pullRequest.headRef}:refs/heads/${pullRequest.headRef}`,
+    ], 300_000);
+    // The merge base is initialized once and thereafter owned by Revisor. It is
+    // deliberately never refreshed from the registered checkout; publication and
+    // GitHub reconciliation are the only operations allowed to advance it.
+    await runGit(mergeRoot, [
+      "rev-parse",
+      "--verify",
+      `refs/heads/${pullRequest.baseRef}`,
+    ]);
 
-  return {
-    ...repository,
-    registeredRootPath: repository.rootPath,
-    rootPath: mergeRoot,
-  };
+    return {
+      ...repository,
+      registeredRootPath: repository.rootPath,
+      rootPath: mergeRoot,
+    };
+  }, { label: "merge-repository-prepare", timeoutMs: 300_000 });
 }

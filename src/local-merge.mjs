@@ -2,7 +2,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSettings } from "./config.mjs";
-import { BaseMovedError, MergeConflictError, StaleReviewError } from "./errors.mjs";
+import { BaseMovedError, StaleReviewError } from "./errors.mjs";
+import { relandHeadOnBase } from "./base-relanding.mjs";
 import { reconcileBaseWithRemote } from "./base-reconcile.mjs";
 import { redactSecretLines } from "./leakage.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
@@ -145,21 +146,6 @@ async function assertReviewedContentUnchanged(rootPath, reviewedHeadSha, headSha
   }
 }
 
-// コンフリクト判定をエラーメッセージだけに頼らない。 `git()` のメッセージは stderr を
-// 優先するので、 Windows の autocrlf 警告のような無関係な stderr が 1 行でも出ると
-// "CONFLICT" が message から消え、 コンフリクトが「不明な失敗」に化ける (PR は Test OK
-// のまま残り、 スイープが 60 秒ごとに同じ失敗を繰り返す)。 `merge --squash --no-commit`
-// のコンフリクトは index に unmerged entry を残すので、それを一次情報として見る。
-async function isMergeConflict(worktreePath, message) {
-  if (/CONFLICT|Automatic merge failed|not something we can merge/i.test(message)) return true;
-  try {
-    return Boolean(await git(worktreePath, ["ls-files", "--unmerged"]));
-  } catch {
-    // index を読めないなら判定材料が無い。 コンフリクト扱いにはしない。
-    return false;
-  }
-}
-
 // A retry can run after another process has already advanced the local base
 // beyond the prepared merge.  In that case advancing the branch *to* the
 // prepared commit would be a non-fast-forward update, even though the merge
@@ -291,25 +277,16 @@ async function attemptSquashMerge({
     base: join(root, "unused"),
   };
   try {
-    await gitWithoutLfs(repository.rootPath, [
-      "worktree", "add", "--detach", worktrees.head, baseSha,
-    ]);
-    try {
-      // A squash merge always stages a single-parent result. Git rejects
-      // `--no-ff` together with `--squash`, so do not add a fast-forward flag.
-      await gitWithoutLfs(worktrees.head, [
-        "merge", "--squash", "--no-commit", headSha,
-      ]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (await isMergeConflict(worktrees.head, message)) {
-        throw new MergeConflictError(
-          `The head conflicts with the current '${pullRequest.baseRef}'; rebase the branch and submit a new review.`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
+    // 載せ替えは Revisor が受け持つ (`review-diff-scope.md` 規則 3)。 進んだ base の上へ
+    // head の正味の変更を載せ直し、 衝突したときだけ、 衝突したファイルの一覧を添えて
+    // 提出元へ返す。 セッションに rebase をやり直させない。
+    await relandHeadOnBase({
+      repoPath: repository.rootPath,
+      worktreePath: worktrees.head,
+      baseSha,
+      headSha,
+      baseRef: pullRequest.baseRef,
+    });
     // commit も index を洗い直す過程でフィルタを起動する。 worktree add と
     // merge --squash だけ無効化しても、 最後のこの 1 本で git-lfs 不在に落ちる。
     await gitWithoutLfs(worktrees.head, [

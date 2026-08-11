@@ -47,8 +47,15 @@ function repositoryFixture() {
   };
 }
 
-function request(fixture) {
-  return { headRef: "feat/local", baseRef: "main", headSha: fixture.headSha };
+function request(fixture, overrides = {}) {
+  return {
+    rootPath: fixture.repoPath,
+    reviewRootPath: fixture.repoPath,
+    headRef: "feat/local",
+    baseRef: "main",
+    headSha: fixture.headSha,
+    ...overrides,
+  };
 }
 
 test("the shared git boundary preserves a working LFS clean filter", async () => {
@@ -81,7 +88,7 @@ test("the shared git boundary preserves a working LFS clean filter", async () =>
 test("cleanup removes both disposable worktrees and the temp root", async () => {
   const fixture = repositoryFixture();
   try {
-    const worktrees = await prepareLocalWorktrees(fixture.repoPath, request(fixture));
+    const worktrees = await prepareLocalWorktrees(request(fixture));
     assert.equal(existsSync(worktrees.head), true);
     assert.equal(existsSync(worktrees.base), true);
 
@@ -106,16 +113,77 @@ test("prepares the review after the base advances", async () => {
     git(fixture.repoPath, "add", "other.txt");
     git(fixture.repoPath, "commit", "-m", "base moves");
 
-    worktrees = await prepareLocalWorktrees(fixture.repoPath, {
-      ...request(fixture),
-      baseSha: originalBaseSha,
-    });
+    worktrees = await prepareLocalWorktrees(request(fixture, { baseSha: originalBaseSha }));
 
     assert.equal(existsSync(worktrees.head), true);
     assert.equal(existsSync(worktrees.base), true);
   } finally {
     if (worktrees) await cleanupWorktrees(fixture.repoPath, worktrees);
     rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// 登録元 checkout の base ref は、 マージのたびには追随しない
+// (spec/feature/checkout-publication.md)。 そこを審査の差分起点にすると、 他 PR が
+// マージしたぶん (ここでは other.txt) までこの PR の変更として審査へ渡ってしまう。
+// 起点は実際に squash 先となる merge repository の base ref でなければならない
+// (spec/feature/review-diff-scope.md)。
+test("the review diff starts at the merge repository's base, not the stale registered one", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-workspace-stale-base-"));
+  const repoPath = join(directory, "Product");
+  const mergeRepoPath = join(directory, "merge-repository");
+  const init = spawnSync("git", ["init", repoPath], { encoding: "utf8", windowsHide: true });
+  if (init.status !== 0) throw new Error(init.stderr || init.stdout);
+  git(repoPath, "checkout", "-b", "main");
+  git(repoPath, "config", "user.name", "Test");
+  git(repoPath, "config", "user.email", "test@example.invalid");
+  writeFileSync(join(repoPath, "product.txt"), "base\n", "utf8");
+  git(repoPath, "add", "product.txt");
+  git(repoPath, "commit", "-m", "base");
+  // 登録元 checkout の main はここで止まったままになる。
+  const staleBaseSha = git(repoPath, "rev-parse", "refs/heads/main");
+  git(repoPath, "checkout", "-b", "feat/local");
+  // 他 PR の変更。 merge repository の main には入っており、 この head も既に含む。
+  writeFileSync(join(repoPath, "other.txt"), "another pull request\n", "utf8");
+  git(repoPath, "add", "other.txt");
+  git(repoPath, "commit", "-m", "another pull request");
+  const currentBaseSha = git(repoPath, "rev-parse", "HEAD");
+  writeFileSync(join(repoPath, "product.txt"), "base\nfeature\n", "utf8");
+  git(repoPath, "add", "product.txt");
+  git(repoPath, "commit", "-m", "feature");
+  const headSha = git(repoPath, "rev-parse", "refs/heads/feat/local");
+  git(repoPath, "checkout", "main");
+
+  const clone = spawnSync("git", ["clone", "--no-checkout", repoPath, mergeRepoPath], {
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  if (clone.status !== 0) throw new Error(clone.stderr || clone.stdout);
+  // Revisor 所有のマージ先。 登録元より先へ進んでいる。
+  git(mergeRepoPath, "update-ref", "refs/heads/main", currentBaseSha);
+  assert.notEqual(staleBaseSha, currentBaseSha);
+
+  let worktrees = null;
+  try {
+    worktrees = await prepareLocalWorktrees({
+      rootPath: repoPath,
+      reviewRootPath: mergeRepoPath,
+      headRef: "feat/local",
+      baseRef: "main",
+      headSha,
+    });
+
+    assert.equal(worktrees.mergeBase, currentBaseSha);
+    const changed = git(
+      repoPath,
+      "diff",
+      "--name-only",
+      `${worktrees.mergeBase}..${headSha}`,
+    ).split(/\r?\n/).filter(Boolean);
+    assert.deepEqual(changed, ["product.txt"]);
+  } finally {
+    if (worktrees) await cleanupWorktrees(repoPath, worktrees);
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
@@ -155,7 +223,9 @@ test("worktree add succeeds when a repo's LFS filter binary is unavailable", asy
 
   let worktrees = null;
   try {
-    worktrees = await prepareLocalWorktrees(repoPath, {
+    worktrees = await prepareLocalWorktrees({
+      rootPath: repoPath,
+      reviewRootPath: repoPath,
       headRef: "feat/local",
       baseRef: "main",
       headSha,
@@ -176,7 +246,7 @@ test("cleanup survives a temp root that cannot be removed", async () => {
   const fixture = repositoryFixture();
   let worktrees = null;
   try {
-    worktrees = await prepareLocalWorktrees(fixture.repoPath, request(fixture));
+    worktrees = await prepareLocalWorktrees(request(fixture));
     let attempted = null;
 
     await cleanupWorktrees(fixture.repoPath, worktrees, {

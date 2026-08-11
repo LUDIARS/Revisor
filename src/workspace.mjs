@@ -24,7 +24,7 @@ export function assertSafeRef(value, label) {
 // SHA は常に Git 自身の出力か state に記録された Git の出力だが、 それを argv や
 // `a..b` の revision range に組み立てる境界では形を確かめてから渡す (`-` 始まりの
 // 値が option として解釈される経路を残さない)。
-function assertSafeSha(value, label) {
+export function assertSafeSha(value, label) {
   if (typeof value !== "string" || !SAFE_SHA.test(value)) {
     throw new Error(`${label} is not a Git object name`);
   }
@@ -118,35 +118,84 @@ export async function isAncestor(repoPath, ancestor, descendant, { run = git } =
   }
 }
 
-export async function inspectLocalPullRequest(repoPath, headRef, baseRef) {
+async function assertHeadWorktreeClean(repoPath, headRef) {
+  const checkedOutAt = await branchWorktree(repoPath, headRef);
+  if (!checkedOutAt) return;
+  const status = await trackedChanges(checkedOutAt);
+  if (status) {
+    throw new Error(
+      `The head branch worktree has uncommitted changes: ${checkedOutAt}`,
+    );
+  }
+}
+
+/**
+ * 審査に渡す差分の起点を解決する。
+ *
+ * head は登録元 checkout から読み、 **base は登録元から読まない**。 登録元の base ref は
+ * `spec/feature/checkout-publication.md` の条件を満たすまで追随せず、 実際に squash 先と
+ * なる位置より古いところに留まりうる。 そこを起点にすると、 他 PR がマージしたぶんまで
+ * この PR の変更として審査へ渡ってしまう (`spec/feature/review-diff-scope.md`)。 base は
+ * squash 先そのもの (merge repository) の ref から読み、 merge-base もそのリポジトリで
+ * 求める。 merge-base は head の祖先なので、 登録元 checkout にも必ず存在し、 使い捨て
+ * worktree はそちらに作れる。
+ */
+export async function resolveReviewDiffOrigin({
+  sourceRepoPath,
+  baseRepoPath,
+  headRef,
+  baseRef,
+}) {
   assertSafeRef(headRef, "head_ref");
   assertSafeRef(baseRef, "base_ref");
   if (headRef === baseRef) throw new Error("head_ref and base_ref must differ.");
-  const headSha = await git(repoPath, ["rev-parse", "--verify", `refs/heads/${headRef}`]);
-  const baseSha = await git(repoPath, ["rev-parse", "--verify", `refs/heads/${baseRef}`]);
+  const headSha = await git(sourceRepoPath, ["rev-parse", "--verify", `refs/heads/${headRef}`]);
+  const baseSha = await git(baseRepoPath, ["rev-parse", "--verify", `refs/heads/${baseRef}`]);
   if (headSha === baseSha) throw new Error("The local PR has no commits to review.");
-  const checkedOutAt = await branchWorktree(repoPath, headRef);
-  if (checkedOutAt) {
-    const status = await trackedChanges(checkedOutAt);
-    if (status) {
-      throw new Error(
-        `The head branch worktree has uncommitted changes: ${checkedOutAt}`,
-      );
-    }
-  }
+  await assertHeadWorktreeClean(sourceRepoPath, headRef);
   return {
     headSha,
     baseSha,
-    mergeBase: await git(repoPath, ["merge-base", headSha, baseSha]),
+    mergeBase: await git(baseRepoPath, ["merge-base", headSha, baseSha]),
   };
 }
 
-export async function prepareLocalWorktrees(repoPath, request) {
-  const inspected = await inspectLocalPullRequest(
-    repoPath,
-    request.headRef,
-    request.baseRef,
-  );
+/**
+ * 1 つのリポジトリだけを見る解決。 投稿時の記録 (`baseSha`) と再投入の再解決に使う。
+ * 審査の差分起点にはこれを使わない — `resolveReviewDiffOrigin` を使うこと。
+ */
+export function inspectLocalPullRequest(repoPath, headRef, baseRef) {
+  return resolveReviewDiffOrigin({
+    sourceRepoPath: repoPath,
+    baseRepoPath: repoPath,
+    headRef,
+    baseRef,
+  });
+}
+
+/**
+ * 審査用の使い捨て worktree を作る。
+ *
+ * `request.rootPath` は登録元 checkout (head の在処であり、 autofix の反映先)、
+ * `request.reviewRootPath` は差分の起点となる base ref を持つ merge repository。
+ * 後者が無いまま審査を走らせると起点が登録元へ戻ってしまうので、 省略は許さない。
+ */
+export async function prepareLocalWorktrees(request) {
+  const repoPath = request.rootPath;
+  if (typeof repoPath !== "string" || !repoPath.trim()) {
+    throw new TypeError("A review request must carry the registered repository root path.");
+  }
+  if (typeof request.reviewRootPath !== "string" || !request.reviewRootPath.trim()) {
+    throw new TypeError(
+      "A review request must carry the merge repository path that defines the diff origin.",
+    );
+  }
+  const inspected = await resolveReviewDiffOrigin({
+    sourceRepoPath: repoPath,
+    baseRepoPath: request.reviewRootPath,
+    headRef: request.headRef,
+    baseRef: request.baseRef,
+  });
   if (inspected.headSha.toLowerCase() !== request.headSha.toLowerCase()) {
     throw new Error(
       `head SHA changed before review (expected ${request.headSha}, found ${inspected.headSha})`,

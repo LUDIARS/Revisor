@@ -1687,3 +1687,149 @@ test("refuses a manual retry while the durable review job is still active", asyn
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
+
+// 他 PR が 1 本マージされて base が進んでも、 衝突しない PR は提出元の再 rebase 無しに
+// 取り込める。 載せ替えは Revisor が merge repository の中で行い、 登録元 checkout の
+// ref・index・作業ツリー・stash には触れない (spec/feature/review-diff-scope.md 規則 3)。
+test("re-lands the next PR itself after another merge advanced the base", async () => {
+  const fixture = repositoryFixture();
+  git(fixture.repoPath, "checkout", "-b", "feat/second", "main");
+  writeFileSync(join(fixture.repoPath, "second.txt"), "second\n", "utf8");
+  git(fixture.repoPath, "add", "second.txt");
+  git(fixture.repoPath, "commit", "-m", "second feature");
+  git(fixture.repoPath, "checkout", "main");
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit() {
+        return { id: "job-1" };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    securityScan: passingSecurityScan(),
+    publisher: passingPublisher(),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const approve = async (headRef, title) => {
+      const pullRequest = await service.submitPullRequest({
+        repository: "LUDIARS/Product",
+        title,
+        body: title,
+        author: "neco",
+        headRef,
+      });
+      store.updatePullRequest(pullRequest.id, {
+        checkStatus: "test_ok",
+        reviewedHeadSha: pullRequest.headSha,
+      });
+      return pullRequest;
+    };
+    const first = await approve("feat/local", "Add product feature");
+    const second = await approve("feat/second", "Add a second feature");
+    const registeredBefore = {
+      base: git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+      head: git(fixture.repoPath, "rev-parse", "HEAD"),
+      branch: git(fixture.repoPath, "rev-parse", "refs/heads/feat/second"),
+      status: git(fixture.repoPath, "status", "--porcelain"),
+      index: git(fixture.repoPath, "diff", "--cached", "--name-only"),
+      stash: git(fixture.repoPath, "stash", "list"),
+    };
+
+    await service.mergePullRequest(first.id);
+    // base が進んだ後、 提出元は何もし直していない。
+    const merged = await service.mergePullRequest(second.id);
+
+    assert.equal(merged.status, "merged");
+    assert.equal(merged.checkStatus, "test_ok");
+    assert.deepEqual(merged.reasons, []);
+    const mergeRoot = resolveMergeRepositoryPath({
+      repository: { repository: "LUDIARS/Product" },
+      statePath: store.path,
+    });
+    assert.equal(git(mergeRoot, "rev-list", "--count", "main"), "3");
+    assert.equal(git(mergeRoot, "show", "main:second.txt").replace(/\r\n/g, "\n"), "second");
+    assert.equal(git(mergeRoot, "show", "main:product.txt").replace(/\r\n/g, "\n"), "base\nfeature");
+    assert.deepEqual(
+      {
+        base: git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+        head: git(fixture.repoPath, "rev-parse", "HEAD"),
+        branch: git(fixture.repoPath, "rev-parse", "refs/heads/feat/second"),
+        status: git(fixture.repoPath, "status", "--porcelain"),
+        index: git(fixture.repoPath, "diff", "--cached", "--name-only"),
+        stash: git(fixture.repoPath, "stash", "list"),
+      },
+      registeredBefore,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// 衝突したときだけ提出元へ返す。 返すのは衝突したファイルの一覧で、 Revisor は
+// 自動解決しない。
+test("returns the conflicting file list when the re-landing conflicts", async () => {
+  const fixture = repositoryFixture();
+  git(fixture.repoPath, "checkout", "-b", "feat/conflicting", "main");
+  writeFileSync(join(fixture.repoPath, "product.txt"), "base\nconflicting\n", "utf8");
+  git(fixture.repoPath, "add", "product.txt");
+  git(fixture.repoPath, "commit", "-m", "conflicting feature");
+  git(fixture.repoPath, "checkout", "main");
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit() {
+        return { id: "job-1" };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    securityScan: passingSecurityScan(),
+    publisher: passingPublisher(),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const approve = async (headRef, title) => {
+      const pullRequest = await service.submitPullRequest({
+        repository: "LUDIARS/Product",
+        title,
+        body: title,
+        author: "neco",
+        headRef,
+      });
+      store.updatePullRequest(pullRequest.id, {
+        checkStatus: "test_ok",
+        reviewedHeadSha: pullRequest.headSha,
+      });
+      return pullRequest;
+    };
+    const first = await approve("feat/local", "Add product feature");
+    const conflicting = await approve("feat/conflicting", "Change the same lines");
+
+    await service.mergePullRequest(first.id);
+    const error = await service.mergePullRequest(conflicting.id).then(
+      () => null,
+      (thrown) => thrown,
+    );
+
+    assert.ok(error instanceof MergeConflictError, `unexpected result: ${error}`);
+    assert.deepEqual(error.conflictedPaths, ["product.txt"]);
+    const held = store.getPullRequest(conflicting.id);
+    assert.equal(held.checkStatus, "action_required");
+    assert.match(held.reasons[0], /product\.txt/);
+    assert.equal(held.status, "open");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
