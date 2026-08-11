@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { RevisorError } from "./errors.mjs";
 import { withFileLock } from "./file-lock.mjs";
+import { workerLogPath } from "./worker-spawn.mjs";
 import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
 import { resolveStatePath } from "./state-store.mjs";
 
@@ -258,7 +259,12 @@ export class JobStore {
         job.updatedAt = this.now();
         if (job.attempts >= MAX_ATTEMPTS) {
           job.status = "failed";
-          job.error = `The review worker died ${job.attempts} time(s); Revisor stopped retrying it.`;
+          // 死因はワーカーの出力にしか出ない。 どこを見ればよいかを文言に含める
+          // (これが無かったため、 死んだ事実だけが残って追跡できなかった)。
+          // This error is persisted and sent through the lifecycle reporter;
+          // never expose the workstation's absolute state path there.
+          job.error = `The review worker died ${job.attempts} time(s); Revisor stopped retrying it.`
+            + ` See the local ${basename(workerLogPath(this.path))} for the worker output.`;
           exhausted.push(structuredClone(job));
           continue;
         }

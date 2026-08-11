@@ -185,6 +185,8 @@ test("a job whose worker died is requeued until the attempt limit, then failed",
     assert.equal(second.requeued.length, 0, "the attempt limit stops the queue from self-feeding");
     assert.equal(second.exhausted.length, 1);
     assert.equal(second.exhausted[0].status, "failed");
+    assert.match(second.exhausted[0].error, /revisor\.jobs\.json\.worker\.log/);
+    assert.equal(second.exhausted[0].error.includes(fixture.directory), false);
     assert.equal(fixture.store.state().queued, 0);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
