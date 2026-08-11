@@ -1,37 +1,16 @@
 import { readGitHubAppCredentials } from "./config.mjs";
 import { GitHubAppClient } from "./github-app.mjs";
 import {
-  createLocalReleaseTag,
   listLocalReleaseTags,
   listRemoteReleaseTags,
   pushPublishedCommit,
 } from "./git-publication.mjs";
-import { composeReleaseNotes } from "./release-notes.mjs";
-import {
-  classifyReleaseKind,
-  latestReleaseTag,
-  selectReleaseTag,
-} from "./release-version.mjs";
-import { scanTextForLeaks } from "./leakage.mjs";
-import { RevisorError } from "./errors.mjs";
+import { publishWithoutGitHub } from "./deferred-publication.mjs";
+import { resolveGitHubAccess } from "./github-reachability.mjs";
+import { prepareRelease } from "./release-preparation.mjs";
+import { PUBLICATION_PUBLISHED } from "./publication-state.mjs";
 import { prepareLocalVersionFile, writeLocalVersion } from "./local-version.mjs";
 import { resolveVersionRootPath } from "./version-root.mjs";
-import { git } from "./workspace.mjs";
-
-async function releaseChanges(rootPath, previousTag, mergeCommitSha) {
-  const output = await git(rootPath, [
-    "log",
-    "--format=%H%x09%s",
-    `${previousTag}..${mergeCommitSha}`,
-  ]);
-  return output.split(/\r?\n/).filter(Boolean).map((line) => {
-    const separator = line.indexOf("\t");
-    return {
-      sha: separator === -1 ? line : line.slice(0, separator),
-      subject: separator === -1 ? "Untitled change" : line.slice(separator + 1),
-    };
-  });
-}
 
 export async function publishMergedPullRequest({
   repository,
@@ -39,14 +18,35 @@ export async function publishMergedPullRequest({
   expectedBaseSha,
   mergeCommitSha,
   preparedTag = null,
+  // 明示保留 (`revisor pr merge <n> --defer-push`)。 GitHub へは一切触れない。
+  deferPush = false,
   env = process.env,
+  readCredentials = readGitHubAppCredentials,
   createClient = (credentials) => new GitHubAppClient(credentials),
 }) {
   // 版数の正本は登録 checkout。 理由と実害は `version-root.mjs` に書いた。
   const versionRootPath = resolveVersionRootPath(repository);
   const localVersion = await prepareLocalVersionFile(versionRootPath);
-  const client = createClient(readGitHubAppCredentials(env));
-  const token = await client.installationToken(repository.repository);
+  const access = await resolveGitHubAccess({
+    repository,
+    env,
+    deferPush,
+    readCredentials,
+    createClient,
+  });
+  // App 未インストール / 明示保留だけがここへ来る。 それ以外の失敗は
+  // `resolveGitHubAccess` がそのまま投げるので、 障害は隠れない。
+  if (!access.reachable) {
+    return publishWithoutGitHub({
+      repository,
+      pullRequest,
+      mergeCommitSha,
+      preparedTag,
+      localVersion,
+      reason: access.reason,
+    });
+  }
+  const { client, token } = access;
   const remoteTags = await listRemoteReleaseTags({
     repository: repository.repository,
     rootPath: repository.rootPath,
@@ -57,45 +57,13 @@ export async function publishMergedPullRequest({
     ...await listLocalReleaseTags(repository.rootPath, pullRequest.baseRef),
     ...remoteTags,
   ];
-  const selection = preparedTag
-    ? { tag: preparedTag, kind: "prepared" }
-    : selectReleaseTag({
-        releasedTags,
-        localVersion,
-      });
-  let tag = selection.tag;
-  const previousTag = latestReleaseTag(releasedTags.filter((candidate) => candidate !== tag));
-  const releaseKind = selection.kind === "prepared"
-    ? classifyReleaseKind(previousTag, tag)
-    : selection.kind;
-  // A patch tag prepared by an older Revisor is never promoted into a new
-  // GitHub Release under the human-only major/minor policy.
-  if (releaseKind === "patch") tag = null;
-  const releaseNotes = tag
-    ? composeReleaseNotes({
-        repository: repository.repository,
-        tag,
-        previousTag,
-        kind: releaseKind,
-        changes: releaseKind === "initial"
-          ? []
-          : await releaseChanges(repository.rootPath, previousTag, mergeCommitSha),
-      })
-    : "";
-  const leakage = scanTextForLeaks(releaseNotes, "release-notes");
-  if (leakage.totalFindings > 0) {
-    throw new RevisorError(
-      `Release Notes contain ${leakage.totalFindings} potential information leakage finding(s).`,
-    );
-  }
-  if (tag) {
-    await createLocalReleaseTag({
-      rootPath: repository.rootPath,
-      mergeCommitSha,
-      tag,
-      message: `${tag}: human-selected ${releaseKind} release`,
-    });
-  }
+  const { tag, releaseNotes } = await prepareRelease({
+    repository,
+    mergeCommitSha,
+    preparedTag,
+    localVersion,
+    releasedTags,
+  });
   await pushPublishedCommit({
     repository: repository.repository,
     rootPath: repository.rootPath,
@@ -107,7 +75,12 @@ export async function publishMergedPullRequest({
     env,
   });
   if (!tag) {
-    return { mergeCommitSha, releaseTag: null, releaseUrl: null };
+    return {
+      mergeCommitSha,
+      releaseTag: null,
+      releaseUrl: null,
+      publication: PUBLICATION_PUBLISHED,
+    };
   }
   let release = await client.releaseByTag(repository.repository, tag);
   if (!release) {
@@ -127,5 +100,6 @@ export async function publishMergedPullRequest({
     mergeCommitSha,
     releaseTag: tag,
     releaseUrl: typeof release.html_url === "string" ? release.html_url : null,
+    publication: PUBLICATION_PUBLISHED,
   };
 }

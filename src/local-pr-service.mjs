@@ -21,6 +21,11 @@ import {
   isHumanOverrideableReviewHold,
 } from "./human-decision.mjs";
 import { decidePullRequest, decidePullRequests } from "./pr-disposition.mjs";
+import {
+  isDeferredPublication,
+  PUBLICATION_DEFERRED,
+  PUBLICATION_PUBLISHED,
+} from "./publication-state.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { diffPatchId, inspectLocalPullRequest, git } from "./workspace.mjs";
 import { retryReviewScope } from "./retry-review.mjs";
@@ -579,20 +584,20 @@ export class LocalPrService {
    * (復旧後に後追いレビューする対象を、記録から必ず特定できるようにするため)。
    * HTTP 経路はこの引数を渡さない。
    */
-  async mergePullRequest(id, { humanApproved = true, bypass = null } = {}) {
+  async mergePullRequest(id, { humanApproved = true, bypass = null, deferPush = false } = {}) {
     if (bypass && !String(bypass.reason ?? "").trim()) {
       throw new Error("A bypass merge requires a reason.");
     }
     return this.publicationCoordinator.run(() => this.lifecycleLockPath
       ? withFileLock(
         this.lifecycleLockPath,
-        () => this.#mergeOnce(id, humanApproved, bypass),
+        () => this.#mergeOnce(id, humanApproved, bypass, deferPush),
         { label: "merge-pull-request" },
       )
-      : this.#mergeOnce(id, humanApproved, bypass));
+      : this.#mergeOnce(id, humanApproved, bypass, deferPush));
   }
 
-  async #mergeOnce(id, humanApproved, bypass = null) {
+  async #mergeOnce(id, humanApproved, bypass = null, deferPush = false) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
     // 終局済み (merged / closed) を再びマージしない。 closed を通すと、 取り下げた
@@ -630,6 +635,7 @@ export class LocalPrService {
         pullRequest: approvedPullRequest,
         env: this.env,
         allowSystemFailureOverride,
+        ...(deferPush ? { deferPush: true } : {}),
         ...(bypass ? { bypass } : {}),
         ...(this.securityScan ? { scan: this.securityScan } : {}),
         ...(this.publisher ? { publish: this.publisher } : {}),
@@ -637,6 +643,10 @@ export class LocalPrService {
       const mergeCommitSha = typeof publication === "string"
         ? publication
         : publication.mergeCommitSha;
+      // GitHub へ届いたか保留したかは記録の上で区別する。 保留のままの PR を
+      // `publishedAt` 付きで残すと、 後送 (`revisor publish-pending`) の対象が
+      // 記録から辿れなくなる。
+      const deferred = isDeferredPublication(publication);
       const merged = this.store.updatePullRequest(id, {
         status: "merged",
         checkStatus: "test_ok",
@@ -645,7 +655,9 @@ export class LocalPrService {
         mergeError: null,
         releaseTag: typeof publication === "object" ? publication.releaseTag ?? null : null,
         releaseUrl: typeof publication === "object" ? publication.releaseUrl ?? null : null,
-        publishedAt: new Date().toISOString(),
+        publication: deferred ? PUBLICATION_DEFERRED : PUBLICATION_PUBLISHED,
+        deferredPublishReason: deferred ? publication.deferredReason ?? null : null,
+        publishedAt: deferred ? null : new Date().toISOString(),
         mergedAt: new Date().toISOString(),
         // 審査を通さずに入った変更は、記録の上で通常のマージと区別できなければならない。
         // 後追いレビューの対象一覧はこの印から作る。

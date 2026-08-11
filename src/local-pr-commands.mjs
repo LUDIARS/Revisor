@@ -4,6 +4,7 @@ import {
   validatePullRequestSubmission,
   validateRepositoryRegistration,
 } from "./local-contracts.mjs";
+import { publishPendingPublications } from "./publish-pending.mjs";
 import { createReviewContext } from "./review-context.mjs";
 
 const LOCAL_COMMANDS = new Set([
@@ -20,6 +21,7 @@ const LOCAL_COMMANDS = new Set([
   "repo:list",
   "queue:status",
   "sweep",
+  "publish-pending",
 ]);
 
 /**
@@ -96,10 +98,13 @@ export async function runLocalPrCommand(args, {
   const write = (value) => stdout.write(
     json ? `${JSON.stringify(value, null, 2)}\n` : `${value}\n`,
   );
-  const command = action === undefined ? scope : `${scope}:${action}`;
+  // 引数を取らないコマンド (`sweep` / `publish-pending`) は、直後に来るのが option
+  // なので、 それを副コマンド名として引くと自分自身を見失う。
+  const namedAction = action === undefined || action.startsWith("--") ? undefined : action;
+  const command = namedAction === undefined ? scope : `${scope}:${namedAction}`;
   if (!LOCAL_COMMANDS.has(command)) return null;
   const context = createContext({ cwd, env });
-  const { store, localPrService, jobs } = context;
+  const { store, localPrService, jobs, publicationCoordinator } = context;
 
   if (scope === "pr" && action === "submit") {
     const submission = validatePullRequestSubmission(
@@ -155,12 +160,19 @@ export async function runLocalPrCommand(args, {
     if (bypass && !String(bypass.reason ?? "").trim()) {
       throw new Error("--bypass requires --reason (it is what makes the follow-up review possible).");
     }
+    // 明示保留。 GitHub へは送らずローカルだけ終局させ、 送出は
+    // `revisor publish-pending` へ回す。
+    const deferPush = args.includes("--defer-push");
     const merged = await localPrService.mergePullRequest(pullRequest.id, {
       ...(bypass ? { bypass } : {}),
+      ...(deferPush ? { deferPush: true } : {}),
     });
     write(json
       ? merged
-      : `${bypass ? "Bypass-merged" : "Merged"} ${summarize(merged)} (${merged.mergeCommitSha})`);
+      : `${bypass ? "Bypass-merged" : "Merged"} ${summarize(merged)} (${merged.mergeCommitSha})`
+        + (merged.publication === "deferred"
+          ? " — GitHub publish は保留しました ('revisor publish-pending' で後送)"
+          : ""));
     return 0;
   }
   // バイパスで入った変更の後追いレビュー対象一覧。 印を付けただけで追えなければ、
@@ -213,7 +225,29 @@ export async function runLocalPrCommand(args, {
         + ` fast=${state.lanes?.fast ?? 0} jobs=${state.jobs.length}`);
     return 0;
   }
-  if (scope === "sweep" && action === undefined) {
+  // 保留した publish の一括後送。 GitHub App が届くようになったものから送り、
+  // まだ届かないものは残す。
+  if (scope === "publish-pending" && namedAction === undefined) {
+    const summary = await publishPendingPublications({
+      store,
+      statePath: store.path,
+      repository: option(args, "--repository"),
+      env,
+      publicationCoordinator,
+    });
+    write(json
+      ? summary
+      : [
+        `pending=${summary.pending} published=${summary.published}`
+        + ` skipped=${summary.skipped} failed=${summary.failed}`,
+        ...summary.entries.map((entry) =>
+          `${entry.status}  ${entry.repository}  `
+          + `${entry.number === null ? "(no record)" : `#${entry.number}`}  `
+          + `${entry.mergeCommitSha}${entry.reason ? `  ${entry.reason}` : ""}`),
+      ].join("\n"));
+    return 0;
+  }
+  if (scope === "sweep" && namedAction === undefined) {
     const summary = await localPrService.sweepAutoMerge();
     write(json
       ? summary

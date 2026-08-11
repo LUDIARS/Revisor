@@ -152,9 +152,15 @@ export class GitHubAppClient {
     }
     if (!expectedStatuses.includes(response.status)) {
       const message = typeof value.message === "string" ? `: ${value.message}` : "";
-      throw new RevisorError(
+      // 呼び出し側が「App 未インストール (installation 404)」だけを他の失敗と区別
+      // できるように、 状態コードと経路を構造化して添える。 文言の照合に頼ると、
+      // GitHub のメッセージが変わった日に判定が静かに壊れる。
+      const error = new RevisorError(
         `GitHub API ${method} ${path} returned ${response.status}${message}`,
       );
+      error.status = response.status;
+      error.apiPath = path;
+      throw error;
     }
     return { status: response.status, body: value };
   }

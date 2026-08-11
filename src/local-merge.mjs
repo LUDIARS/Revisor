@@ -14,6 +14,8 @@ import {
   rememberPreparedMerge,
 } from "./git-publication.mjs";
 import { assertLocalVersionUnchanged } from "./local-version.mjs";
+import { rememberPendingPublish } from "./pending-publish.mjs";
+import { isDeferredPublication } from "./publication-state.mjs";
 import { classifyPreparedMerge, readPublishedBaseSha } from "./prepared-merge.mjs";
 import { publishMergedPullRequest } from "./release-publisher.mjs";
 import {
@@ -161,6 +163,27 @@ async function localBaseContainsPreparedMerge(rootPath, baseSha, mergeCommitSha)
 }
 
 /**
+ * GitHub 送出を保留したマージだけを記録する。
+ *
+ * 記録は base ref を前進させる前に行う: 先に base が動いてから記録前に落ちると、
+ * 「ローカルには入っているが保留の記録が無い」= 永久に送られない変更になる。
+ */
+async function recordDeferredPublication({
+  rootPath,
+  localPrId,
+  mergeCommitSha,
+  publication,
+  log,
+}) {
+  if (!isDeferredPublication(publication)) return;
+  await rememberPendingPublish(rootPath, localPrId, mergeCommitSha);
+  log(
+    `GitHub publish を保留しました (${publication.deferredReason}) — `
+    + "ローカルのマージは完了しています。 後で 'revisor publish-pending' を実行してください。",
+  );
+}
+
+/**
  * squash merge の 1 回分の試行。 GitHub base が独立に進んでいた場合の自動 reconcile
  * (取り込み + 再試行) は wrapper (`squashMergeLocalPullRequest`) が 1 回だけ行う。
  */
@@ -170,6 +193,8 @@ async function attemptSquashMerge({
   env = process.env,
   scan = configuredSecurityScan,
   publish = publishMergedPullRequest,
+  // 明示保留。 CLI の `--defer-push` だけがここを true にする。
+  deferPush = false,
   allowSystemFailureOverride = false,
   readPublishedBase = readPublishedBaseSha,
   // stdout は CLI のデータ出力なので、マージ経路の診断行は stderr へ出す。
@@ -241,7 +266,15 @@ async function attemptSquashMerge({
         expectedBaseSha,
         mergeCommitSha: prepared.mergeCommitSha,
         preparedTag: prepared.tag,
+        deferPush,
         env,
+      });
+      await recordDeferredPublication({
+        rootPath: repository.rootPath,
+        localPrId: pullRequest.id,
+        mergeCommitSha: prepared.mergeCommitSha,
+        publication,
+        log,
       });
       if (!await localBaseContainsPreparedMerge(
         repository.rootPath,
@@ -314,7 +347,15 @@ async function attemptSquashMerge({
       pullRequest,
       expectedBaseSha: baseSha,
       mergeCommitSha,
+      deferPush,
       env,
+    });
+    await recordDeferredPublication({
+      rootPath: repository.rootPath,
+      localPrId: pullRequest.id,
+      mergeCommitSha,
+      publication,
+      log,
     });
     await advanceLocalBranch(
       repository.rootPath,

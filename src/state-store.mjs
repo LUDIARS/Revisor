@@ -204,6 +204,9 @@ export class LocalPrStore {
         lifecycleEvents: [],
         releaseTag: null,
         releaseUrl: null,
+        // GitHub まで届いたか保留中か。 マージするまでどちらでもない。
+        publication: null,
+        deferredPublishReason: null,
         publishedAt: null,
         createdAt: timestamp,
         updatedAt: timestamp,

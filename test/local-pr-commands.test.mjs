@@ -34,6 +34,40 @@ test("a following flag cannot satisfy the required bypass reason", async () => {
   assert.equal(mergeCalled, false);
 });
 
+test("forwards --defer-push only through the CLI merge command", async () => {
+  const pullRequest = {
+    id: "pr-8",
+    number: 8,
+    repository: "LUDIARS/Revisor",
+    status: "open",
+    checkStatus: "test_ok",
+    title: "deferred publish",
+  };
+  let request;
+  const code = await runLocalPrCommand(
+    ["pr", "merge", "8", "--defer-push", "--json"],
+    {
+      stdout: { write() {} },
+      createContext: () => ({
+        store: { listPullRequests: () => [pullRequest] },
+        jobs: {},
+        localPrService: {
+          async mergePullRequest(id, options) {
+            request = { id, ...options };
+            return {
+              ...pullRequest,
+              publication: "deferred",
+              mergeCommitSha: "a".repeat(40),
+            };
+          },
+        },
+      }),
+    },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(request, { id: "pr-8", deferPush: true });
+});
+
 test("promotes a queued PR through the explicit fast-lane command", async () => {
   const writes = [];
   const pullRequest = {

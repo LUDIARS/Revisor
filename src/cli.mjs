@@ -23,6 +23,8 @@ function printHelp() {
     "  revisor pr retry <number> [--fast-lane] [--json]",
     "  revisor pr fast-lane <number> [--session-id <id>] [--json]",
     "  revisor pr merge <number> --bypass --reason <text>   # CLI only: merge without a review",
+    "  revisor pr merge <number> --defer-push               # merge locally and hold the GitHub publish",
+    "  revisor publish-pending [--repository <owner/name>] [--json]  # send the held publishes",
     "  revisor pr bypassed [--all] [--json]                 # bypass merges awaiting follow-up review",
     "  revisor pr bypass-reviewed <number> [--note <text>]",
     "  revisor repo register --json-file <path>",
