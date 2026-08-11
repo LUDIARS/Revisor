@@ -38,7 +38,9 @@ published base commits and human-selected semantic version tags/Releases.
 - `state-store.mjs` atomically persists repository and local PR projections.
 - `local-pr-service.mjs` orchestrates registration, submission, re-review,
   startup recovery of interrupted reviews, and merge.
-- `queue.mjs` owns FIFO state, deduplication, and concurrency admission.
+- `persistent-queue.mjs` and `job-store.mjs` own durable FIFO state,
+  deduplication, lifecycle admission, and worker wake-up. They do not cap how
+  many reviews run at once (`feature/review-concurrency.md`).
 - `local-reporter.mjs` projects queue and review results into local PR state.
 - `worker-pool.mjs` owns child-process lifetime and one-job-per-worker dispatch.
 - `runner.mjs` orchestrates one admitted review.
@@ -126,8 +128,12 @@ The general settings endpoint rejects the field rather than dropping it, so a
 success response never reports a host registration that did not happen. See
 `feature/ui-http-boundary.md`.
 
-The queue concurrency and worker-process count use the same validated setting,
-so the queue never admits more runs than the pool can execute.
+Queue admission is deliberately not a concurrency governor. The worker-side
+outer scheduler bounds how many pull requests are under review, while the
+independent stage worker pools bound each expensive concern within those
+reviews. The validated worker setting sizes both the outer scheduler and each
+stage pool; it is not an admission limit. Only landing (staging the passed head
+and advancing the base) is serialized. See `feature/review-concurrency.md`.
 
 ## State model
 
