@@ -3,6 +3,7 @@ import { createReviewContext } from "./review-context.mjs";
 import { createPrReviewRunner } from "./runner.mjs";
 import { ReviewStageWorkers } from "./review-stage-workers.mjs";
 import { workerPresencePath } from "./worker-spawn.mjs";
+import { clearWorkerState, writeWorkerState } from "./worker-state.mjs";
 import { drainReviewJobs } from "./review-job-scheduler.mjs";
 
 /**
@@ -35,12 +36,16 @@ export async function runReviewWorker({
   let stageWorkers;
   let ran = 0;
   try {
+    // サーバは審査を実行しないので、 プールの状態はこのプロセスにしか無い。 UI が
+    // 実際の稼働本数を出せるよう、 状態が動くたびにファイルへ書いて公開する。
     stageWorkers = createStageWorkers({
       size: context.settings.workerCount,
       fastLaneSlots: context.settings.fastLaneSlots,
       cwd,
       env,
+      onStateChange: (state) => writeWorkerState(context.jobs.path, state),
     });
+    writeWorkerState(context.jobs.path, stageWorkers.state());
     const runner = createRunner({
       cwd,
       env,
@@ -99,6 +104,7 @@ export async function runReviewWorker({
     }
   } finally {
     await stageWorkers?.close?.();
+    clearWorkerState(context.jobs.path);
     release?.();
   }
 }

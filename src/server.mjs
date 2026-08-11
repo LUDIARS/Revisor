@@ -21,6 +21,7 @@ import { ReleaseService } from "./release-service.mjs";
 import { createReviewContext } from "./review-context.mjs";
 import { createUiRequestHandler, readJsonBody, sendJson } from "./ui-server.mjs";
 import { ensureReviewWorker } from "./worker-spawn.mjs";
+import { readWorkerState } from "./worker-state.mjs";
 
 function isLocalApi(pathname) {
   return pathname === "/v1/repositories"
@@ -208,8 +209,9 @@ export async function startRevisor({
   });
   const { settings, store, queue, localPrService } = context;
   // 段階ワーカーのプールは審査を実行するプロセス (短命ワーカー) が持つ。 サーバ側は
-  // その状態を持たないので、 UI の実行状況パネルは空の queues を表示する。
-  const reviewWorkers = null;
+  // その状態をメモリでは知り得ないので、 ワーカーが書いた状態ファイルを読んで返す。
+  // 読み取り専用の窓であり、 サーバがプールを所有するわけではない (close も持たない)。
+  const reviewWorkers = { state: () => readWorkerState(context.jobs.path) };
   const releaseService = createReleaseService({
     store,
     env,
@@ -246,13 +248,13 @@ export async function startRevisor({
     });
   } catch (error) {
     prWebSocket.close();
-    await reviewWorkers?.close();
+    await reviewWorkers?.close?.();
     throw error;
   }
   const address = server.address();
   if (!address || typeof address === "string") {
     prWebSocket.close();
-    await reviewWorkers?.close();
+    await reviewWorkers?.close?.();
     server.close();
     throw new Error("Could not resolve the Revisor address.");
   }

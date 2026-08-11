@@ -48,6 +48,7 @@ test("a job submitted during the final sweep is drained without another wake", a
     const outcome = await runReviewWorker({
       createContext: () => context,
       createStageWorkers: () => ({
+        state() { return { queues: [] }; },
         async run(work) { return work(); },
         async close() { closed = true; },
       }),

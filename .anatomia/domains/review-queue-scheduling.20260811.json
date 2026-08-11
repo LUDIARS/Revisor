@@ -5,7 +5,7 @@
     {
       "preset": "couplingCap",
       "params": {
-        "targetPattern": "src/(?:job-store|persistent-queue|review-job-scheduler|review-lane|review-stage-workers|worker-command|worker-pool)\\.mjs$",
+        "targetPattern": "src/(?:job-store|persistent-queue|review-job-scheduler|review-lane|review-stage-workers|worker-command|worker-pool|worker-state)\\.mjs$",
         "by": "path",
         "maxFanOut": 9007199254740991
       }
@@ -13,10 +13,10 @@
   ],
   "membership": [
     {
-      "pathPattern": "(^|/)src/(?:job-store|persistent-queue|review-job-scheduler|review-lane|review-stage-workers|worker-command|worker-pool)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:job-store|persistent-queue|review-job-scheduler|review-lane|review-stage-workers|worker-command|worker-pool|worker-state)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:job-store|review-job-scheduler|review-stage-workers|worker-command|worker-pool)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:job-store|review-job-scheduler|review-stage-workers|worker-command|worker-pool|worker-state)\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)src/local-contracts\\.mjs$",
