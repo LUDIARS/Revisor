@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
-import { LocalPrStore } from "./state-store.mjs";
+import { LocalPrStore, redirectLegacyStorePath } from "./state-store.mjs";
 import { git } from "./workspace.mjs";
 
 const MANAGED_MARKER = "# LUDIARS Revisor managed pre-push hook";
@@ -175,7 +175,9 @@ export async function guardMainPush({
   now = () => new Date().toISOString(),
   authorizedPublication = process.env.REVISOR_PUBLISHING === "1",
 }) {
-  const store = new LocalPrStore({ path: statePath, now });
+  // 配布済み hook は旧 revisor.state.json のパスを焼き込んでいる。 再インストール
+  // なしで database を見つけられるよう、旧パスはここで読み替える。
+  const store = new LocalPrStore({ path: redirectLegacyStorePath(statePath), now });
   const repository = store.findRepositoryByPath(repoPath);
   if (!repository) throw new Error(`Repository is not registered in Revisor: ${repoPath}`);
   const pushes = parsePushLines(input);

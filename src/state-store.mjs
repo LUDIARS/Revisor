@@ -1,38 +1,50 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { resolveConfigPath } from "./config.mjs";
 import { RevisorError } from "./errors.mjs";
-import { withFileLockSync } from "./file-lock.mjs";
+import {
+  archiveLegacyJson,
+  displaceLegacyJson,
+  getMeta,
+  openRevisorDatabase,
+  resolveDbPath,
+  setMeta,
+  takeCounter,
+  withImmediateTransaction,
+  withReadTransaction,
+} from "./revisor-db.mjs";
 
 const STATE_PATH_ENV = "REVISOR_STATE_PATH";
 const QA_ELIGIBLE_CHECK_STATUSES = new Set(["queued", "running", "test_ok"]);
 const MAX_PULL_REQUEST_EVENTS = 50;
+const LEGACY_STATE_FILE = "revisor.state.json";
+const STATE_IMPORTED_KEY = "state_imported";
+const NEXT_PR_NUMBER_KEY = "nextPullRequestNumber";
 
 function testWorkflowStatus(checkStatus) {
   return checkStatus === "test_ok" ? "Open / Test OK" : "Open / In Review";
 }
 
-function emptyState() {
-  return {
-    version: 2,
-    nextPullRequestNumber: 1,
-    repositories: [],
-    pullRequests: [],
-  };
+/** 旧 JSON state の置き場。 database への取り込み元としてだけ残っている。 */
+export function resolveStatePath(env = process.env) {
+  return env[STATE_PATH_ENV]
+    ?? join(dirname(resolveConfigPath(env)), LEGACY_STATE_FILE);
+}
+
+/**
+ * 配布済み pre-push hook には旧 `revisor.state.json` のパスが焼き込まれている。
+ * hook を再インストールしなくても guard が動くよう、旧パスは同じディレクトリの
+ * database へ読み替える。
+ */
+export function redirectLegacyStorePath(path) {
+  return basename(path) === LEGACY_STATE_FILE
+    ? join(dirname(path), "revisor.db")
+    : path;
 }
 
 // v1 はリポジトリごとの連番だった。 番号は横断利用 (Rv#xxx だけで PR を特定して
 // ワークフローを回す) が前提になったので、 全リポジトリ共通の 1 本へ振り直す。
-// createdAt 昇順 (同時刻は id で安定化) なので、 同じ v1 状態からは常に同じ番号に
-// 落ちる — 読み取りは write を伴わないため、 決定的でないと読むたびに番号が揺れる。
 function migrateToGlobalNumbering(state) {
   const ordered = [...state.pullRequests].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
@@ -46,69 +58,130 @@ function migrateToGlobalNumbering(state) {
   };
 }
 
-export function resolveStatePath(env = process.env) {
-  return env[STATE_PATH_ENV]
-    ?? join(dirname(resolveConfigPath(env)), "revisor.state.json");
-}
-
-function readState(path) {
-  if (!existsSync(path)) return emptyState();
-  try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
-    if (
-      !value
-      || (value.version !== 1 && value.version !== 2)
-      || !Array.isArray(value.repositories)
-      || !Array.isArray(value.pullRequests)
-    ) {
-      throw new Error("invalid schema");
-    }
-    if (value.version === 1) return migrateToGlobalNumbering(value);
-    if (!Number.isInteger(value.nextPullRequestNumber) || value.nextPullRequestNumber < 1) {
-      throw new Error("invalid schema");
-    }
-    return value;
-  } catch (error) {
-    throw new RevisorError(`Revisor state is unreadable: ${path}`, { cause: error });
+function validateLegacyState(value) {
+  if (
+    !value
+    || (value.version !== 1 && value.version !== 2)
+    || !Array.isArray(value.repositories)
+    || !Array.isArray(value.pullRequests)
+  ) {
+    throw new Error("invalid schema");
   }
-}
-
-function writeState(path, value) {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-      flag: "wx",
-    });
-    renameSync(temporaryPath, path);
-  } finally {
-    rmSync(temporaryPath, { force: true });
+  if (value.version === 1) return migrateToGlobalNumbering(value);
+  if (!Number.isInteger(value.nextPullRequestNumber) || value.nextPullRequestNumber < 1) {
+    throw new Error("invalid schema");
   }
+  return value;
 }
 
-/** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
-function mutateState(path, label, run) {
-  return withFileLockSync(path, () => {
-    const state = readState(path);
-    const result = run(state);
-    writeState(path, state);
-    return result;
-  }, { label });
+function parseRecords(rows) {
+  return rows.map((row) => JSON.parse(row.record));
 }
 
 export class LocalPrStore {
+  #database = null;
+
   constructor({
-    path = resolveStatePath(),
+    path = resolveDbPath(),
+    legacyPath,
     now = () => new Date().toISOString(),
     createId = randomUUID,
     onEvent = () => {},
   } = {}) {
     this.path = path;
+    this.legacyPath = legacyPath
+      ?? process.env[STATE_PATH_ENV]
+      ?? join(dirname(path), LEGACY_STATE_FILE);
     this.now = now;
     this.createId = createId;
     this.onEvent = onEvent;
+  }
+
+  #db() {
+    if (this.#database) return this.#database;
+    try {
+      // 同じパスに旧 JSON が居る場合は database を作る前に読む必要がある
+      // (JSON の上に SQLite は開けない)。 妥当な JSON だけが退避される。
+      const displaced = displaceLegacyJson(this.path);
+      const database = openRevisorDatabase(this.path);
+      this.#importLegacy(database, displaced);
+      this.#database = database;
+    } catch (error) {
+      throw new RevisorError(`Revisor state is unreadable: ${this.path}`, { cause: error });
+    }
+    return this.#database;
+  }
+
+  /** 旧 JSON state を一度だけ取り込む。 取り込み済みかは database 自身が記憶する。 */
+  #importLegacy(database, displaced) {
+    let renameLegacyAside = false;
+    const imported = withImmediateTransaction(database, () => {
+      if (getMeta(database, STATE_IMPORTED_KEY)) return false;
+      let legacy = displaced;
+      if (!legacy && this.legacyPath !== this.path && existsSync(this.legacyPath)) {
+        legacy = JSON.parse(readFileSync(this.legacyPath, "utf8"));
+        renameLegacyAside = true;
+      }
+      if (legacy) {
+        const state = validateLegacyState(legacy);
+        const saveRepository = database.prepare(
+          "INSERT OR REPLACE INTO repositories (id, record) VALUES (?, ?)");
+        for (const record of state.repositories) {
+          saveRepository.run(record.id, JSON.stringify(record));
+        }
+        const savePullRequest = database.prepare(
+          "INSERT OR REPLACE INTO pull_requests (id, record) VALUES (?, ?)");
+        for (const record of state.pullRequests) {
+          savePullRequest.run(record.id, JSON.stringify(record));
+        }
+        setMeta(database, NEXT_PR_NUMBER_KEY, state.nextPullRequestNumber);
+      }
+      setMeta(database, STATE_IMPORTED_KEY, "1");
+      return true;
+    });
+    if (imported && renameLegacyAside) {
+      try {
+        archiveLegacyJson(this.legacyPath);
+      } catch {
+        // 退避できなくても取り込みは確定済み。 残った旧ファイルは二度と読まれない。
+      }
+    }
+  }
+
+  #mutate(run) {
+    const database = this.#db();
+    return withImmediateTransaction(database, () => run(database));
+  }
+
+  #allRepositories(database) {
+    return parseRecords(database.prepare("SELECT record FROM repositories").all());
+  }
+
+  #findRepositoryRecord(database, repository) {
+    const key = String(repository).toLowerCase();
+    return this.#allRepositories(database)
+      .find((candidate) => candidate.repository.toLowerCase() === key) ?? null;
+  }
+
+  #saveRepository(database, record) {
+    database
+      .prepare("INSERT OR REPLACE INTO repositories (id, record) VALUES (?, ?)")
+      .run(record.id, JSON.stringify(record));
+  }
+
+  #allPullRequests(database) {
+    return parseRecords(database.prepare("SELECT record FROM pull_requests").all());
+  }
+
+  #getPullRequestRecord(database, id) {
+    const row = database.prepare("SELECT record FROM pull_requests WHERE id = ?").get(id);
+    return row ? JSON.parse(row.record) : null;
+  }
+
+  #savePullRequest(database, record) {
+    database
+      .prepare("INSERT OR REPLACE INTO pull_requests (id, record) VALUES (?, ?)")
+      .run(record.id, JSON.stringify(record));
   }
 
   emitPullRequest(type, record) {
@@ -128,17 +201,19 @@ export class LocalPrStore {
   }
 
   registerRepository(repository) {
-    return mutateState(this.path, "register-repository", (state) => {
+    return this.#mutate((database) => {
       const timestamp = this.now();
-      const existing = state.repositories.find((candidate) =>
-        candidate.repository.toLowerCase() === repository.repository.toLowerCase());
+      const existing = this.#findRepositoryRecord(database, repository.repository);
       if (existing) {
-        Object.assign(existing, repository, {
+        const merged = {
+          ...existing,
+          ...repository,
           id: existing.id,
           createdAt: existing.createdAt,
           updatedAt: timestamp,
-        });
-        return structuredClone(existing);
+        };
+        this.#saveRepository(database, merged);
+        return merged;
       }
       const record = {
         id: this.createId(),
@@ -147,40 +222,37 @@ export class LocalPrStore {
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      state.repositories.push(record);
-      return structuredClone(record);
+      this.#saveRepository(database, record);
+      return record;
     });
   }
 
   // 公開ワークフローだけを差し替える。 再登録 (`repo register`) を通すと test_cases
   // など登録本文の全項目を書き直す必要があり、 属性 1 つの変更には重すぎる。
   updateRepositoryWorkflow(repository, workflow) {
-    return mutateState(this.path, "update-repository-workflow", (state) => {
-      const existing = state.repositories.find((candidate) =>
-        candidate.repository.toLowerCase() === String(repository).toLowerCase());
+    return this.#mutate((database) => {
+      const existing = this.#findRepositoryRecord(database, repository);
       if (!existing) return null;
       existing.workflow = workflow;
       existing.updatedAt = this.now();
-      return structuredClone(existing);
+      this.#saveRepository(database, existing);
+      return existing;
     });
   }
 
   getRepository(repository) {
-    const record = readState(this.path).repositories.find((candidate) =>
-      candidate.repository.toLowerCase() === String(repository).toLowerCase());
-    return record ? structuredClone(record) : null;
+    return this.#findRepositoryRecord(this.#db(), repository);
   }
 
   findRepositoryByPath(rootPath) {
     const normalized = String(rootPath).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    const record = readState(this.path).repositories.find((candidate) =>
+    return this.#allRepositories(this.#db()).find((candidate) =>
       candidate.rootPath.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
-        === normalized);
-    return record ? structuredClone(record) : null;
+        === normalized) ?? null;
   }
 
   listRepositories() {
-    return structuredClone(readState(this.path).repositories)
+    return this.#allRepositories(this.#db())
       .sort((left, right) => left.repository.localeCompare(right.repository));
   }
 
@@ -195,17 +267,16 @@ export class LocalPrStore {
 
   /** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
   #persistPullRequest(pullRequest, { deduplicate }) {
-    const outcome = mutateState(this.path, "create-pull-request", (state) => {
+    const outcome = this.#mutate((database) => {
       if (deduplicate) {
-        const existing = state.pullRequests.find((candidate) =>
+        const existing = this.#allPullRequests(database).find((candidate) =>
           candidate.status === "open"
           && candidate.repository.toLowerCase() === pullRequest.repository.toLowerCase()
           && candidate.headSha.toLowerCase() === pullRequest.headSha.toLowerCase());
-        if (existing) return { pullRequest: structuredClone(existing), created: false };
+        if (existing) return { pullRequest: existing, created: false };
       }
       const timestamp = this.now();
-      const number = state.nextPullRequestNumber;
-      state.nextPullRequestNumber = number + 1;
+      const number = takeCounter(database, NEXT_PR_NUMBER_KEY);
       const record = {
         id: this.createId(),
         number,
@@ -224,28 +295,26 @@ export class LocalPrStore {
         createdAt: timestamp,
         updatedAt: timestamp,
       };
-      state.pullRequests.push(record);
-      return { pullRequest: structuredClone(record), created: true };
+      this.#savePullRequest(database, record);
+      return { pullRequest: record, created: true };
     });
     if (outcome.created) this.emitPullRequest("pull_request.created", outcome.pullRequest);
     return outcome;
   }
 
   getPullRequest(id) {
-    const record = readState(this.path).pullRequests.find((candidate) => candidate.id === id);
-    return record ? structuredClone(record) : null;
+    return this.#getPullRequestRecord(this.#db(), id);
   }
 
   findExactPullRequest(repository, headSha) {
-    const record = readState(this.path).pullRequests.find((candidate) =>
+    return this.#allPullRequests(this.#db()).find((candidate) =>
       candidate.status === "open"
       && candidate.repository.toLowerCase() === repository.toLowerCase()
-      && candidate.headSha.toLowerCase() === headSha.toLowerCase());
-    return record ? structuredClone(record) : null;
+      && candidate.headSha.toLowerCase() === headSha.toLowerCase()) ?? null;
   }
 
   listPullRequests() {
-    return structuredClone(readState(this.path).pullRequests)
+    return this.#allPullRequests(this.#db())
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -255,23 +324,26 @@ export class LocalPrStore {
 
   /** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
   updatePullRequestWith(id, createPatch) {
-    const outcome = mutateState(this.path, "update-pull-request", (state) => {
-      const record = state.pullRequests.find((candidate) => candidate.id === id);
+    const outcome = this.#mutate((database) => {
+      const record = this.#getPullRequestRecord(database, id);
       if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
+      // patch 関数へはコピーを渡す。 返り値だけが反映され、引数への直接変更は捨てられる
+      // — という契約を JSON ファイル時代から変えない。
       const patch = createPatch(structuredClone(record));
       if (!patch || Object.keys(patch).length === 0) {
-        return { pullRequest: structuredClone(record), updated: false };
+        return { pullRequest: record, updated: false };
       }
-      Object.assign(record, patch, { id: record.id, updatedAt: this.now() });
-      return { pullRequest: structuredClone(record), updated: true };
+      const merged = { ...record, ...patch, id: record.id, updatedAt: this.now() };
+      this.#savePullRequest(database, merged);
+      return { pullRequest: merged, updated: true };
     });
     if (outcome.updated) this.emitPullRequest("pull_request.updated", outcome.pullRequest);
     return outcome.pullRequest;
   }
 
   appendPullRequestEvent(id, event) {
-    const updated = mutateState(this.path, "append-pull-request-event", (state) => {
-      const record = state.pullRequests.find((candidate) => candidate.id === id);
+    const updated = this.#mutate((database) => {
+      const record = this.#getPullRequestRecord(database, id);
       if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
       const lifecycleEvents = Array.isArray(record.lifecycleEvents)
         ? record.lifecycleEvents
@@ -284,27 +356,33 @@ export class LocalPrStore {
       });
       record.lifecycleEvents = lifecycleEvents.slice(-MAX_PULL_REQUEST_EVENTS);
       record.updatedAt = this.now();
-      return structuredClone(record);
+      this.#savePullRequest(database, record);
+      return record;
     });
     this.emitPullRequest("pull_request.updated", updated);
     return updated;
   }
 
   updatePushGuard(repository, pushGuard) {
-    return mutateState(this.path, "update-push-guard", (state) => {
-      const record = state.repositories.find((candidate) =>
-        candidate.repository.toLowerCase() === repository.toLowerCase());
+    return this.#mutate((database) => {
+      const record = this.#findRepositoryRecord(database, repository);
       if (!record) throw new RevisorError(`Repository '${repository}' is not registered.`);
       record.pushGuard = pushGuard;
       record.updatedAt = this.now();
-      return structuredClone(record);
+      this.#saveRepository(database, record);
+      return record;
     });
   }
 
   testWorkflowProducts() {
-    const state = readState(this.path);
-    return state.repositories.flatMap((repository) => {
-      const latest = state.pullRequests
+    const database = this.#db();
+    // リポジトリと PR は別テーブルになったので、同じスナップショットで読む。
+    const { repositories, pullRequests } = withReadTransaction(database, () => ({
+      repositories: this.#allRepositories(database),
+      pullRequests: this.#allPullRequests(database),
+    }));
+    return repositories.flatMap((repository) => {
+      const latest = pullRequests
         .filter((pullRequest) =>
           pullRequest.repository.toLowerCase() === repository.repository.toLowerCase()
           && pullRequest.status === "open"

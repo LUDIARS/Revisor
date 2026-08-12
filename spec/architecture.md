@@ -20,8 +20,9 @@ published base commits and human-selected semantic version tags/Releases.
   titles, bodies, authors, branch names and head/base SHAs, the review verdict
   with its reasons and advisories, the leakage and security findings (rule, file
   and line only — matched values are never persisted), and, on
-  `GET /v1/repositories`, the absolute working-tree and hook paths. The state file
-  behind those reads is `0600`, so opening them to the loopback port widens the
+  `GET /v1/repositories`, the absolute working-tree and hook paths. The state
+  database behind those reads is private to the owning account, so opening them
+  to the loopback port widens the
   audience from the owning OS account to every account on the machine; Revisor
   treats the workstation as single-user and accepts that.
   A token-free read requires both a loopback peer address and a loopback
@@ -158,11 +159,10 @@ only `Open / Test OK` means the review gate has passed.
 
 The number is global rather than per-repository because it is used on its own to
 identify a pull request across the workflow (`Rv#xxx`), which a number that
-repeats in every repository cannot do. A state file written by the earlier
-per-repository scheme (`version: 1`) is renumbered on read, ordered by creation
-time and broken by id, so the same stored state always yields the same numbers —
-a read performs no write, and a non-deterministic migration would renumber the
-board on every read.
+repeats in every repository cannot do. A legacy JSON state written by the earlier
+per-repository scheme (`version: 1`) is renumbered once when it is imported into
+the SQLite database, ordered by creation time and broken by id, so the same
+stored state always yields the same numbers.
 
 Whether a pull request needs a human is not stored. It is derived on every read
 from the stored assessments and the current settings, so moving the accepted

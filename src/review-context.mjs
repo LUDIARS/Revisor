@@ -11,7 +11,8 @@ import { PersistentPrReviewQueue } from "./persistent-queue.mjs";
 import { notifyPullRequestLifecycle } from "./pr-lifecycle-notice.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
-import { LocalPrStore, resolveStatePath } from "./state-store.mjs";
+import { resolveDbPath } from "./revisor-db.mjs";
+import { LocalPrStore } from "./state-store.mjs";
 
 /**
  * PR 記録 / キュー / 審査サービスの組み立て。
@@ -30,7 +31,7 @@ export function createReviewContext({
   startWorker,
 } = {}) {
   const settings = readSettings(env);
-  const statePath = stateStore?.path ?? resolveStatePath(env);
+  const statePath = stateStore?.path ?? resolveDbPath(env);
   const store = stateStore ?? new LocalPrStore({ path: statePath, onEvent });
   const jobs = jobStore ?? new JobStore({ path: resolveJobsPath(env) });
   // Promise chain だけでは別プロセスの CLI / worker / server を直列化できない。

@@ -1,27 +1,43 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { RevisorError } from "./errors.mjs";
-import { withFileLock } from "./file-lock.mjs";
 import { workerLogPath } from "./worker-spawn.mjs";
 import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
 import { resolveStatePath } from "./state-store.mjs";
+import {
+  archiveLegacyJson,
+  displaceLegacyJson,
+  getMeta,
+  openRevisorDatabase,
+  resolveDbPath,
+  setMeta,
+  takeCounter,
+  withImmediateTransaction,
+} from "./revisor-db.mjs";
 
-// 審査キューの正本。 常駐プロセスの in-memory キューだったものをファイルへ移した。
-// 投入する CLI と実行するワーカーが別プロセスなので、キューが記憶ではなく記録である
-// ことが前提になる。 PR 本体の state とは別ファイルにして、キューの入れ替えが
-// PR 記録の schema を触らないようにする。
+// 審査キューの正本。 PR 記録と同じ database に置く — 投入する CLI と実行するワーカーが
+// 別プロセスなので、キューが記憶ではなく記録であることが前提になる。 テーブルは PR 記録と
+// 分かれており、キューの入れ替えが PR 記録の schema を触ることはない。
 
 // 1 つの job を実行し直す上限。 ワーカーが落ちた分の拾い直しは必要だが、
 // 落ち続ける job を無限に拾い直すと、そのままキューが自己増殖する。
 const MAX_ATTEMPTS = 2;
 
+const LEGACY_JOBS_FILE = "revisor.jobs.json";
+const JOBS_IMPORTED_KEY = "jobs_imported";
+const NEXT_FAST_LANE_KEY = "nextFastLaneSequence";
+
+/**
+ * キューの座標。 database 本体のパスであり、ワーカーの presence lock / log /
+ * 状態ファイルの名前もここから派生する。
+ */
 export function resolveJobsPath(env = process.env) {
-  return join(dirname(resolveStatePath(env)), "revisor.jobs.json");
+  return resolveDbPath(env);
 }
 
-function emptyJobs() {
-  return { version: 1, nextFastLaneSequence: 1, jobs: [] };
+function resolveLegacyJobsPath(env = process.env) {
+  return join(dirname(resolveStatePath(env)), LEGACY_JOBS_FILE);
 }
 
 function storedFastLaneSequence(job) {
@@ -30,7 +46,19 @@ function storedFastLaneSequence(job) {
     : null;
 }
 
-function canonicalizeFastLaneSequence(value) {
+// 旧 JSON の jobs を取り込み可能な形へ正規化する。 lane の欠けた記録は標準レーンへ、
+// 順序番号の無い fast job には投入時刻順で番号を振り直す。
+function canonicalizeLegacyJobs(value) {
+  if (!value || value.version !== 1 || !Array.isArray(value.jobs)) {
+    throw new Error("invalid schema");
+  }
+  for (const job of value.jobs) {
+    job.reviewLane = normalizeReviewLane(job.reviewLane ?? job.request?.reviewLane);
+    job.request = { ...job.request, reviewLane: job.reviewLane };
+    if (job.reviewLane === REVIEW_LANES.FAST && !job.fastLaneEnteredAt) {
+      job.fastLaneEnteredAt = job.createdAt;
+    }
+  }
   let lastSequence = value.jobs.reduce(
     (maximum, job) => Math.max(maximum, storedFastLaneSequence(job) ?? 0),
     0,
@@ -47,48 +75,7 @@ function canonicalizeFastLaneSequence(value) {
     && value.nextFastLaneSequence > lastSequence
     ? value.nextFastLaneSequence
     : lastSequence + 1;
-}
-
-function takeFastLaneSequence(value) {
-  const sequence = value.nextFastLaneSequence;
-  value.nextFastLaneSequence += 1;
-  return sequence;
-}
-
-function readJobs(path) {
-  if (!existsSync(path)) return emptyJobs();
-  try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
-    if (!value || value.version !== 1 || !Array.isArray(value.jobs)) {
-      throw new Error("invalid schema");
-    }
-    for (const job of value.jobs) {
-      job.reviewLane = normalizeReviewLane(job.reviewLane ?? job.request?.reviewLane);
-      job.request = { ...job.request, reviewLane: job.reviewLane };
-      if (job.reviewLane === REVIEW_LANES.FAST && !job.fastLaneEnteredAt) {
-        job.fastLaneEnteredAt = job.createdAt;
-      }
-    }
-    canonicalizeFastLaneSequence(value);
-    return value;
-  } catch (error) {
-    throw new RevisorError(`Revisor job queue is unreadable: ${path}`, { cause: error });
-  }
-}
-
-function writeJobs(path, value) {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-      flag: "wx",
-    });
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
+  return value;
 }
 
 function processIsGone(pid) {
@@ -106,25 +93,81 @@ function jobKey(request) {
 }
 
 export class JobStore {
+  #database = null;
+
   constructor({
     path = resolveJobsPath(),
+    legacyPath,
     now = () => new Date().toISOString(),
     createId = randomUUID,
     maxJobs = 200,
   } = {}) {
     this.path = path;
+    this.legacyPath = legacyPath ?? resolveLegacyJobsPath();
     this.now = now;
     this.createId = createId;
     this.maxJobs = maxJobs;
   }
 
-  #mutate(run, label) {
-    return withFileLock(this.path, () => {
-      const value = readJobs(this.path);
-      const outcome = run(value);
-      writeJobs(this.path, value);
-      return outcome;
-    }, { label });
+  #db() {
+    if (this.#database) return this.#database;
+    try {
+      const displaced = displaceLegacyJson(this.path);
+      const database = openRevisorDatabase(this.path);
+      this.#importLegacy(database, displaced);
+      this.#database = database;
+    } catch (error) {
+      throw new RevisorError(`Revisor job queue is unreadable: ${this.path}`, { cause: error });
+    }
+    return this.#database;
+  }
+
+  /** 旧 JSON キューを一度だけ取り込む。 取り込み済みかは database 自身が記憶する。 */
+  #importLegacy(database, displaced) {
+    let renameLegacyAside = false;
+    const imported = withImmediateTransaction(database, () => {
+      if (getMeta(database, JOBS_IMPORTED_KEY)) return false;
+      let legacy = displaced;
+      if (!legacy && this.legacyPath !== this.path && existsSync(this.legacyPath)) {
+        legacy = JSON.parse(readFileSync(this.legacyPath, "utf8"));
+        renameLegacyAside = true;
+      }
+      if (legacy) {
+        const value = canonicalizeLegacyJobs(legacy);
+        const save = database.prepare("INSERT OR REPLACE INTO jobs (id, record) VALUES (?, ?)");
+        for (const job of value.jobs) save.run(job.id, JSON.stringify(job));
+        setMeta(database, NEXT_FAST_LANE_KEY, value.nextFastLaneSequence);
+      }
+      setMeta(database, JOBS_IMPORTED_KEY, "1");
+      return true;
+    });
+    if (imported && renameLegacyAside) {
+      try {
+        archiveLegacyJson(this.legacyPath);
+      } catch {
+        // 退避できなくても取り込みは確定済み。 残った旧ファイルは二度と読まれない。
+      }
+    }
+  }
+
+  #mutate(run) {
+    const database = this.#db();
+    return withImmediateTransaction(database, () => run(database));
+  }
+
+  #allJobs(database) {
+    return database.prepare("SELECT record FROM jobs").all()
+      .map((row) => JSON.parse(row.record));
+  }
+
+  #saveJob(database, job) {
+    database
+      .prepare("INSERT OR REPLACE INTO jobs (id, record) VALUES (?, ?)")
+      .run(job.id, JSON.stringify(job));
+  }
+
+  #deleteJob(database, id) {
+    database.prepare("DELETE FROM jobs WHERE id = ?").run(id);
   }
 
   /**
@@ -134,12 +177,12 @@ export class JobStore {
    */
   async enqueue(request, { force = false } = {}) {
     const key = jobKey(request);
-    return this.#mutate((value) => {
-      const existing = value.jobs.find((job) => job.key === key);
+    return this.#mutate((database) => {
+      const existing = this.#allJobs(database).find((job) => job.key === key);
       if (existing && (!force || existing.status === "queued" || existing.status === "running")) {
-        return { job: structuredClone(existing), created: false };
+        return { job: existing, created: false };
       }
-      if (existing) value.jobs.splice(value.jobs.indexOf(existing), 1);
+      if (existing) this.#deleteJob(database, existing.id);
       const timestamp = this.now();
       const reviewLane = normalizeReviewLane(request.reviewLane);
       const job = {
@@ -161,13 +204,13 @@ export class JobStore {
           ? timestamp
           : null,
         fastLaneSequence: reviewLane === REVIEW_LANES.FAST
-          ? takeFastLaneSequence(value)
+          ? takeCounter(database, NEXT_FAST_LANE_KEY)
           : null,
       };
-      value.jobs.push(job);
-      trim(value, this.maxJobs);
-      return { job: structuredClone(job), created: true };
-    }, "enqueue");
+      this.#saveJob(database, job);
+      this.#trim(database);
+      return { job, created: true };
+    });
   }
 
   /**
@@ -176,8 +219,8 @@ export class JobStore {
    */
   async claimNext({ reviewLane = null } = {}) {
     const selectedLane = reviewLane === null ? null : normalizeReviewLane(reviewLane);
-    return this.#mutate((value) => {
-      const job = value.jobs
+    return this.#mutate((database) => {
+      const job = this.#allJobs(database)
         .filter((candidate) => candidate.status === "queued"
           && (selectedLane === null
             || normalizeReviewLane(candidate.reviewLane ?? candidate.request?.reviewLane)
@@ -205,41 +248,45 @@ export class JobStore {
       job.attempts += 1;
       job.claimedPid = process.pid;
       job.updatedAt = this.now();
-      return structuredClone(job);
-    }, "claim");
+      this.#saveJob(database, job);
+      return job;
+    });
   }
 
   /** @implements SPEC-REVIEW-FAST-LANE-DURABILITY */
   async promote(localPrId) {
-    return this.#mutate((value) => {
-      const job = value.jobs.find((candidate) =>
+    return this.#mutate((database) => {
+      const job = this.#allJobs(database).find((candidate) =>
         candidate.localPrId === localPrId && candidate.status === "queued");
       if (!job) {
         throw new RevisorError(`Queued review job for local PR '${localPrId}' was not found.`);
       }
-      if (job.reviewLane === REVIEW_LANES.FAST) return structuredClone(job);
+      if (job.reviewLane === REVIEW_LANES.FAST) return job;
       job.reviewLane = REVIEW_LANES.FAST;
       job.request = { ...job.request, reviewLane: REVIEW_LANES.FAST };
       // Promotion joins the tail of the existing fast FIFO instead of jumping
       // ahead based on the older standard-lane submission timestamp.
       const timestamp = this.now();
       job.fastLaneEnteredAt = timestamp;
-      job.fastLaneSequence = takeFastLaneSequence(value);
+      job.fastLaneSequence = takeCounter(database, NEXT_FAST_LANE_KEY);
       job.updatedAt = timestamp;
-      return structuredClone(job);
-    }, "promote-fast-lane");
+      this.#saveJob(database, job);
+      return job;
+    });
   }
 
   async settle(id, { status, error = null }) {
-    return this.#mutate((value) => {
-      const job = value.jobs.find((candidate) => candidate.id === id);
-      if (!job) throw new RevisorError(`Review job '${id}' was not found.`);
+    return this.#mutate((database) => {
+      const row = database.prepare("SELECT record FROM jobs WHERE id = ?").get(id);
+      if (!row) throw new RevisorError(`Review job '${id}' was not found.`);
+      const job = JSON.parse(row.record);
       job.status = status;
       job.error = error;
       job.claimedPid = null;
       job.updatedAt = this.now();
-      return structuredClone(job);
-    }, "settle");
+      this.#saveJob(database, job);
+      return job;
+    });
   }
 
   /**
@@ -250,10 +297,10 @@ export class JobStore {
    * 終局させる — ここを無条件に戻すと、落ち続ける job がキューに永住する。
    */
   async reclaimAbandoned() {
-    return this.#mutate((value) => {
+    return this.#mutate((database) => {
       const requeued = [];
       const exhausted = [];
-      for (const job of value.jobs) {
+      for (const job of this.#allJobs(database)) {
         if (job.status !== "running" || !processIsGone(job.claimedPid)) continue;
         job.claimedPid = null;
         job.updatedAt = this.now();
@@ -265,23 +312,25 @@ export class JobStore {
           // never expose the workstation's absolute state path there.
           job.error = `The review worker died ${job.attempts} time(s); Revisor stopped retrying it.`
             + ` See the local ${basename(workerLogPath(this.path))} for the worker output.`;
-          exhausted.push(structuredClone(job));
+          this.#saveJob(database, job);
+          exhausted.push(job);
           continue;
         }
         job.status = "queued";
-        requeued.push(structuredClone(job));
+        this.#saveJob(database, job);
+        requeued.push(job);
       }
       return { requeued, exhausted };
-    }, "reclaim");
+    });
   }
 
   get(id) {
-    const job = readJobs(this.path).jobs.find((candidate) => candidate.id === id);
-    return job ? structuredClone(job) : null;
+    const row = this.#db().prepare("SELECT record FROM jobs WHERE id = ?").get(id);
+    return row ? JSON.parse(row.record) : null;
   }
 
   list() {
-    return structuredClone(readJobs(this.path).jobs)
+    return this.#allJobs(this.#db())
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -301,17 +350,20 @@ export class JobStore {
       jobs,
     };
   }
-}
 
-// 終局した job だけを古い順に落とす。 未終了の job を数合わせで消すと、実行中の
-// ワーカーが自分の job を見失う。
-function trim(value, maxJobs) {
-  if (value.jobs.length <= maxJobs) return;
-  const settled = value.jobs
-    .filter((job) => job.status === "completed" || job.status === "failed")
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-  for (const job of settled) {
-    if (value.jobs.length <= maxJobs) return;
-    value.jobs.splice(value.jobs.indexOf(job), 1);
+  // 終局した job だけを古い順に落とす。 未終了の job を数合わせで消すと、実行中の
+  // ワーカーが自分の job を見失う。
+  #trim(database) {
+    const jobs = this.#allJobs(database);
+    if (jobs.length <= this.maxJobs) return;
+    let count = jobs.length;
+    const settled = jobs
+      .filter((job) => job.status === "completed" || job.status === "failed")
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    for (const job of settled) {
+      if (count <= this.maxJobs) return;
+      this.#deleteJob(database, job.id);
+      count -= 1;
+    }
   }
 }

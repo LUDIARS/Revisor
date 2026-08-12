@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { JobStore } from "../src/job-store.mjs";
-import { withFileLock } from "../src/file-lock.mjs";
 
 function storeFixture() {
   const directory = mkdtempSync(join(tmpdir(), "revisor-jobs-"));
@@ -12,7 +12,7 @@ function storeFixture() {
   return {
     directory,
     store: new JobStore({
-      path: join(directory, "jobs.json"),
+      path: join(directory, "revisor.jobs.db"),
       createId: () => `job-${++sequence}`,
       now: () => new Date(1_700_000_000_000 + sequence * 1_000).toISOString(),
     }),
@@ -158,6 +158,25 @@ test("legacy v1 jobs migrate to the canonical standard lane on restart", () => {
   }
 });
 
+test("imports a separately stored legacy queue without replacing its prior archive", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-jobs-legacy-archive-"));
+  const path = join(directory, "revisor.db");
+  const legacyPath = join(directory, "revisor.jobs.json");
+  const previousArchive = `${legacyPath}.migrated`;
+  const legacy = { version: 1, jobs: [] };
+  try {
+    writeFileSync(legacyPath, JSON.stringify(legacy), "utf8");
+    writeFileSync(previousArchive, "older backup", "utf8");
+    const store = new JobStore({ path, legacyPath });
+    assert.deepEqual(store.list(), []);
+    assert.equal(readFileSync(previousArchive, "utf8"), "older backup");
+    assert.equal(existsSync(`${legacyPath}.migrated.1`), true);
+    assert.deepEqual(JSON.parse(readFileSync(`${legacyPath}.migrated.1`, "utf8")), legacy);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 // ワーカーは短命なので「running なのに保持プロセスが居ない」がそのまま中断の証拠になる。
 test("a job whose worker died is requeued until the attempt limit, then failed", async () => {
   const fixture = storeFixture();
@@ -166,11 +185,18 @@ test("a job whose worker died is requeued until the attempt limit, then failed",
     // 保持者を「存在しない pid」に差し替えて、死んだワーカーを再現する。
     const die = async () => {
       const claimed = await fixture.store.claimNext();
-      await withFileLock(fixture.store.path, () => {
-        const raw = JSON.parse(readFileSync(fixture.store.path, "utf8"));
-        raw.jobs.find((job) => job.id === claimed.id).claimedPid = 0x7fff_fffe;
-        writeFileSync(fixture.store.path, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
-      });
+      const database = new DatabaseSync(fixture.store.path);
+      try {
+        const raw = JSON.parse(
+          database.prepare("SELECT record FROM jobs WHERE id = ?").get(claimed.id).record,
+        );
+        raw.claimedPid = 0x7fff_fffe;
+        database
+          .prepare("UPDATE jobs SET record = ? WHERE id = ?")
+          .run(JSON.stringify(raw), claimed.id);
+      } finally {
+        database.close();
+      }
       return claimed;
     };
     await die();
@@ -185,7 +211,7 @@ test("a job whose worker died is requeued until the attempt limit, then failed",
     assert.equal(second.requeued.length, 0, "the attempt limit stops the queue from self-feeding");
     assert.equal(second.exhausted.length, 1);
     assert.equal(second.exhausted[0].status, "failed");
-    assert.match(second.exhausted[0].error, /revisor\.jobs\.json\.worker\.log/);
+    assert.match(second.exhausted[0].error, /revisor\.jobs\.db\.worker\.log/);
     assert.equal(second.exhausted[0].error.includes(fixture.directory), false);
     assert.equal(fixture.store.state().queued, 0);
   } finally {

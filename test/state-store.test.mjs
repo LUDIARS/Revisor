@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -218,6 +218,30 @@ test("migrates a v1 per-repository numbered state to the global sequence", () =>
       headSha: "c".repeat(40), baseSha: "d".repeat(40),
     });
     assert.equal(next.number, 4);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("imports a separately stored legacy state without replacing its prior archive", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-state-legacy-archive-"));
+  const path = join(directory, "revisor.db");
+  const legacyPath = join(directory, "revisor.state.json");
+  const previousArchive = `${legacyPath}.migrated`;
+  const legacy = {
+    version: 2,
+    nextPullRequestNumber: 1,
+    repositories: [],
+    pullRequests: [],
+  };
+  try {
+    writeFileSync(legacyPath, JSON.stringify(legacy), "utf8");
+    writeFileSync(previousArchive, "older backup", "utf8");
+    const store = new LocalPrStore({ path, legacyPath });
+    assert.deepEqual(store.listPullRequests(), []);
+    assert.equal(readFileSync(previousArchive, "utf8"), "older backup");
+    assert.equal(existsSync(`${legacyPath}.migrated.1`), true);
+    assert.deepEqual(JSON.parse(readFileSync(`${legacyPath}.migrated.1`, "utf8")), legacy);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

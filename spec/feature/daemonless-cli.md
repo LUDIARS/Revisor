@@ -60,12 +60,20 @@ presence を解放した後でキューを再確認し、積み残しがあれ�
 ### SPEC-DAEMONLESS-PROCESS-LOCKS: プロセス間の相互排他
 
 state と job の read-modify-write、および base ref を進める publication は、別プロセスから
-同時に走りうる。 `src/file-lock.mjs` のディレクトリ作成ロックで直列化し、保持者が死んだ
-ロックは pid 生存判定で奪う。 待ちは有限 — 無期限に待つと、詰まった 1 プロセスがすべての
-コマンドを黙って積み上げ、常駐を捨てた意味が無くなる。
+同時に走りうる。 待ちは有限 — 無期限に待つと、詰まった 1 プロセスがすべてのコマンドを
+黙って積み上げ、常駐を捨てた意味が無くなる。
 
-正常な pid の lock は処理時間だけで stale にしない。解放時は取得時の token が一致する lock
-だけを消し、古い保持者の後始末が後から取得した保持者の lock を消さない。
+PR 記録と審査キューの正本は 1 つの SQLite database (`revisor.db`) にあり、read-modify-write
+は `BEGIN IMMEDIATE` トランザクション (`src/revisor-db.mjs`) で直列化する。 待ち上限は
+`busy_timeout` (60 秒)。 JSON ファイル + atomic rename だった頃は、外部の読み手が state を
+開いているだけで rename が EPERM になり、無関係な PR の審査が巻き添えで落ちた — WAL の
+database は読み手が書き手を壊せない。 旧 `revisor.state.json` / `revisor.jobs.json` は
+初回オープン時に一度だけ取り込み、`.migrated` へ退避する。
+
+publication lock とワーカーの presence lock は data ではなくプロセスの生存を表すので、
+引き続き `src/file-lock.mjs` のディレクトリ作成ロックで直列化し、保持者が死んだロックは
+pid 生存判定で奪う。 正常な pid の lock は処理時間だけで stale にしない。解放時は取得時の
+token が一致する lock だけを消し、古い保持者の後始末が後から取得した保持者の lock を消さない。
 
 ## バイパスマージ
 
