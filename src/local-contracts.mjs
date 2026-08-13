@@ -206,6 +206,9 @@ export function validateRepositoryRegistration(body) {
   if (!REPOSITORY.test(repository)) throw new Error("repository is invalid.");
   const rootPath = text(body.root_path, "root_path", 1_000);
   if (!isAbsolute(rootPath)) throw new Error("root_path must be absolute.");
+  if (/[\0-\x1f\x7f]/.test(rootPath)) {
+    throw new Error("root_path must not contain control characters.");
+  }
   const baseRef = gitRef(body.base_ref ?? "main", "base_ref");
   if (!Array.isArray(body.test_cases) || body.test_cases.length === 0) {
     throw new Error("At least one test case is required when registering a repository.");

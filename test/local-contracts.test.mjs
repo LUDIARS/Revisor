@@ -34,6 +34,14 @@ test("requires test cases at repository registration", () => {
   }), /At least one test case/);
 });
 
+test("rejects repository paths containing Git-config control characters", () => {
+  assert.throws(() => validateRepositoryRegistration({
+    repository: "LUDIARS/Revisor",
+    root_path: "E:/Document/Ars/Revisor\n[include]",
+    test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
+  }), /root_path must not contain control characters/);
+});
+
 test("normalizes argv test cases and local PR metadata", () => {
   const registration = validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",

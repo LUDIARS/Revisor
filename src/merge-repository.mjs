@@ -7,6 +7,34 @@ import { assertSafeRef, git } from "./workspace.mjs";
 const MERGE_REPOSITORIES_DIRECTORY = "merge-repositories";
 const SOURCE_REMOTE = "revisor-source";
 
+function portableAbsolutePath(path) {
+  return resolve(path).replaceAll("\\", "/");
+}
+
+async function registeredSourceDirectories(rootPath, runGit) {
+  const sourcePath = portableAbsolutePath(rootPath);
+  // Resolving the git directory already opens the contaminated repository, so it
+  // needs the same trust the clone does. Only the registered root is known
+  // before Git answers, and a worktree-scoped entry does not cover the gitdir a
+  // linked worktree points at, so carry the conventional `<root>/.git` as well:
+  // both are derived from the registered path, never guessed from Git output.
+  const discoveryDirectories = [sourcePath, `${sourcePath}/.git`];
+  const gitDirectory = portableAbsolutePath(
+    await runGit(rootPath, sourceGitArgs(discoveryDirectories, [
+      "rev-parse",
+      "--absolute-git-dir",
+    ])),
+  );
+  return [...new Set([sourcePath, gitDirectory])];
+}
+
+function sourceGitArgs(sourceDirectories, args) {
+  return [
+    ...sourceDirectories.flatMap((path) => ["-c", `safe.directory=${path}`]),
+    ...args,
+  ];
+}
+
 function repositoryDirectoryName(repository) {
   const slug = repository.repository
     .toLowerCase()
@@ -45,6 +73,7 @@ async function initializeMergeRepository({
   mergeRoot,
   repository,
   baseRef,
+  sourceDirectories,
   runGit,
 }) {
   const stagingRoot = await mkdtemp(join(repositoriesRoot, ".initialize-"));
@@ -55,7 +84,7 @@ async function initializeMergeRepository({
     // --shared: its alternates file would make this repository depend on the
     // registered checkout. Keeping the local clone fast matters because this
     // path runs before every merge.
-    await runGit(repositoriesRoot, [
+    await runGit(repositoriesRoot, sourceGitArgs(sourceDirectories, [
       "clone",
       "--no-checkout",
       "--origin",
@@ -63,7 +92,7 @@ async function initializeMergeRepository({
       "--",
       repository.rootPath,
       stagedRepository,
-    ], 300_000);
+    ]), 300_000);
     let baseSha;
     try {
       baseSha = await runGit(stagedRepository, [
@@ -72,12 +101,12 @@ async function initializeMergeRepository({
         `refs/heads/${baseRef}`,
       ]);
     } catch {
-      await runGit(stagedRepository, [
+      await runGit(stagedRepository, sourceGitArgs(sourceDirectories, [
         "fetch",
         "--no-tags",
         SOURCE_REMOTE,
         `+refs/heads/${baseRef}:refs/heads/${baseRef}`,
-      ]);
+      ]));
       baseSha = await runGit(stagedRepository, [
         "rev-parse",
         "--verify",
@@ -118,8 +147,8 @@ async function assertMergeRepositoryIdentity(mergeRoot, repository, runGit) {
 
 /**
  * Prepare Revisor's persistent, independent merge repository for one local PR.
- * Only Git objects are read from the registered source checkout; its worktree,
- * refs, index, branch, stash, hooks, and ignored files are never changed.
+ * Only Git metadata and objects are read from the registered source checkout;
+ * its worktree, refs, index, branch, stash, hooks, and ignored files are never changed.
  */
 export async function prepareMergeRepository({
   repository,
@@ -151,32 +180,35 @@ export async function prepareMergeRepository({
     `${repositoryDirectoryName(repository)}.prepare`,
   );
   return withFileLock(preparationLockPath, async () => {
+    const sourceDirectories = await registeredSourceDirectories(repository.rootPath, runGit);
     if (!await pathExists(mergeRoot)) {
       await initializeMergeRepository({
         repositoriesRoot,
         mergeRoot,
         repository,
         baseRef: pullRequest.baseRef,
+        sourceDirectories,
         runGit,
       });
     }
 
     await assertMergeRepositoryIdentity(mergeRoot, repository, runGit);
     // A registration may be updated to a moved checkout. The isolated repository
-    // follows that explicit registration, but no Git operation runs in the source.
+    // follows that explicit registration; source-side operations are limited to
+    // resolving its git directory and local clone/fetch reads.
     await runGit(mergeRoot, [
       "remote",
       "set-url",
       SOURCE_REMOTE,
       resolve(repository.rootPath),
     ]);
-    await runGit(mergeRoot, [
+    await runGit(mergeRoot, sourceGitArgs(sourceDirectories, [
       "fetch",
       "--no-tags",
       "--force",
       SOURCE_REMOTE,
       `+refs/heads/${pullRequest.headRef}:refs/heads/${pullRequest.headRef}`,
-    ], 300_000);
+    ]), 300_000);
     // The merge base is initialized once and thereafter owned by Revisor. It is
     // deliberately never refreshed from the registered checkout; publication and
     // GitHub reconciliation are the only operations allowed to advance it.
@@ -185,7 +217,6 @@ export async function prepareMergeRepository({
       "--verify",
       `refs/heads/${pullRequest.baseRef}`,
     ]);
-
     return {
       ...repository,
       registeredRootPath: repository.rootPath,

@@ -46,18 +46,25 @@ the one operation that failed.
 
 ## Resolution
 
-Revisor now writes its own global-scope Git configuration
-(`<LOCALAPPDATA>/LUDIARS/Revisor/git-trust.gitconfig`) and points every managed
-Git invocation at it with `GIT_CONFIG_GLOBAL`. Environment variables are
-inherited by `upload-pack`, so the trust setting applies to clone sources as
-well. The file includes the user's own global configuration when it exists, so identity and
-credential settings are unchanged, and declares `safe.directory = *`: the
-workspace is written by several local accounts, so per-path entries would only
-move the outage to the next contaminated checkout.
+For each registered source set, Revisor now writes an immutable, content-addressed
+global-scope Git configuration based at
+`<LOCALAPPDATA>/LUDIARS/Revisor/git-trust.gitconfig` and points only that source's
+clone/fetch invocation at it with `GIT_CONFIG_GLOBAL`. Environment variables are
+inherited by `upload-pack`, so the trust setting reaches the clone source. The
+file includes the user's own global configuration when it exists and declares
+only the resolved registered root and Git-reported absolute git directory; it
+never uses `safe.directory = *`. Separate files prevent concurrent merges from
+rewriting each other's trust scope.
+
+Resolving that git directory is itself a read of the contaminated repository, so
+it carries command-scoped trust for the registered root and its `.git` entry —
+the only two paths knowable before Git answers. Without that step the refusal
+simply moves one command earlier, to the resolution instead of the clone.
 
 Startup additionally inspects every registered checkout once and reports the
 ones Revisor cannot read, so an unreadable, moved, or contaminated checkout is
-named at boot instead of at the moment someone tries to merge.
+named at boot instead of at the moment someone tries to merge. That inspection
+carries the same trust, so it does not report a checkout that merges fine.
 
 `scripts/repair-checkout-ownership.ps1` restores ownership of the affected
 directories for the tools that do not use Revisor's trust configuration.
@@ -72,8 +79,11 @@ some other tool refuses the repository.
 ## Regression coverage
 
 The trust configuration contract asserts the file content (user include plus
-`safe.directory`), that it is never included into itself, that Git receives it
-through `GIT_CONFIG_GLOBAL` without losing the caller's environment, and that a
-host where the file cannot be placed still runs Git. The checkout inspection
+exact `safe.directory` entries), wildcard exclusion, control-character rejection,
+self-include prevention, propagation through `GIT_CONFIG_GLOBAL` without losing
+the caller's environment, and fallback when the file cannot be placed. The merge
+repository contract asserts that git-directory resolution carries the registered
+source trust, not only clone and fetch. The checkout inspection
 contract asserts that every unreadable registered checkout is named, with the
-ownership reason preserved on a single line.
+ownership reason preserved on a single line, and that the check itself carries
+the same trust.

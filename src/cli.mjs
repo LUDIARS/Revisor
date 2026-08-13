@@ -12,6 +12,8 @@ import { option, runLocalPrCommand } from "./local-pr-commands.mjs";
 import { runReviewWorker } from "./worker-command.mjs";
 import { startRevisor } from "./server.mjs";
 import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
+import { startRuntimeDiagnostics } from "./runtime-diagnostics.mjs";
+import { serviceLog } from "./service-log.mjs";
 
 function printHelp() {
   process.stdout.write([
@@ -173,11 +175,22 @@ export async function main(args, { stdin = process.stdin } = {}) {
     throw new Error(`Unknown command '${args.join(" ")}'.`);
   }
   const cwd = process.cwd();
-  const service = await startRevisor({
-    cwd,
-    env: process.env,
-    port: resolveManagedServicePort(cwd, process.env),
-  });
+  // 起動より先に据える。 起動そのものが失敗した回も 「いつ、 どう終わったか」 を残す。
+  startRuntimeDiagnostics({ env: process.env, command: args[0] });
+  let service;
+  try {
+    service = await startRevisor({
+      cwd,
+      env: process.env,
+      port: resolveManagedServicePort(cwd, process.env),
+    });
+  } catch (error) {
+    serviceLog("service_start_failed", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack ?? null : null,
+    }, { level: "error" });
+    throw error;
+  }
   registerShutdown(service.close);
   process.stdout.write(`Revisor: ${service.url}\n`);
   return 0;

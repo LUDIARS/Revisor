@@ -1303,6 +1303,41 @@ test("the auto-merge sweep ignores legacy draft metadata", async () => {
   }
 });
 
+test("the sweep logs why a Test OK pull request remains unmerged", async () => {
+  const pullRequest = {
+    id: "pr-risky",
+    number: 42,
+    repository: "LUDIARS/Product",
+    status: "open",
+    checkStatus: "test_ok",
+    draft: false,
+    reasons: [],
+    advisories: [],
+    humanQuestion: null,
+    mergeRisk: { score: 40, band: "moderate", bandLabel: "中", factors: [] },
+    runtimeVerification: { required: false, score: 0, factors: [], evidence: [] },
+  };
+  const events = [];
+  const service = new LocalPrService({
+    store: {
+      listPullRequests: () => [pullRequest],
+      getPullRequest: () => pullRequest,
+    },
+    queue: {},
+    loadSettings: () => ({
+      autoMergeEnabled: true,
+      autoMergeRiskThreshold: 15,
+      autoMergeRequiresRuntimeVerificationClear: true,
+    }),
+    log: (event, detail) => events.push([event, detail]),
+  });
+
+  assert.deepEqual(await service.sweepAutoMerge(), { attempted: 0, merged: 0, failed: 0 });
+  assert.equal(events[0][0], "auto_merge_skipped");
+  assert.equal(events[0][1].localPrId, pullRequest.id);
+  assert.match(events[0][1].reason, /40.*15/);
+});
+
 // スイープは 60 秒間隔のタイマーで回る一方、1 周はマージ前セキュリティスキャン次第で
 // それより長くなる。 重なった周回とレビュー完了時の自動マージが同じ PR を二度
 // マージしにいくと、2 本目は必ず「base が動いた」で落ちて、マージ可能な PR が失敗

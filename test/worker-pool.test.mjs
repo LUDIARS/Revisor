@@ -7,6 +7,7 @@ class FakeWorker extends EventEmitter {
   exitCode = null;
   signalCode = null;
   messages = [];
+  pid = 12_345;
 
   send(message, callback) {
     this.messages.push(message);
@@ -37,6 +38,7 @@ function settle({ worker, message }, settled, result) {
 test("runs one standard job at a time while a slot stays reserved for the fast lane", async () => {
   const created = [new FakeWorker(), new FakeWorker()];
   const available = [...created];
+  const events = [];
   const pool = new PrReviewWorkerPool({
     size: 2,
     cwd: process.cwd(),
@@ -44,9 +46,15 @@ test("runs one standard job at a time while a slot stays reserved for the fast l
       let id = 0;
       return () => `task-${++id}`;
     })(),
+    log: (event, detail) => events.push([event, detail]),
     forkWorker: () => available.shift(),
   });
   const settled = new Set();
+  assert.deepEqual(events.map(([event]) => event), [
+    "review_worker_spawned",
+    "review_worker_spawned",
+  ]);
+  assert.equal(events[0][1].workerPid, 12_345);
   const first = pool.run({ number: 1 });
   const second = pool.run({ number: 2 });
   const third = pool.run({ number: 3 });
@@ -70,6 +78,12 @@ test("runs one standard job at a time while a slot stays reserved for the fast l
   settle(thirdDispatch[0], settled, 3);
   assert.equal(await third, 3);
   await pool.close();
+  assert.deepEqual(events.slice(2).map(([event]) => event), [
+    "review_worker_exited",
+    "review_worker_exited",
+  ]);
+  assert.equal(events[2][1].closing, true);
+  assert.equal(events[2][1].workerPid, 12_345);
 });
 
 test("prioritizes a ready review within its dedicated queue and exposes the queue state", async () => {

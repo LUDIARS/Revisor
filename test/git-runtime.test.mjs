@@ -37,14 +37,23 @@ test("launches the Revisor-owned Windows Git directly and preserves argv and env
 });
 
 test("hands Git the Revisor trust configuration through the environment", () => {
-  const invocation = managedGitInvocation(["status"], {
+  let safeDirectories;
+  const invocation = managedGitInvocation([
+    "-c",
+    "safe.directory=C:/registered/Product/.git",
+    "fetch",
+  ], {
     cwd: "C:\\review worktree",
     env: ENV,
     platform: "win32",
     fileExists: completeRuntime,
-    trustEnv: ({ env }) => ({ ...env, GIT_CONFIG_GLOBAL: "C:\\managed\\trust.gitconfig" }),
+    trustEnv: (request) => {
+      safeDirectories = request.safeDirectories;
+      return { ...request.env, GIT_CONFIG_GLOBAL: "C:\\managed\\trust.gitconfig" };
+    },
   });
 
+  assert.deepEqual(safeDirectories, ["C:/registered/Product/.git"]);
   assert.equal(invocation.env.GIT_CONFIG_GLOBAL, "C:\\managed\\trust.gitconfig");
   assert.equal(invocation.env.AUTH_HEADER, "secret");
 });

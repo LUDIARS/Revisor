@@ -15,6 +15,7 @@ related:
   - ./security-scan.md
   - ./merge-risk.md
   - ../architecture.md
+  - ../plan/problem_logs/2026-08-09-merge-repository-source-ownership.md
 updated: 2026-08-10
 ---
 
@@ -124,3 +125,9 @@ merge の直前に source から対象 head ref だけを clone へ fetch する
 file、ignored build tree があっても、Revisor は status/stash/checkout/reset を実行せず、それらを
 merge 成否の条件にしない。merge 完了後に登録 checkout を前進させる任意の publication は
 `checkout-publication.md` の別の安全条件に従う。
+
+local clone / fetch transport は process cwd の merge repository とは別に登録 source の object
+database を開く。sandbox account が作った source を service account が読む場合も、登録時に
+検証済みの source 絶対 path と Git がそこから解決した absolute git directory だけを
+command-scoped `safe.directory` として clone / fetch に渡す。linked worktree の git directory も
+推測で組み立てない。`safe.directory=*` と global Git config の変更は行わない。

@@ -44,6 +44,28 @@ test("reports one failure per line with the ownership reason intact", async () =
   assert.match(line, /dubious ownership .* is owned by: other/);
 });
 
+// The inspection opens the registered checkout, so it hits the same dubious-ownership
+// refusal the merge path does. Without command-scoped trust every contaminated
+// checkout is named at boot even though merging it works.
+test("carries source trust into the readability check itself", async () => {
+  const calls = [];
+  await inspectRegisteredRepositories([REPOSITORIES[0]], {
+    runGit: (rootPath, args) => {
+      calls.push(args);
+      return `${rootPath}\\.git`;
+    },
+  });
+
+  assert.deepEqual(calls[0].slice(0, 4), [
+    "-c",
+    "safe.directory=C:/workspace/Revisor",
+    "-c",
+    "safe.directory=C:/workspace/Revisor/.git",
+  ]);
+  assert.deepEqual(calls[0].slice(-2), ["rev-parse", "--absolute-git-dir"]);
+  assert.equal(calls[0].includes("safe.directory=*"), false);
+});
+
 test("treats an empty registry as nothing to report", async () => {
   assert.deepEqual(await inspectRegisteredRepositories(undefined, { runGit }), []);
   assert.deepEqual(unreachableRepositories(undefined), []);

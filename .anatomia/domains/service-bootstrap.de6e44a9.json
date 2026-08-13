@@ -1,6 +1,6 @@
 {
   "name": "service-bootstrap",
-  "description": "Revisor managed processのlistener位置をExcubitor集積catalog由来の注入環境から解決する起動境界。REVISOR_PORTの存在・形式・範囲を検証し、未注入の直接CLI起動だけ中央catalogへfallbackする。catalog fragment自体は運用設定であり、このapplication domainには帰属させない。",
+  "description": "Revisor managed processのlistener位置をExcubitor集積catalog由来の注入環境から解決し、listen後に登録checkoutの読み取り可否をbest-effortで診断する起動境界。REVISOR_PORTの存在・形式・範囲を検証し、未注入の直接CLI起動だけ中央catalogへfallbackする。catalog fragment自体は運用設定であり、このapplication domainには帰属させない。",
   "presetRules": [
     {
       "preset": "couplingCap",
@@ -19,20 +19,32 @@
     {
       "pathPattern": "(^|/)src/cli\\.mjs$",
       "namePattern": "^main$"
+    },
+    {
+      "pathPattern": "(^|/)src/repository-access\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/repository-access\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)src/local-contracts\\.mjs$",
+      "namePattern": "^validateRepositoryRegistration$"
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the service-bootstrap domain: consume and validate the Excubitor-injected listener port for managed Revisor startup, with central-catalog fallback only for direct CLI launches.",
+  "cardTemplate": "Summarise the service-bootstrap domain: consume and validate the Excubitor-injected listener port, then diagnose registered-checkout readability after listen, with central-catalog fallback only for direct CLI launches.",
   "source": "spec-draft",
   "mechanics": [
     "managed-port-injection",
     "listener-port-validation",
-    "direct-cli-catalog-fallback"
+    "direct-cli-catalog-fallback",
+    "registered-checkout-access-diagnostic"
   ],
   "specRefs": [
     "service-bootstrap — managed listener location resolution",
-    "service-bootstrap — 解決順序"
+    "service-bootstrap — 解決順序",
+    "service-bootstrap — 登録checkoutの読み取り確認"
   ],
-  "rationale": "Managed processのlisten先決定はcatalogデータの所有ではなくproduction startupの責務。Excubitorが集積した値とRevisorのlistenerを一致させ、private fragmentを公開base catalogへ重複させるbootstrap依存を除く。既存の同居service解決は変更せず、Revisor自身のmanaged startupだけに境界を限定する。",
-  "updatedAt": "2026-08-04T00:00:00.000Z"
+  "rationale": "Managed processのlisten先決定とlisten後の登録checkout診断はcatalogデータやrepository lifecycleの所有ではなくproduction startupの責務。Excubitorが集積した値とRevisorのlistenerを一致させ、private fragmentを公開base catalogへ重複させるbootstrap依存を除く。読み取り確認は状態を変えずbest-effortに留め、既存の同居service解決は変更しない。",
+  "updatedAt": "2026-08-09T00:00:00.000Z"
 }

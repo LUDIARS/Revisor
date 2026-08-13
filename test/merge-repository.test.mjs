@@ -191,3 +191,65 @@ test("serializes concurrent preparation of the same merge repository", async () 
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
+
+test("trusts only the registered source for local clone and fetch transport", async () => {
+  const fixture = repositoryFixture();
+  const statePath = join(fixture.directory, "state", "revisor.state.json");
+  const repository = {
+    repository: "LUDIARS/Product",
+    rootPath: fixture.sourceRoot,
+  };
+  const pullRequest = {
+    headRef: "feat/local",
+    baseRef: "main",
+  };
+  const calls = [];
+  const runGit = async (cwd, args) => {
+    calls.push({ cwd, args });
+    const commands = ["clone", "fetch", "rev-parse", "config", "checkout", "remote"];
+    const commandIndex = args.findIndex((arg) => commands.includes(arg));
+    const command = args[commandIndex];
+    if (command === "clone") {
+      mkdirSync(args.at(-1), { recursive: true });
+      return "";
+    }
+    if (command === "rev-parse" && args.includes("--absolute-git-dir")) {
+      return join(fixture.sourceRoot, ".git");
+    }
+    if (command === "rev-parse" && args.includes("--is-inside-work-tree")) return "true";
+    if (command === "rev-parse") return fixture.baseSha;
+    if (command === "config" && args.includes("--get")) return repository.repository;
+    return "";
+  };
+  try {
+    await prepareMergeRepository({ repository, pullRequest, statePath, runGit });
+
+    const sourcePath = fixture.sourceRoot.replaceAll("\\", "/");
+    const sourceGitDirectory = join(fixture.sourceRoot, ".git").replaceAll("\\", "/");
+    // Resolving the git directory already opens the contaminated source, so it
+    // must carry trust too; otherwise clone is never reached on the very
+    // checkout this whole boundary exists to rescue.
+    const discovery = calls.find(({ args }) => args.includes("--absolute-git-dir"));
+    assert.deepEqual(discovery.args.slice(0, 4), [
+      "-c",
+      `safe.directory=${fixture.sourceRoot.replaceAll("\\", "/")}`,
+      "-c",
+      `safe.directory=${fixture.sourceRoot.replaceAll("\\", "/")}/.git`,
+    ]);
+    assert.equal(discovery.args.includes("safe.directory=*"), false);
+
+    const sourceTransfers = calls.filter(({ args }) => args.includes("clone") || args.includes("fetch"));
+    assert.equal(sourceTransfers.length, 2);
+    for (const { args } of sourceTransfers) {
+      assert.deepEqual(args.slice(0, 4), [
+        "-c",
+        `safe.directory=${sourcePath}`,
+        "-c",
+        `safe.directory=${sourceGitDirectory}`,
+      ]);
+      assert.equal(args.includes("safe.directory=*"), false);
+    }
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});

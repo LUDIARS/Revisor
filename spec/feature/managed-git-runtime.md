@@ -13,6 +13,7 @@ related:
   - ./runtime-execution.md
   - ./local-workspace.md
   - ../architecture.md
+  - ../plan/problem_logs/2026-08-09-dubious-ownership-blocked-merge.md
 updated: 2026-08-09
 ---
 
@@ -62,21 +63,32 @@ not reach a local clone's **source** repository, which is opened by a child
 clones from the registered checkout, command-scoped trust alone leaves every
 merge for a checkout owned by another local account failing permanently.
 
-Revisor therefore owns a Git configuration file at
-`%LOCALAPPDATA%\LUDIARS\Revisor\git-trust.gitconfig` (`REVISOR_GIT_TRUST_CONFIG`
-overrides the location) and passes it to every managed invocation through
-`GIT_CONFIG_GLOBAL`, which child Git processes do inherit. The file includes the
-operator's own global configuration when it exists, so identity, credential, and
-conditional settings behave as before, and declares `safe.directory = *`.
-
-The wildcard is deliberate. LUDIARS checkouts are written by several local
-accounts — a sandboxed implementation account re-creating `.git` leaves that
-account as its owner — so per-path entries would only move the outage to the
-next contaminated checkout. Trust is scoped instead by *who reads the file*:
-only Revisor's own Git invocations, never the operator's global configuration.
+For local clone/fetch, Revisor therefore owns a family of Git configuration files
+based at `%LOCALAPPDATA%\LUDIARS\Revisor\git-trust.gitconfig`
+(`REVISOR_GIT_TRUST_CONFIG` overrides the base location) and passes the matching
+file through `GIT_CONFIG_GLOBAL`, which child Git processes do inherit. Each
+immutable, content-addressed file includes the operator's own global configuration
+when it exists and declares only the resolved registered root and Git-reported
+absolute git directory. Ordinary managed Git commands retain the caller's global
+configuration and receive no Revisor trust file. No configuration uses
+`safe.directory = *`.
 
 A host where the file cannot be resolved or written still runs Git, with the
 command-scoped trust alone.
+
+Local clone/fetch transport is the one case where Git opens two repositories:
+the process cwd and the explicitly registered source. That boundary adds the
+resolved registered root and Git-reported absolute git directory both to argv and
+to the invocation-scoped protected configuration inherited by `upload-pack`.
+Control characters are rejected before a registered path can become config text.
+
+Asking Git for that absolute git directory already opens the source, so the
+resolution step carries trust itself; otherwise the contaminated checkout is
+refused before clone is ever reached. Only paths derived from the registered
+root — the root and its conventional `.git` entry — are trusted at that point,
+never a path guessed from Git output. The startup readability check opens the
+same registered checkouts and carries the same command-scoped trust, so a
+checkout Revisor can merge is not reported unreadable at boot.
 
 Windows registered test cases normally use `cmd.exe` for command shims. A case
 whose configured executable is Git stays a direct process request, so it

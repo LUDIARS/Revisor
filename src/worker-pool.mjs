@@ -6,6 +6,7 @@ import {
   normalizeReviewLane,
   REVIEW_LANES,
 } from "./review-lane.mjs";
+import { serviceLog } from "./service-log.mjs";
 
 const WORKER_ENTRY = fileURLToPath(new URL("./worker-entry.mjs", import.meta.url));
 
@@ -27,6 +28,7 @@ export class PrReviewWorkerPool {
     now = () => new Date().toISOString(),
     onStateChange = () => {},
     fastLaneSlots,
+    log = serviceLog,
     forkWorker = () => fork(WORKER_ENTRY, [], {
       cwd,
       env,
@@ -42,6 +44,7 @@ export class PrReviewWorkerPool {
     this.createId = createId;
     this.now = now;
     this.onStateChange = onStateChange;
+    this.log = log;
     this.forkWorker = forkWorker;
     for (let index = 0; index < size; index += 1) this.#spawn();
   }
@@ -121,7 +124,21 @@ export class PrReviewWorkerPool {
     this.#workerIds.set(worker, `worker-${this.#nextWorkerId++}`);
     worker.on("message", (message) => this.#handleMessage(worker, message));
     worker.once("error", (error) => this.#handleExit(worker, error));
+    this.log("review_worker_spawned", {
+      workerId: this.#workerIds.get(worker),
+      workerPid: worker.pid ?? null,
+      workers: this.#workers.size,
+    });
     worker.once("exit", (code, signal) => {
+      // ワーカーが黙って死んで再生成される様子は、 これまでどこにも残らなかった。
+      // 本体の再起動ループと同じ形の問題がワーカー側にもあるのかを見分けたい。
+      this.log("review_worker_exited", {
+        workerId: this.#workerIds.get(worker),
+        workerPid: worker.pid ?? null,
+        code: code ?? null,
+        signal: signal ?? null,
+        closing: this.#closing,
+      }, { level: this.#closing ? "info" : "warn" });
       this.#handleExit(
         worker,
         new Error(`PR review worker exited (${signal ?? code ?? "unknown"}).`),

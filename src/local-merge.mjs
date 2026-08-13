@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSettings } from "./config.mjs";
-import { BaseMovedError, StaleReviewError } from "./errors.mjs";
+import { BaseMovedError, MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { relandHeadOnBase } from "./base-relanding.mjs";
 import { reconcileBaseWithRemote } from "./base-reconcile.mjs";
 import { redactSecretLines } from "./leakage.mjs";
@@ -18,6 +18,7 @@ import { rememberPendingPublish } from "./pending-publish.mjs";
 import { isDeferredPublication } from "./publication-state.mjs";
 import { classifyPreparedMerge, readPublishedBaseSha } from "./prepared-merge.mjs";
 import { publishMergedPullRequest } from "./release-publisher.mjs";
+import { serviceLog } from "./service-log.mjs";
 import {
   advanceLocalBranch,
   assertSafeSha,
@@ -225,15 +226,30 @@ async function attemptSquashMerge({
   allowSystemFailureOverride = false,
   readPublishedBase = readPublishedBaseSha,
   // stdout は CLI のデータ出力なので、マージ経路の診断行は stderr へ出す。
+  // 人間向けの 1 行通知はこちら、 機械可読な段階記録は serviceLog 側と役割を分ける。
   log = (message) => process.stderr.write(`Revisor: ${message}\n`),
   bypass = null,
+  // 構造化された段階記録。 人間向けの log とは役割が違うので引数を分ける。
+  logEvent = serviceLog,
 }) {
   // バイパスマージ: Revisor / Concordia 自身が落ちていて審査を回せないとき、まず動作を
   // 取り戻すための CLI 限定経路。 審査「状態」のゲート (Test OK であること・審査済み
   // ヘッドと一致すること) だけを外し、実 finding を出したセキュリティスキャンは
   // 通常どおり止める。 外したことは記録に残り、復旧後に後追いレビューできる。
   // 終局済み (merged / closed) はバイパスでも通さない。
+  const subject = {
+    repository: repository.repository,
+    localPrId: pullRequest.id,
+    number: pullRequest.number,
+    headRef: pullRequest.headRef,
+    baseRef: pullRequest.baseRef,
+  };
   if (pullRequest.status !== "open" || (!bypass && pullRequest.checkStatus !== "test_ok")) {
+    logEvent("merge_refused", {
+      ...subject,
+      status: pullRequest.status,
+      checkStatus: pullRequest.checkStatus,
+    }, { level: "warn" });
     throw mergeStateRefusal(pullRequest);
   }
   // ベースは審査時の SHA に固定しない。 他 PR のマージで base は常に前進するので、
@@ -249,9 +265,21 @@ async function attemptSquashMerge({
     "--verify",
     `refs/heads/${pullRequest.headRef}`,
   ]);
+  logEvent("merge_attempt_started", {
+    ...subject,
+    baseSha,
+    headSha,
+    reviewedHeadSha: pullRequest.reviewedHeadSha,
+  });
   await assertLocalVersionUnchanged(repository.rootPath, baseSha, headSha);
   // バイパスでは審査済みヘッドが存在しないことすらある (一度も審査が通っていない)。
   // 突き合わせる相手が無い以上、ここは比較そのものを行わない。
+  if (
+    !bypass
+    && headSha.toLowerCase() !== String(pullRequest.reviewedHeadSha).toLowerCase()
+  ) {
+    logEvent("merge_head_moved_since_review", { ...subject, baseSha, headSha });
+  }
   // A process can stop after the GitHub push or Release creation and before
   // local state is marked merged. A private recovery ref keeps both tagged
   // Releases and ordinary untagged merges reachable for an idempotent retry.
@@ -274,6 +302,11 @@ async function attemptSquashMerge({
         "rev-parse",
         `${prepared.mergeCommitSha}^`,
       ]);
+      logEvent("merge_prepared_reused", {
+        ...subject,
+        mergeCommitSha: prepared.mergeCommitSha,
+        tag: prepared.tag ?? null,
+      });
       const publication = await publish({
         repository,
         pullRequest,
@@ -307,6 +340,12 @@ async function attemptSquashMerge({
         pullRequest.id,
         prepared.mergeCommitSha,
       );
+      logEvent("merge_completed", {
+        ...subject,
+        baseSha,
+        mergeCommitSha: prepared.mergeCommitSha,
+        releaseTag: publication?.releaseTag ?? null,
+      });
       return publication;
     }
     // 破棄してから通常経路へ落ちる。 作り直しがコンフリクトした場合は下の
@@ -327,13 +366,26 @@ async function attemptSquashMerge({
     // 載せ替えは Revisor が受け持つ (`review-diff-scope.md` 規則 3)。 進んだ base の上へ
     // head の正味の変更を載せ直し、 衝突したときだけ、 衝突したファイルの一覧を添えて
     // 提出元へ返す。 セッションに rebase をやり直させない。
-    await relandHeadOnBase({
-      repoPath: repository.rootPath,
-      worktreePath: worktrees.head,
-      baseSha,
-      headSha,
-      baseRef: pullRequest.baseRef,
-    });
+    try {
+      await relandHeadOnBase({
+        repoPath: repository.rootPath,
+        worktreePath: worktrees.head,
+        baseSha,
+        headSha,
+        baseRef: pullRequest.baseRef,
+      });
+    } catch (error) {
+      if (error instanceof MergeConflictError) {
+        logEvent("merge_conflict_detected", {
+          ...subject,
+          baseSha,
+          headSha,
+          conflictFiles: error.conflictedPaths,
+          gitMessage: error.message,
+        }, { level: "warn" });
+      }
+      throw error;
+    }
     // A branch can be rebased onto a main that already contains its complete
     // patch. Treat that as a logical no-op merge instead of trying to create
     // an empty commit in the detached integration worktree.
@@ -373,6 +425,7 @@ async function attemptSquashMerge({
       ...commitMessage(pullRequest),
     ]);
     const mergeCommitSha = await git(worktrees.head, ["rev-parse", "HEAD"]);
+    logEvent("merge_squash_committed", { ...subject, baseSha, mergeCommitSha });
     await assertMergeSecurityScan({
       worktreePath: worktrees.head,
       baseSha,
@@ -405,6 +458,12 @@ async function attemptSquashMerge({
       mergeCommitSha,
     );
     await forgetPreparedMerge(repository.rootPath, pullRequest.id, mergeCommitSha);
+    logEvent("merge_completed", {
+      ...subject,
+      baseSha,
+      mergeCommitSha,
+      releaseTag: publication?.releaseTag ?? null,
+    });
     return publication;
   } finally {
     await cleanupWorktrees(repository.rootPath, worktrees);
@@ -412,10 +471,18 @@ async function attemptSquashMerge({
 }
 
 export async function squashMergeLocalPullRequest(input) {
+  const logEvent = input.logEvent ?? serviceLog;
   try {
     return await attemptSquashMerge(input);
   } catch (error) {
     if (!(error instanceof BaseMovedError)) throw error;
+    logEvent("merge_base_reconcile_started", {
+      repository: input.repository.repository,
+      localPrId: input.pullRequest.id,
+      number: input.pullRequest.number,
+      baseRef: input.pullRequest.baseRef,
+      reason: error.message,
+    }, { level: "warn" });
     // GitHub 側だけが進んだ状態は定型修復できる: 先行コミットをローカル base へ
     // 取り込み (ff / クリーン merge のみ、 コンフリクトは人間へ)、 進んだ base の上で
     // squash をやり直す。 失敗した試行の prepared merge は旧 base を親に持つため捨てる

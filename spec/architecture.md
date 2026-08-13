@@ -44,6 +44,12 @@ published base commits and human-selected semantic version tags/Releases.
   many reviews run at once (`feature/review-concurrency.md`).
 - `local-reporter.mjs` projects queue and review results into local PR state.
 - `worker-pool.mjs` owns child-process lifetime and one-job-per-worker dispatch.
+- `runtime-diagnostics.mjs` owns process-lifetime heartbeat, signal, exception,
+  and exit observation without taking signal termination away from Node or the
+  service shutdown hook.
+- `service-log.mjs` owns bounded, recursively redacted JSONL records and
+  best-effort stderr/Vestigium delivery. See
+  `spec/feature/runtime-diagnostics.md`.
 - `runner.mjs` orchestrates one admitted review.
 - `workspace.mjs` owns local-ref validation, disposable worktrees, and
   compare-and-swap branch advancement. It does not fetch or push.

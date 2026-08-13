@@ -70,7 +70,19 @@ export function managedGitInvocation(args, {
   const managedArgs = cwd
     ? ["-c", `safe.directory=${resolve(cwd).replaceAll("\\", "/")}`, ...args]
     : args;
-  const trustedEnv = trustEnv({ env, platform });
+  const sourceSafeDirectories = [];
+  for (let index = 0; index < args.length - 1; index += 1) {
+    if (args[index] !== "-c") continue;
+    const value = args[index + 1];
+    if (typeof value === "string" && value.startsWith("safe.directory=")) {
+      sourceSafeDirectories.push(value.slice("safe.directory=".length));
+    }
+  }
+  const trustedEnv = trustEnv({
+    env,
+    platform,
+    safeDirectories: sourceSafeDirectories,
+  });
   if (platform !== "win32") {
     return {
       command: env.REVISOR_GIT_BIN || "git",

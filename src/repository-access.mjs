@@ -1,4 +1,20 @@
+import { resolve } from "node:path";
 import { git } from "./workspace.mjs";
+
+// The check opens the registered checkout itself, so it must carry the same
+// command-scoped trust the merge path uses. Without it a checkout owned by
+// another local account is reported as unreadable even though every real
+// Revisor operation on it succeeds — a false alarm at every boot.
+function trustedSourceArgs(rootPath, args) {
+  const sourcePath = resolve(rootPath).replaceAll("\\", "/");
+  return [
+    ...[sourcePath, `${sourcePath}/.git`].flatMap((path) => [
+      "-c",
+      `safe.directory=${path}`,
+    ]),
+    ...args,
+  ];
+}
 
 // 登録 checkout が読めない状態 (所有者の汚染、 移動、 削除、 .git の破損) は、 これまで
 // マージ直前の clone まで表に出なかった。 起動時に全件を同じやり方で 1 回確かめる。
@@ -12,7 +28,10 @@ export async function inspectRepositoryAccess(repository, { runGit = git } = {})
     return { ...record, ok: false, reason: "root_path is not registered." };
   }
   try {
-    const gitDir = await runGit(record.rootPath, ["rev-parse", "--absolute-git-dir"]);
+    const gitDir = await runGit(
+      record.rootPath,
+      trustedSourceArgs(record.rootPath, ["rev-parse", "--absolute-git-dir"]),
+    );
     return { ...record, ok: true, gitDir };
   } catch (error) {
     return {

@@ -5,7 +5,7 @@
     {
       "preset": "couplingCap",
       "params": {
-        "targetPattern": "src/(?:git-publication|local-merge|release-notes|release-publisher|release-version)\\.mjs$",
+        "targetPattern": "src/(?:git-publication|local-merge|prepared-merge|release-notes|release-publisher|release-version)\\.mjs$",
         "by": "path",
         "maxFanOut": 9007199254740991
       }
@@ -13,10 +13,10 @@
   ],
   "membership": [
     {
-      "pathPattern": "(^|/)src/(?:git-publication|local-merge|release-notes|release-publisher|release-version)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:git-publication|local-merge|prepared-merge|release-notes|release-publisher|release-version)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:git-publication|local-merge|release-notes|release-version)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:git-publication|local-merge|prepared-merge|release-notes|release-version)\\.test\\.mjs$"
     }
   ],
   "templateRules": [],

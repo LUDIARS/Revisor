@@ -117,7 +117,11 @@ function mergeInput(fixture, overrides = {}) {
 test("merges even after the base advanced, as long as the squash applies cleanly", async () => {
   const fixture = repositoryFixture();
   try {
-    const input = mergeInput(fixture);
+    const events = [];
+    const input = {
+      ...mergeInput(fixture),
+      logEvent: (event, detail) => events.push([event, detail]),
+    };
     // 審査の後に base が別ファイルの変更で前進する (旧実装はここで必ず拒否した)。
     writeFileSync(join(fixture.repoPath, "other.txt"), "other\nmoved\n", "utf8");
     git(fixture.repoPath, "add", "other.txt");
@@ -126,6 +130,12 @@ test("merges even after the base advanced, as long as the squash applies cleanly
     const mergeCommitSha = await squashMergeLocalPullRequest(input);
 
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
+    assert.deepEqual(events.map(([event]) => event), [
+      "merge_attempt_started",
+      "merge_squash_committed",
+      "merge_completed",
+    ]);
+    assert.equal(Object.hasOwn(events[0][1], "mergeRootPath"), false);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -284,9 +294,11 @@ test("an explicit human override bypasses an unavailable pre-merge scanner", asy
 test("a human override never bypasses actual security findings", async () => {
   const fixture = repositoryFixture();
   try {
+    const events = [];
     await assert.rejects(
       squashMergeLocalPullRequest({
         ...mergeInput(fixture),
+        logEvent: (event) => events.push(event),
         allowSystemFailureOverride: true,
         scan: async () => ({
           status: "findings",
@@ -297,6 +309,7 @@ test("a human override never bypasses actual security findings", async () => {
       }),
       /security finding/,
     );
+    assert.deepEqual(events, ["merge_attempt_started", "merge_squash_committed"]);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -322,8 +335,10 @@ test("reuses a tagged prepared merge when publication is retried", async () => {
     git(fixture.repoPath, "checkout", "main");
 
     const calls = [];
+    const events = [];
     const publication = await squashMergeLocalPullRequest({
       ...input,
+      logEvent: (event, detail) => events.push([event, detail]),
       scan: async () => {
         throw new Error("a prepared merge must not be rebuilt or rescanned");
       },
@@ -343,6 +358,11 @@ test("reuses a tagged prepared merge when publication is retried", async () => {
     assert.equal(calls[0].preparedTag, "v1.2.3");
     assert.equal(publication.releaseTag, "v1.2.3");
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), preparedSha);
+    assert.deepEqual(events.map(([event]) => event), [
+      "merge_attempt_started",
+      "merge_prepared_reused",
+      "merge_completed",
+    ]);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

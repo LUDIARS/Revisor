@@ -4,6 +4,7 @@ import { autoMergeDecision, autoMergeRecord } from "./auto-merge.mjs";
 import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { withFileLock, withFileLockSync } from "./file-lock.mjs";
+import { serviceLog } from "./service-log.mjs";
 import { installPushGuard } from "./push-guard.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
 import {
@@ -106,6 +107,7 @@ export class LocalPrService {
     cliPath = CLI_PATH,
     env = process.env,
     loadSettings = () => readSettings(env),
+    log = serviceLog,
     notifyLifecycle = null,
     publicationCoordinator = new PublicationCoordinator(),
   }) {
@@ -128,6 +130,7 @@ export class LocalPrService {
     this.publisher = publisher;
     this.prepareVersionFile = prepareVersionFile;
     this.env = env;
+    this.log = log;
     this.cliPath = cliPath;
     this.notifyLifecycle = notifyLifecycle;
     this.publicationCoordinator = publicationCoordinator;
@@ -804,7 +807,18 @@ export class LocalPrService {
           || pullRequest.checkStatus !== "test_ok"
         ) continue;
         const decision = autoMergeDecision(pullRequest, settings);
-        if (!decision.merge) continue;
+        if (!decision.merge) {
+          // 見送りは記録に残さない方針だったが、 「Test OK なのに何周しても
+          // マージされない」 を説明できるのは、 この理由だけである。 状態は
+          // 書き換えず、 ログにだけ落とす。
+          this.log("auto_merge_skipped", {
+            repository: pullRequest.repository,
+            localPrId: pullRequest.id,
+            number: pullRequest.number,
+            reason: decision.reason,
+          });
+          continue;
+        }
         summary.attempted += 1;
         try {
           await this.mergePullRequest(pullRequest.id, { humanApproved: false });
