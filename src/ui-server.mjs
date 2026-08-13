@@ -24,7 +24,7 @@ import { renderPrBoardPage } from "./ui-pr-board-page.mjs";
 import { renderReleasePage } from "./ui-release-page.mjs";
 import { renderSettingsPage } from "./ui-settings-page.mjs";
 import { isAllowedHost, isAuthorizedSession } from "./ui-security.mjs";
-import { SerializedListBody } from "./pr-list-cache.mjs";
+import { LIST_STATES, ListResponseCache, listResponseBody } from "./pr-list-cache.mjs";
 
 const PAGES = new Map([
   ["/", renderPrBoardPage],
@@ -81,7 +81,7 @@ export function createUiRequestHandler({
   releaseService,
 }) {
   let allowedHosts = readAllowedHosts(env);
-  const listBody = new SerializedListBody();
+  const listBody = new ListResponseCache();
   return async (request, response) => {
     if (!isAllowedHost(request.headers.host, allowedHosts)) {
       sendJson(response, 403, {
@@ -230,10 +230,19 @@ export function createUiRequestHandler({
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/local-prs") {
+        const view = url.searchParams.get("view") ?? "full";
+        const state = url.searchParams.get("state") ?? "all";
+        if ((view !== "full" && view !== "summary") || !LIST_STATES.has(state)) {
+          sendJson(response, 400, {
+            error: "view must be full|summary and state must be open|merged|closed|all.",
+          });
+          return;
+        }
         const pullRequests = localPrService.listPullRequests();
         sendSerializedJson(response, 200, listBody.render(
           pullRequests,
-          () => JSON.stringify({ pullRequests }),
+          view + "|" + state,
+          () => listResponseBody(pullRequests, { view, state }),
         ));
         return;
       }

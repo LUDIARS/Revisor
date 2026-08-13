@@ -128,6 +128,8 @@ const CONTROLLER_SOURCE = `
   const prDiffContent = document.querySelector('#pr-diff-content');
   const prDiffClose = document.querySelector('#pr-diff-close');
   let selectedPrId = null;
+  let selectedDetail = null;
+  let detailRequestVersion = 0;
   let openPullRequests = [];
   let selectedProjects = new Set();
   let diffRequestVersion = 0;
@@ -277,10 +279,29 @@ const CONTROLLER_SOURCE = `
     prDetail.replaceChildren(fragment);
   }
 
+  async function loadDetail(id) {
+    const version = ++detailRequestVersion;
+    if (!id) {
+      selectedDetail = null;
+      renderBoard();
+      return;
+    }
+    try {
+      const result = await request('/api/local-prs/' + encodeURIComponent(id));
+      if (version !== detailRequestVersion) return;
+      selectedDetail = { id, record: result.pullRequest };
+    } catch (error) {
+      if (version !== detailRequestVersion) return;
+      selectedDetail = { id, record: null, error: error.message };
+    }
+    renderBoard();
+  }
+
   function selectPullRequest(id) {
     selectedPrId = id;
     prActionMessage.textContent = '';
     renderBoard();
+    void loadDetail(id);
     renderPrEventLog();
   }
 
@@ -375,7 +396,14 @@ const CONTROLLER_SOURCE = `
       ? 'Open な PR はありません。'
       : '条件に一致する PR はありません。';
     prCards.replaceChildren(...visible.map((pr) => prCard(pr, selectedPrId, selectPullRequest)));
-    renderDetail(openPullRequests.find((pr) => pr.id === selectedPrId) ?? null);
+    if (!selectedPrId) {
+      renderDetail(null);
+    } else if (selectedDetail && selectedDetail.id === selectedPrId) {
+      if (selectedDetail.error) prDetail.replaceChildren(paragraph(selectedDetail.error));
+      else renderDetail(selectedDetail.record);
+    } else {
+      prDetail.replaceChildren(paragraph('詳細を取得中…'));
+    }
   }
 
   function renderPullRequests(pullRequests) {
@@ -389,11 +417,12 @@ const CONTROLLER_SOURCE = `
   async function refresh() {
     try {
       const [prs, workflow, reviewWork] = await Promise.all([
-        request('/api/local-prs'),
+        request('/api/local-prs?view=summary&state=open'),
         request('/api/test-workflow'),
         request('/api/review-work'),
       ]);
       renderPullRequests(prs.pullRequests);
+      if (selectedPrId) void loadDetail(selectedPrId);
       renderTestWorkflow(workflow.products);
       renderReviewWork(reviewWork);
     } catch (error) {

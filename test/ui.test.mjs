@@ -41,6 +41,8 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   assert.match(page, /block\('差分解析 \(Anatomia\)', analysisOf\(pr\)\)/);
   assert.match(page, /Genius の判断カード/);
   assert.match(page, /selectedPrId = id/);
+  assert.match(page, /request\('\/api\/local-prs\/' \+ encodeURIComponent\(id\)\)/);
+  assert.match(page, /詳細を取得中…/);
   assert.match(page, /runAction\(retry, pr\.id, 'retry'\)/);
   assert.match(page, /人間判断で squash merge/);
   // ボタンの表示条件はサービス側の述語 (decision.humanDecisionMergeable) をそのまま
@@ -56,6 +58,11 @@ test("the PR page explains early QA above the board", () => {
   assert.match(page, /審査中は先行QA/);
   assert.match(page, /審査通過後は確定QA/);
   assert.match(page, /request\('\/api\/test-workflow'\)/);
+});
+
+test("the PR board fetches only open summaries for its list", () => {
+  const page = renderPrBoardPage("session-nonce");
+  assert.match(page, /request\('\/api\/local-prs\?view=summary&state=open'\)/);
 });
 
 test("the PR page shows live dedicated review worker queues", () => {

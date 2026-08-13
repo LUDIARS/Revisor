@@ -25,7 +25,7 @@ import {
   sendJson,
   sendSerializedJson,
 } from "./ui-server.mjs";
-import { SerializedListBody } from "./pr-list-cache.mjs";
+import { LIST_STATES, ListResponseCache, listResponseBody } from "./pr-list-cache.mjs";
 import { ensureReviewWorker } from "./worker-spawn.mjs";
 import { readWorkerState } from "./worker-state.mjs";
 
@@ -46,7 +46,7 @@ export function createRequestHandler({
   localPrService,
   releaseService,
 }) {
-  const listBody = new SerializedListBody();
+  const listBody = new ListResponseCache();
   const ui = createUiRequestHandler({
     env,
     sessionToken,
@@ -115,10 +115,19 @@ export function createRequestHandler({
         return;
       }
       if (request.method === "GET" && url.pathname === "/v1/local-prs") {
+        const view = url.searchParams.get("view") ?? "full";
+        const state = url.searchParams.get("state") ?? "all";
+        if ((view !== "full" && view !== "summary") || !LIST_STATES.has(state)) {
+          sendJson(response, 400, {
+            error: "view must be full|summary and state must be open|merged|closed|all.",
+          });
+          return;
+        }
         const pullRequests = localPrService.listPullRequests();
         sendSerializedJson(response, 200, listBody.render(
           pullRequests,
-          () => JSON.stringify({ pullRequests }),
+          view + "|" + state,
+          () => listResponseBody(pullRequests, { view, state }),
         ));
         return;
       }

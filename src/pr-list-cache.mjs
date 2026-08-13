@@ -28,16 +28,45 @@ export function decisionSettingsKey(settings) {
   ]);
 }
 
-export class SerializedListBody {
+export function summaryProjection(pullRequest) {
+  return {
+    id: pullRequest.id,
+    number: pullRequest.number,
+    repository: pullRequest.repository,
+    title: pullRequest.title,
+    status: pullRequest.status,
+    checkStatus: pullRequest.checkStatus,
+    reviewLane: pullRequest.reviewLane ?? null,
+    createdAt: pullRequest.createdAt,
+    updatedAt: pullRequest.updatedAt,
+    decision: pullRequest.decision,
+  };
+}
+
+export class ListResponseCache {
   #source = null;
-  #body = null;
+  #bodies = new Map();
 
   /** @implements SPEC-PR-LIST-CACHE */
-  render(source, build) {
-    if (this.#source !== source || this.#body === null) {
-      this.#body = build();
+  render(source, key, build) {
+    if (this.#source !== source) {
+      this.#bodies.clear();
       this.#source = source;
     }
-    return this.#body;
+    if (!this.#bodies.has(key)) this.#bodies.set(key, build());
+    return this.#bodies.get(key);
   }
+}
+
+export const LIST_STATES = new Set(["open", "merged", "closed", "all"]);
+
+export function filterByState(pullRequests, state) {
+  if (state === "all") return pullRequests;
+  return pullRequests.filter((pullRequest) => pullRequest.status === state);
+}
+
+export function listResponseBody(pullRequests, { view, state }) {
+  const filtered = filterByState(pullRequests, state);
+  const projected = view === "summary" ? filtered.map(summaryProjection) : filtered;
+  return JSON.stringify({ pullRequests: projected });
 }

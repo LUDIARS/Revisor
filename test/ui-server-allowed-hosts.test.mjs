@@ -189,3 +189,42 @@ test("the general settings endpoint cannot update allowed hosts", async () => {
     rmSync(state.directory, { recursive: true, force: true });
   }
 });
+
+test("filters and summarizes session-authorized local PR lists", async () => {
+  const state = fixture();
+  try {
+    const pullRequests = [{
+      id: "pr-open", number: 1, repository: "LUDIARS/Revisor", title: "Open PR",
+      status: "open", checkStatus: "queued", createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:01:00.000Z", decision: { state: "needs_human" }, body: "full",
+    }];
+    const handle = createUiRequestHandler({
+      env: state.env, sessionToken: "ui-session-token", queue: { state: () => ({}) },
+      localPrService: { listPullRequests: () => pullRequests },
+    });
+    const full = response();
+    await handle(request({
+      url: "/api/local-prs",
+      headers: { "x-revisor-session": "ui-session-token" },
+    }), full);
+    assert.equal(full.status, 200);
+    assert.equal(full.body, JSON.stringify({ pullRequests }));
+
+    const summary = response();
+    await handle(request({
+      url: "/api/local-prs?view=summary&state=open",
+      headers: { "x-revisor-session": "ui-session-token" },
+    }), summary);
+    assert.equal(summary.status, 200);
+    assert.equal("body" in JSON.parse(summary.body).pullRequests[0], false);
+
+    const invalid = response();
+    await handle(request({
+      url: "/api/local-prs?state=invalid",
+      headers: { "x-revisor-session": "ui-session-token" },
+    }), invalid);
+    assert.equal(invalid.status, 400);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});

@@ -485,6 +485,41 @@ test("reads without a configured workflow token", async () => {
   }
 });
 
+test("filters and summarizes local PR lists without changing the default response", async () => {
+  const pullRequests = [{
+    id: "pr-open", number: 1, repository: "LUDIARS/Revisor", title: "Open PR",
+    status: "open", checkStatus: "queued", reviewLane: "standard",
+    createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:01:00.000Z",
+    decision: { state: "needs_human" }, body: "full record",
+  }, {
+    id: "pr-merged", number: 2, repository: "LUDIARS/Revisor", title: "Merged PR",
+    status: "merged", checkStatus: "test_ok", createdAt: "2026-08-12T00:00:00.000Z",
+    updatedAt: "2026-08-12T00:01:00.000Z", decision: { state: "auto_ok" }, body: "merged record",
+  }];
+  const handler = createRequestHandler({
+    env: {}, sessionToken: "ui-token", queue: { state: () => ({}) },
+    localPrService: { listPullRequests: () => pullRequests },
+  });
+  const full = response();
+  await handler(request({ method: "GET", url: "/v1/local-prs" }), full);
+  assert.equal(full.status, 200);
+  assert.equal(full.body, JSON.stringify({ pullRequests }));
+
+  const summary = response();
+  await handler(request({ method: "GET", url: "/v1/local-prs?view=summary&state=open" }), summary);
+  assert.equal(summary.status, 200);
+  assert.deepEqual(JSON.parse(summary.body).pullRequests, [{
+    id: "pr-open", number: 1, repository: "LUDIARS/Revisor", title: "Open PR",
+    status: "open", checkStatus: "queued", reviewLane: "standard",
+    createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:01:00.000Z",
+    decision: { state: "needs_human" },
+  }]);
+
+  const invalid = response();
+  await handler(request({ method: "GET", url: "/v1/local-prs?view=compact" }), invalid);
+  assert.equal(invalid.status, 400);
+});
+
 test("serves version state and confirmed release actions through the UI session", async () => {
   const calls = [];
   const handler = createRequestHandler({
