@@ -35,6 +35,7 @@ import {
   prepareRegisteredVersionFile,
 } from "./local-version.mjs";
 import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
+import { decisionSettingsKey, PrListCache } from "./pr-list-cache.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -132,6 +133,7 @@ export class LocalPrService {
   // 1 周の所要時間はマージ前セキュリティスキャン次第で interval を超える。 前周が
   // まだ走っているうちに次を重ねると、同じ候補を二重に処理しにいく。
   #sweeping = false;
+  #listCache = new PrListCache();
 
   // squash の最中にある PR の id。 マージは数分かかる (マージ前セキュリティスキャン)
   // 一方 closePullRequest は同期で status を書くので、 走っているマージが完了時に
@@ -582,7 +584,14 @@ export class LocalPrService {
   // it at read time makes a just-approved PR move immediately without rewriting
   // stored records.
   listPullRequests() {
-    return decidePullRequests(this.store.listPullRequests(), this.loadSettings());
+    const settings = this.loadSettings();
+    // Read the version before records so a concurrent write cannot pair a fresh token with old data.
+    const version = this.store.listVersion?.() ?? null;
+    return this.#listCache.read({
+      version,
+      settingsKey: decisionSettingsKey(settings),
+      build: () => decidePullRequests(this.store.listPullRequests(), settings),
+    });
   }
 
   testWorkflowProducts() {

@@ -97,6 +97,29 @@ function passingPublisher() {
   });
 }
 
+test("reuses the list until store data or decision settings change", () => {
+  let version = "1:0";
+  let settings = { autoMergeEnabled: false };
+  const record = {
+    id: "pr-1",
+    status: "open",
+    checkStatus: "queued",
+    createdAt: "2026-08-13T00:00:00.000Z",
+  };
+  const service = new LocalPrService({
+    store: { listVersion: () => version, listPullRequests: () => [record] },
+    queue: {},
+    loadSettings: () => settings,
+  });
+  const first = service.listPullRequests();
+  assert.strictEqual(service.listPullRequests(), first);
+  version = "1:1";
+  const afterWrite = service.listPullRequests();
+  assert.notStrictEqual(afterWrite, first);
+  settings = { autoMergeEnabled: true };
+  assert.notStrictEqual(service.listPullRequests(), afterWrite);
+});
+
 test("registers tests, queues a local-only PR, and squash merges it", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });

@@ -19,7 +19,13 @@ import {
 } from "./repository-access.mjs";
 import { ReleaseService } from "./release-service.mjs";
 import { createReviewContext } from "./review-context.mjs";
-import { createUiRequestHandler, readJsonBody, sendJson } from "./ui-server.mjs";
+import {
+  createUiRequestHandler,
+  readJsonBody,
+  sendJson,
+  sendSerializedJson,
+} from "./ui-server.mjs";
+import { SerializedListBody } from "./pr-list-cache.mjs";
 import { ensureReviewWorker } from "./worker-spawn.mjs";
 import { readWorkerState } from "./worker-state.mjs";
 
@@ -40,6 +46,7 @@ export function createRequestHandler({
   localPrService,
   releaseService,
 }) {
+  const listBody = new SerializedListBody();
   const ui = createUiRequestHandler({
     env,
     sessionToken,
@@ -108,7 +115,11 @@ export function createRequestHandler({
         return;
       }
       if (request.method === "GET" && url.pathname === "/v1/local-prs") {
-        sendJson(response, 200, { pullRequests: localPrService.listPullRequests() });
+        const pullRequests = localPrService.listPullRequests();
+        sendSerializedJson(response, 200, listBody.render(
+          pullRequests,
+          () => JSON.stringify({ pullRequests }),
+        ));
         return;
       }
       if (request.method === "GET" && url.pathname === "/v1/test-workflow") {

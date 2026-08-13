@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,6 +64,33 @@ test("projects an open PR for early QA while review is queued", () => {
     }]);
     const reloaded = new LocalPrStore({ path });
     assert.equal(reloaded.getPullRequest(pullRequest.id).checkStatus, "test_ok");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("changes the list version for local and other-connection writes", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-list-version-"));
+  const path = join(directory, "state.db");
+  try {
+    const storeModule = new URL("../src/state-store.mjs", import.meta.url).href;
+    const script = `
+      import assert from "node:assert/strict";
+      import { LocalPrStore } from ${JSON.stringify(storeModule)};
+      const first = new LocalPrStore({ path: process.env.REVISOR_LIST_VERSION_PATH });
+      const second = new LocalPrStore({ path: process.env.REVISOR_LIST_VERSION_PATH });
+      const before = first.listVersion();
+      first.registerRepository({ repository: "LUDIARS/First", rootPath: "E:/First", baseRef: "main", testCases: [] });
+      const afterLocalWrite = first.listVersion();
+      assert.notEqual(afterLocalWrite, before);
+      second.registerRepository({ repository: "LUDIARS/Second", rootPath: "E:/Second", baseRef: "main", testCases: [] });
+      assert.notEqual(first.listVersion(), afterLocalWrite);
+    `;
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+      encoding: "utf8",
+      env: { ...process.env, REVISOR_LIST_VERSION_PATH: path },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

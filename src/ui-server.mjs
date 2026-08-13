@@ -24,6 +24,7 @@ import { renderPrBoardPage } from "./ui-pr-board-page.mjs";
 import { renderReleasePage } from "./ui-release-page.mjs";
 import { renderSettingsPage } from "./ui-settings-page.mjs";
 import { isAllowedHost, isAuthorizedSession } from "./ui-security.mjs";
+import { SerializedListBody } from "./pr-list-cache.mjs";
 
 const PAGES = new Map([
   ["/", renderPrBoardPage],
@@ -47,6 +48,10 @@ function send(response, status, contentType, body, headers = {}) {
 
 export function sendJson(response, status, body) {
   send(response, status, "application/json; charset=utf-8", JSON.stringify(body));
+}
+
+export function sendSerializedJson(response, status, body) {
+  send(response, status, "application/json; charset=utf-8", body);
 }
 
 export async function readJsonBody(request, { optional = false } = {}) {
@@ -76,6 +81,7 @@ export function createUiRequestHandler({
   releaseService,
 }) {
   let allowedHosts = readAllowedHosts(env);
+  const listBody = new SerializedListBody();
   return async (request, response) => {
     if (!isAllowedHost(request.headers.host, allowedHosts)) {
       sendJson(response, 403, {
@@ -224,9 +230,11 @@ export function createUiRequestHandler({
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/local-prs") {
-        sendJson(response, 200, {
-          pullRequests: localPrService.listPullRequests(),
-        });
+        const pullRequests = localPrService.listPullRequests();
+        sendSerializedJson(response, 200, listBody.render(
+          pullRequests,
+          () => JSON.stringify({ pullRequests }),
+        ));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/local-prs") {

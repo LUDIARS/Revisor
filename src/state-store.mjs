@@ -80,6 +80,7 @@ function parseRecords(rows) {
 
 export class LocalPrStore {
   #database = null;
+  #writes = 0;
 
   constructor({
     path = resolveDbPath(),
@@ -150,7 +151,9 @@ export class LocalPrStore {
 
   #mutate(run) {
     const database = this.#db();
-    return withImmediateTransaction(database, () => run(database));
+    const result = withImmediateTransaction(database, () => run(database));
+    this.#writes += 1;
+    return result;
   }
 
   #allRepositories(database) {
@@ -316,6 +319,17 @@ export class LocalPrStore {
   listPullRequests() {
     return this.#allPullRequests(this.#db())
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  /**
+   * 一覧キャッシュの無効化トークン。data_version は他コネクションの commit で変わり、
+   * 自コネクションの書き込みでは変わらないため、自前の書き込み回数を併記する。
+   * PR 記録と審査キューは同じ database なので、どちらの変化でもトークンが変わる。
+   */
+  listVersion() {
+    const database = this.#db();
+    const { data_version: dataVersion } = database.prepare("PRAGMA data_version").get();
+    return `${dataVersion}:${this.#writes}`;
   }
 
   updatePullRequest(id, patch) {
