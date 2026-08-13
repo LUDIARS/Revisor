@@ -1,11 +1,11 @@
 {
   "name": "review-plan",
-  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, bounded test autofix, capacity fallback, and model-free deterministic re-verification.",
+  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, bounded test autofix, capacity fallback, model-free deterministic re-verification, and best-effort PR narrative reconciliation.",
   "presetRules": [
     {
       "preset": "couplingCap",
       "params": {
-        "targetPattern": "src/(?:anatomia|review-plan|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$",
+        "targetPattern": "src/(?:anatomia|pr-narrative|review-plan|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$",
         "by": "path",
         "maxFanOut": 9007199254740991
       }
@@ -13,14 +13,14 @@
   ],
   "membership": [
     {
-      "pathPattern": "(^|/)src/(?:anatomia|review-plan|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:anatomia|pr-narrative|review-plan|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:review-plan|review-strategy|reviewer|retry-review|runner-review|test-autofix)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:pr-narrative|review-plan|review-strategy|reviewer|retry-review|runner-review|test-autofix)\\.test\\.mjs$"
     }
   ],
   "templateRules": [],
-  "cardTemplate": "Summarise the review-plan domain: stage selection, reviewer model/effort strategy, bounded autofix, capacity fallback, validation mode, and partial verification evidence reuse.",
+  "cardTemplate": "Summarise the review-plan domain: stage selection, reviewer model/effort strategy, bounded autofix, capacity fallback, validation mode, partial verification evidence reuse, and PR narrative reconciliation.",
   "source": "spec-draft",
   "mechanics": [
     "review-stage-planning",
@@ -28,12 +28,14 @@
     "bounded-test-autofix",
     "provider-capacity-fallback",
     "deterministic-re-verification",
-    "cost-validation-mode"
+    "cost-validation-mode",
+    "pr-narrative-reconciliation"
   ],
   "specRefs": [
     "review-plan — 変更種別と規模ごとの審査ステージ設計",
-    "review-cost-control — review model cost and retry control"
+    "review-cost-control — review model cost and retry control",
+    "review-plan — SPEC-PR-NARRATIVE-RECONCILIATION"
   ],
   "rationale": "These modules jointly own how one local PR review is planned and executed. Gate interpretation remains in review-gate, Git worktree primitives remain in local-workspace, and publication remains in remote-publication.",
-  "updatedAt": "2026-08-06T00:00:00.000Z"
+  "updatedAt": "2026-08-13T00:00:00.000Z"
 }

@@ -11,6 +11,7 @@ import {
   targetDomainQuestion,
 } from "./concordia-context.mjs";
 import { readSettings } from "./config.mjs";
+import { reconcileNarrativeForReview } from "./pr-narrative.mjs";
 import { runPlannedTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { assessMergeRisk, assessRuntimeVerification } from "./merge-risk.mjs";
@@ -548,6 +549,7 @@ export function createPrReviewRunner({
   // moment the intent review succeeds so that a crash later in the pipeline
   // does not throw that work away (spec/feature/crash-recovery.md).
   onIntentReviewCompleted = null,
+  onNarrativeReconciled = null,
 } = {}) {
   return async (request) => {
     if (request.repository !== request.headRepository) {
@@ -644,6 +646,20 @@ export function createPrReviewRunner({
           classification: submitted.classification,
         });
       }
+      // Narrative alignment is a review side effect, not a verdict. It runs only
+      // after the mandatory local leakage and Anatomia front gates, and uses the
+      // review-stage executor so it cannot bypass model capacity controls.
+      await reconcileNarrativeForReview({
+        request,
+        diffText: submitted.unifiedDiff,
+        leakage: initialLeakage,
+        reviewer: settings.fallbackReviewer,
+        cwd: worktrees.head,
+        mergeBase: worktrees.mergeBase,
+        enabled: settings.costValidationSkipReview !== true,
+        review: executeReview,
+        onReconciled: onNarrativeReconciled,
+      });
       const concordiaUrl = optionalConcordiaUrl(cwd, settings.concordiaContextEnabled);
       const authorContext = await resolveAuthorContext({
         settings,

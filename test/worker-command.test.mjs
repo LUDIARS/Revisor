@@ -13,6 +13,8 @@ test("a job submitted during the final sweep is drained without another wake", a
   let sweepCount = 0;
   let readyCount = 0;
   let closed = false;
+  let runnerOptions;
+  const reconciled = [];
   const job = {
     id: "job-late",
     status: "queued",
@@ -35,6 +37,7 @@ test("a job submitted during the final sweep is drained without another wake", a
       async running() {},
       async completed(entry) { completed.push(entry); },
       async failed() {},
+      async narrativeReconciled(id, narrative) { reconciled.push({ id, ...narrative }); },
     },
     localPrService: {
       async recoverInterruptedReviews() {
@@ -55,7 +58,10 @@ test("a job submitted during the final sweep is drained without another wake", a
         async run(work) { return work(); },
         async close() { closed = true; },
       }),
-      createRunner: () => async () => ({ conclusion: "success" }),
+      createRunner: (options) => {
+        runnerOptions = options;
+        return async () => ({ conclusion: "success" });
+      },
       signalReady: () => { readyCount += 1; },
     });
     assert.deepEqual(outcome, { ran: 1, skipped: false });
@@ -64,6 +70,18 @@ test("a job submitted during the final sweep is drained without another wake", a
     assert.equal(closed, true);
     assert.equal(completed.length, 1);
     assert.deepEqual(settled, [{ id: "job-late", status: "completed" }]);
+    await runnerOptions.onNarrativeReconciled({
+      localPrId: "pr-1",
+      headSha: job.request.headSha,
+      title: null,
+      body: "本文\n\n## 解説\n説明",
+    });
+    assert.deepEqual(reconciled, [{
+      id: "pr-1",
+      headSha: job.request.headSha,
+      title: null,
+      body: "本文\n\n## 解説\n説明",
+    }]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -163,6 +163,11 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
     assert.equal(queued.headSha, git(fixture.repoPath, "rev-parse", "feat/local"));
     assert.equal(queued.rootPath, fixture.repoPath);
     assert.equal(queued.testCases.length, 1);
+    assert.deepEqual(queued.pullRequest, {
+      title: "Add product feature",
+      body: "Two local commits become one.",
+      narrative: null,
+    });
     assert.equal(git(fixture.repoPath, "branch", "-r"), "");
 
     store.updatePullRequest(pullRequest.id, {

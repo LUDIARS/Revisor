@@ -48,6 +48,8 @@ const STALE_REQUEUE_LIMIT = 2;
  * `reviewRootPath` は審査の差分起点となる base ref を持つ merge repository。
  * 登録元の base ref は追随前の古い位置に留まりうるので、 差分の起点にはしない
  * (`spec/feature/review-diff-scope.md`)。
+ *
+ * @implements SPEC-PR-NARRATIVE-RECONCILIATION
  */
 function reviewRequest(repository, reviewRepository, pullRequest, options = {}) {
   return {
@@ -65,6 +67,11 @@ function reviewRequest(repository, reviewRepository, pullRequest, options = {}) 
     reviewMode: options.reviewMode ?? "full",
     verificationTargets: options.verificationTargets ?? [],
     previousReview: options.previousReview ?? null,
+    pullRequest: {
+      title: pullRequest.title,
+      body: pullRequest.body,
+      narrative: pullRequest.narrative ?? null,
+    },
     reviewedContentUnchanged: options.reviewedContentUnchanged === true,
     reviewLane: normalizeReviewLane(pullRequest.reviewLane),
   };

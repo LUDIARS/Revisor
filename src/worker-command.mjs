@@ -15,6 +15,7 @@ import { drainReviewJobs } from "./review-job-scheduler.mjs";
  * 走っている間は presence lock を保持し、投入側はそれを見て多重起動を避ける。
  *
  * @implements SPEC-DAEMONLESS-WORKER-DRAIN
+ * @implements SPEC-PR-NARRATIVE-RECONCILIATION
  */
 export async function runReviewWorker({
   cwd = process.cwd(),
@@ -54,6 +55,8 @@ export async function runReviewWorker({
       // チェックポイントを書いておくと、 次のワーカーが verification から再開でき、
       // 最も高いモデルレビューをやり直さずに済む (spec/feature/crash-recovery.md)。
       onIntentReviewCompleted: (checkpoint) => context.reporter.intentReviewCompleted(checkpoint),
+      onNarrativeReconciled: ({ localPrId, ...narrative }) =>
+        context.reporter.narrativeReconciled(localPrId, narrative),
     });
     // 初期化と presence 取得が済んでから ready を返す。 spawn イベントだけでは、
     // 親が先に終わった Windows の子プロセスが実行可能になった証拠にならない。

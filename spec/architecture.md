@@ -55,6 +55,11 @@ published base commits and human-selected semantic version tags/Releases.
   change needs, and enforces the safety floor an advised plan cannot cross.
 - `plan-advisor.mjs` optionally asks a daemon-less Augur CLI or a control model
   for a plan and always fails soft back to the deterministic one.
+- `pr-narrative.mjs` performs the optional, model-assisted PR title/body
+  reconciliation after local leakage and front-gate checks. It treats all model
+  input as untrusted data, runs through review-stage capacity, and checkpoints a
+  successful result per head without changing the review verdict. See
+  `feature/review-plan.md` (`SPEC-PR-NARRATIVE-RECONCILIATION`).
 - `merge-risk.mjs` scores the runtime-verification requirement and the merge
   risk, itemised.
 - `pr-disposition.mjs` derives, at read time, whether a pull request needs a
@@ -152,9 +157,11 @@ sequence shared by every registered repository, base/head refs, exact original
 SHAs, workflow status, CI outcomes, projected Anatomia data, leakage locations,
 the security scan outcome and its finding locations, the review plan, the
 merge-risk and runtime-verification assessments, the automatic merge outcome,
-and the final reviewed SHA. The test workflow is a derived view containing the
-  latest Open PR per repository while it is `queued`, `running`, or
-  `test_ok`. The first two states are early-QA candidates for the current head;
+the final reviewed SHA, and the latest narrative-reconciliation head checkpoint.
+The checkpoint only suppresses repeated presentation work and is not review
+evidence. The test workflow is a derived view containing the latest Open PR per
+repository while it is `queued`, `running`, or `test_ok`. The first two states
+are early-QA candidates for the current head;
 only `Open / Test OK` means the review gate has passed.
 
 The number is global rather than per-repository because it is used on its own to

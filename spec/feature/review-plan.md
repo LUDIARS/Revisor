@@ -14,7 +14,7 @@ related:
   - ./review-gate.md
   - ./merge-risk.md
   - ./review-cost-control.md
-updated: 2026-08-06
+updated: 2026-08-13
 ---
 
 # review-plan — 変更種別と規模ごとの審査ステージ設計
@@ -54,6 +54,40 @@ updated: 2026-08-06
 (作業ブランチと秘匿情報をリモートへ出さない) だから。`anatomia_domain_review` と
 `spec_requirements` を必須にしているのは、doc レビューでも「ドメイン整合」と
 「spec 要件充足」は見たいという neco の明示指示による。
+
+## SPEC-PR-NARRATIVE-RECONCILIATION: PR タイトル・本文の整合
+
+通常レビューでは、提出された diff を確認する審査の前段で、PR タイトルが変更全体を表して
+いるかと、本文へ追加する短い解説を低コストモデルへ 1 回だけ問い合わせる。同じ head
+SHA の成功済み整合は `pullRequest.narrative.headSha` をチェックポイントとして再実行しない。
+これは PR 表示の補助であり審査判定ではないため、モデル・Git metadata・状態保存の失敗は
+best-effort で無視し、`checkStatus` / `reasons` / その他のゲート結果を変更しない。
+
+モデルを呼ぶ安全境界は審査本体と同じである。
+
+- `verification` モードと cost-validation の reviewer skip 中はモデルを呼ばない。
+- added diff の leakage scan が clean で、Anatomia front gate が block しなかった後にだけ呼ぶ。
+- タイトルとコミット件名も外部モデルへ渡す直前に metadata leakage scan を行い、モデル応答も
+  保存直前に再検査する。検出値は保存せず、検出時は整合だけを省略する。
+- モデル呼び出しは review-stage executor を通し、他のモデルレビューと同じ容量制御に従う。
+  実行権限は read-only、tier は economy、effort は low とする。
+- タイトル・コミット件名・diff はすべて未信頼データとして JSON 化し、入力中の命令に従わず、
+  ツールや追加ファイルを使わないようプロンプトで明示する。
+
+応答は `{title: string|null, explanation: string}` だけを受理する。タイトルは制御文字と改行を
+除去して 100 文字を上限とし、日本語を含まない値と空値を拒否する。解説も制御文字を除去して
+2,000 文字を上限とし、日本語を含まない値と空値を拒否する。解説中の Markdown 見出しは
+escape し、既存本文の fenced code block 内にある
+`## 解説` は置換対象にしない。既存の実見出し `## 解説` はその section だけを置換し、無ければ
+末尾へ追加する。タイトルを変えた場合は、改行を平坦化した旧タイトルも解説へ残す。
+
+結果保存時に現在の PR head SHA を再確認し、一致する PR の title/body と narrative
+チェックポイントだけを更新する。worker から reporter への callback がこの保存を担当し、
+runner やモデルは state store を直接操作しない。
+
+登録テストは prompt の未信頼入力境界、応答 shape と sanitizer、CRLF・fenced code block を含む
+section 置換、leakage / verification / checkpoint / cost skip、head 一致時だけの reporter 更新、
+および review request への title/body/checkpoint 引き渡しを検証する。
 
 ## レビューコスト段階
 

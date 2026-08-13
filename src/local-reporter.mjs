@@ -64,6 +64,7 @@ export class LocalPrReporter {
     afterCompleted = null,
     notifyCompletion = null,
     notifyReviewStatus = null,
+    now = () => new Date().toISOString(),
   } = {}) {
     // 現役 job 判定 (`#isCurrent`) も通知も、PR レコードを読めることが前提。
     // 読めない store を黙って受け取ると、supersession ガードが素通りして
@@ -78,10 +79,14 @@ export class LocalPrReporter {
     if (notifyReviewStatus !== null && typeof notifyReviewStatus !== "function") {
       throw new TypeError("Review status notifier must be a function.");
     }
+    if (typeof now !== "function") {
+      throw new TypeError("Local PR reporter clock must be a function.");
+    }
     this.store = store;
     this.afterCompleted = afterCompleted;
     this.notifyCompletion = notifyCompletion;
     this.notifyReviewStatus = notifyReviewStatus;
+    this.now = now;
   }
 
   /**
@@ -173,6 +178,44 @@ export class LocalPrReporter {
       reviewer: reviewer ?? null,
       reviewPlan: plan ?? null,
     });
+  }
+
+  /**
+   * 審査冒頭の LLM 整合結果を PR レコードへ反映する。審査の判定
+   * (checkStatus / reasons) には一切触れない。
+   *
+   * @implements SPEC-PR-NARRATIVE-RECONCILIATION
+   */
+  async narrativeReconciled(localPrId, { headSha, title, body }) {
+    const pullRequest = this.store.getPullRequest(localPrId);
+    if (!pullRequest) return;
+    if (
+      typeof headSha !== "string"
+      || typeof body !== "string"
+      || !body
+      || !(title === null || (typeof title === "string" && title))
+    ) {
+      return;
+    }
+    if (String(pullRequest.headSha).toLowerCase() !== String(headSha).toLowerCase()) return;
+    this.store.updatePullRequest(localPrId, {
+      ...(typeof title === "string" ? { title } : {}),
+      body,
+      narrative: {
+        headSha,
+        adjustedTitle: typeof title === "string",
+        at: this.now(),
+      },
+    });
+    if (typeof this.store.appendPullRequestEvent === "function") {
+      this.store.appendPullRequestEvent(localPrId, {
+        event: "narrative",
+        message: typeof title === "string"
+          ? `タイトルを内容に合わせて更新し、解説を追加しました (旧: ${pullRequest.title})`
+          : "本文に解説を追加しました",
+        tone: "idle",
+      });
+    }
   }
 
   async completed(job) {

@@ -103,3 +103,40 @@ test("a superseded worker cannot checkpoint the newer review", async () => {
   assert.equal(store.record.intentReviewCompleted, false);
   assert.equal(store.record.reviewedHeadSha, undefined);
 });
+
+test("narrative reconciliation updates only a matching head and records an event", async () => {
+  const store = storeDouble({ headSha: HEAD, title: "旧題", body: "本文" });
+  const events = [];
+  store.appendPullRequestEvent = (_id, event) => events.push(event);
+  const reporter = new LocalPrReporter(store, { now: () => "2026-08-13T00:00:00.000Z" });
+
+  await reporter.narrativeReconciled("PR1", {
+    headSha: HEAD,
+    title: "新題",
+    body: "本文\n\n## 解説\n説明",
+  });
+
+  assert.equal(store.record.title, "新題");
+  assert.equal(store.record.narrative.adjustedTitle, true);
+  assert.equal(store.record.narrative.at, "2026-08-13T00:00:00.000Z");
+  assert.equal(events[0].event, "narrative");
+
+  await reporter.narrativeReconciled("PR1", {
+    headSha: "c".repeat(40),
+    title: "無視",
+    body: "無視",
+  });
+  assert.equal(store.record.title, "新題");
+  assert.equal(store.record.body, "本文\n\n## 解説\n説明");
+});
+
+test("narrative reconciliation keeps the title for a body-only update", async () => {
+  const store = storeDouble({ headSha: HEAD, title: "旧題", body: "本文" });
+  const reporter = new LocalPrReporter(store);
+
+  await reporter.narrativeReconciled("PR1", { headSha: HEAD, title: null, body: "解説付き本文" });
+
+  assert.equal(store.record.title, "旧題");
+  assert.equal(store.record.body, "解説付き本文");
+  assert.equal(store.record.narrative.adjustedTitle, false);
+});
