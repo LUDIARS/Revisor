@@ -1,0 +1,47 @@
+{
+  "name": "persistent-review-state",
+  "description": "Revisor のローカル PR 記録と審査キューを共有 SQLite database に永続化する境界。database の初期化、WAL / busy timeout、初回作成時のファイル保護、legacy JSON の一度だけの取り込み、PR・repository・job record の保存とプロセス間トランザクションを担う。審査判定・worker 実行・HTTP 応答は持たない。",
+  "presetRules": [
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "src/(?:revisor-db|state-store|job-store)\\.mjs$",
+        "by": "path",
+        "maxFanOut": 9007199254740991
+      }
+    },
+    {
+      "preset": "couplingCap",
+      "params": {
+        "targetPattern": "openRevisorDatabase|withImmediateTransaction|withReadTransaction|resolveDbPath|displaceLegacyJson|archiveLegacyJson|resolveStatePath|resolveJobsPath",
+        "by": "name",
+        "maxFanOut": 9007199254740991
+      }
+    }
+  ],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:revisor-db|state-store|job-store)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:revisor-db|state-store(?:-concurrency)?|job-store)\\.test\\.mjs$"
+    }
+  ],
+  "templateRules": [],
+  "cardTemplate": "Summarise the \"persistent-review-state\" domain: shared SQLite PR/job records, database creation and migration, WAL/busy-timeout concurrency, and the boundary between persistence and review execution.",
+  "source": "spec-draft",
+  "mechanics": [
+    "sqlite-wal-concurrency",
+    "database-initialization",
+    "legacy-state-migration",
+    "process-transaction-serialization"
+  ],
+  "specRefs": [
+    "daemonless-cli — PR 記録と審査キューは共有 SQLite database を正本とする",
+    "daemonless-cli — read-modify-write は BEGIN IMMEDIATE、待ち上限は busy_timeout",
+    "daemonless-cli — legacy JSON state/jobs は初回 open 時に一度だけ取り込む",
+    "daemonless-cli — WAL の database は読み手が書き手を壊さない"
+  ],
+  "rationale": "PR record と job record は同じ SQLite transaction 境界を共有する永続状態であり、HTTP / CLI / worker のどれが呼び出したかで整合性規則を変えてはならない。database 初期化と legacy migration をこの境界へ閉じ込めることで、review execution や local PR lifecycle がファイル形式・WAL・OS 権限の詳細を持たないようにする。",
+  "updatedAt": "2026-08-13T00:00:00.000Z"
+}

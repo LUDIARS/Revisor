@@ -80,6 +80,11 @@ export function archiveLegacyJson(path) {
  */
 export function openRevisorDatabase(path) {
   mkdirSync(dirname(path), { recursive: true });
+  // Permission repair must not run for an existing database. On Windows, the
+  // service can keep the DB/WAL open while another CLI process connects; a
+  // concurrent chmod then fails with EPERM before SQLite can use its WAL
+  // concurrency controls.
+  const isNewDatabase = !existsSync(path);
   const database = new DatabaseSync(path);
   database.exec("PRAGMA busy_timeout = 60000");
   database.exec("PRAGMA journal_mode = WAL");
@@ -90,12 +95,13 @@ export function openRevisorDatabase(path) {
     CREATE TABLE IF NOT EXISTS pull_requests (id TEXT PRIMARY KEY, record TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL);
   `);
-  secureDatabaseFiles(path);
+  if (isNewDatabase) secureDatabaseFiles(path);
   return database;
 }
 
 // PR の本文・作業ツリーの絶対パス・診断は DB と WAL に入る。旧 JSON と同じく、
-// 作成時の umask に任せず所有者だけが読めるモードへ明示的にそろえる。
+// 初回作成時だけ所有者のみが読めるモードへ明示的にそろえる。既存 DB の
+// permission repair は、稼働中サービスとの並行アクセスを壊すため行わない。
 function secureDatabaseFiles(path) {
   for (const filePath of [path, `${path}-wal`, `${path}-shm`]) {
     if (existsSync(filePath)) chmodSync(filePath, 0o600);

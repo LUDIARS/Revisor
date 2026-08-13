@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -92,6 +92,62 @@ test("changes the list version for local and other-connection writes", () => {
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("opens an existing database while another process holds it", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-active-db-"));
+  const path = join(directory, "revisor.db");
+  const storeModule = new URL("../src/state-store.mjs", import.meta.url).href;
+  const holderScript = `
+    import { LocalPrStore } from ${JSON.stringify(storeModule)};
+    const store = new LocalPrStore({ path: process.env.REVISOR_ACTIVE_DB_PATH });
+    store.listPullRequests();
+    process.stdout.write("ready\\n");
+    setInterval(() => {}, 1_000);
+  `;
+  const holder = spawn(process.execPath, ["--input-type=module", "--eval", holderScript], {
+    env: { ...process.env, REVISOR_ACTIVE_DB_PATH: path },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const holderExited = new Promise((resolve) => holder.once("exit", resolve));
+  try {
+    await new Promise((resolve, reject) => {
+      let output = "";
+      const timeout = setTimeout(
+        () => reject(new Error("database holder did not become ready")),
+        10_000,
+      );
+      const rejectWithCleanup = (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      };
+      holder.stdout.setEncoding("utf8");
+      holder.stdout.on("data", (chunk) => {
+        output += chunk;
+        if (output.includes("ready\n")) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+      holder.once("error", rejectWithCleanup);
+      holder.once("exit", (code) => rejectWithCleanup(new Error(`database holder exited (${code})`)));
+    });
+    const clientScript = `
+      import assert from "node:assert/strict";
+      import { LocalPrStore } from ${JSON.stringify(storeModule)};
+      const store = new LocalPrStore({ path: process.env.REVISOR_ACTIVE_DB_PATH });
+      assert.deepEqual(store.listPullRequests(), []);
+    `;
+    const client = spawnSync(process.execPath, ["--input-type=module", "--eval", clientScript], {
+      encoding: "utf8",
+      env: { ...process.env, REVISOR_ACTIVE_DB_PATH: path },
+    });
+    assert.equal(client.status, 0, client.stderr || client.stdout);
+  } finally {
+    if (holder.exitCode === null) holder.kill();
+    await holderExited;
     rmSync(directory, { recursive: true, force: true });
   }
 });
