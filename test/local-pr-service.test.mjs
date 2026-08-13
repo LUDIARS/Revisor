@@ -1557,7 +1557,7 @@ test("a closed local PR can be neither merged, re-queued, nor closed twice", asy
       headRef: "feat/local",
     });
     store.updatePullRequest(pullRequest.id, { checkStatus: "test_ok" });
-    await service.closePullRequest(pullRequest.id);
+    await service.closePullRequest(pullRequest.id, { reason: "不要になった" });
 
     await assert.rejects(
       () => service.mergePullRequest(pullRequest.id),
@@ -1568,7 +1568,7 @@ test("a closed local PR can be neither merged, re-queued, nor closed twice", asy
       /Only an open local PR can be reviewed again/,
     );
     await assert.rejects(
-      () => service.closePullRequest(pullRequest.id),
+      () => service.closePullRequest(pullRequest.id, { reason: "不要になった" }),
       /Only an open local PR can be closed/,
     );
   } finally {
@@ -1607,7 +1607,7 @@ test("refuses to close a local PR while its review is in flight", async () => {
     // しても上書きされて open へ戻ったように見えるだけになる。
     assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
     await assert.rejects(
-      () => service.closePullRequest(pullRequest.id),
+      () => service.closePullRequest(pullRequest.id, { reason: "不要になった" }),
       /A local PR under review cannot be closed/,
     );
   } finally {
@@ -1661,7 +1661,7 @@ test("refuses to close a local PR while its squash merge is in flight", async ()
     const merging = service.mergePullRequest(pullRequest.id);
     await mergeStarted;
     await assert.rejects(
-      () => service.closePullRequest(pullRequest.id),
+      () => service.closePullRequest(pullRequest.id, { reason: "不要になった" }),
       /A local PR being merged cannot be closed/,
     );
     finishMerge();
@@ -1673,9 +1673,50 @@ test("refuses to close a local PR while its squash merge is in flight", async ()
     assert.equal(after.closeReason, undefined);
     // マージが終われば締め出しは解ける (終局済みとして拒否される)。
     await assert.rejects(
-      () => service.closePullRequest(pullRequest.id),
+      () => service.closePullRequest(pullRequest.id, { reason: "不要になった" }),
       /Only an open local PR can be closed/,
     );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses to close a local PR without a reason", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const announced = [];
+  const service = new LocalPrService({
+    store,
+    queue: { async submit() { return { id: "job-1" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    notifyLifecycle: async (event) => { announced.push(event); },
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, { checkStatus: "test_ok" });
+
+    await assert.rejects(
+      () => service.closePullRequest(pullRequest.id),
+      /requires a reason/,
+    );
+    await assert.rejects(
+      () => service.closePullRequest(pullRequest.id, { reason: "   " }),
+      /requires a reason/,
+    );
+    // 弾いたなら状態も通知も動かさない。
+    assert.equal(store.getPullRequest(pullRequest.id).status, "open");
+    assert.deepEqual(announced, ["created"]);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

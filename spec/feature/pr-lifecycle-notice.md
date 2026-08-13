@@ -47,7 +47,7 @@ local PR は Revisor のダッシュボードにしか現れない。 投稿元�
 | `review_failed` | `LocalPrReporter.completed` (それ以外) / `.failed` / `#enqueue` 失敗 / 復旧不能 | 理由付きの審査失敗 |
 | `merged` | `LocalPrService.mergePullRequest` | squash merge 完了 |
 | `bypass_merged` | `LocalPrService.mergePullRequest` (CLI bypass) | 審査を通さない復旧マージ。後追いレビューが必要 |
-| `closed` | `LocalPrService.closePullRequest` | マージせず取り下げ。理由の有無とブランチが残ることを明記 |
+| `closed` | `LocalPrService.closePullRequest` | マージせず取り下げ。必須の理由とブランチが残ることを明記 |
 
 **審査結果とマージは別イベント。** 自動マージが審査通過の直後に走る場合でも、
 `review_passed` を先に出してから `merged` を出す (`completed` は auto-merge の**前**に
@@ -83,6 +83,8 @@ Concordia の Discord egress は **session 紐付きの無い chat row を拒否
   無害化する。 Revisor の通知が Discord の一斉メンションに使われないため。
 - 失敗/取り下げ理由の loopback / RFC 1918 / `.local` URL は
   `[redacted: private endpoint]` に置き換える。公開 URL と相対パスは診断のため残す。
+- 新規の取り下げは理由必須だが、必須化前の state と互換性を保つため、
+  `closeReason` が無い legacy record の通知は「理由の記録はありません。」と明記する。
 
 ## 6. best-effort
 

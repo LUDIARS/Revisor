@@ -150,6 +150,10 @@ export async function runLocalPrCommand(args, {
   }
   if (scope === "pr" && action === "close") {
     const pullRequest = findByNumber(store, rest[0]);
+    // サービス側でも弾くが、 CLI では「何を渡せば通るか」を先に言う方が早い。
+    if (!String(option(args, "--reason") ?? "").trim()) {
+      throw new Error("pr close requires --reason (it is what makes the withdrawal reviewable).");
+    }
     const closed = await localPrService.closePullRequest(pullRequest.id, {
       reason: option(args, "--reason"),
     });

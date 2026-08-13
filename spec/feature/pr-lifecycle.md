@@ -15,7 +15,7 @@ related:
   - ./crash-recovery.md
   - ./pr-lifecycle-notice.md
   - ./review-gate.md
-updated: 2026-08-10
+updated: 2026-08-11
 ---
 
 # pr-lifecycle — ローカル PR の終局 (マージ / 取り下げ)
@@ -59,8 +59,8 @@ PR や、案ごと捨てた PR が `open` のまま残ると:
   完了した merge が `status: "merged"` を書き戻して取り下げを踏み潰し、
   取り下げたはずの変更が board から消えないまま main へ入る。締め出す区間は
   squash 開始から status 書き込み完了まで
-- 理由は**任意**。文字列で中身があるものだけ `closeReason` に trim して記録し、
-  それ以外は `null`。終局の可否を理由の有無で左右しない
+- 理由は**必須**。文字列を trim し、空なら状態を書き換える前に拒否する。
+  正規化後の値を `closeReason` に記録し、取り下げの判断根拠を後から辿れるようにする
 - `closedAt` に ISO 時刻を書く
 - state 書き込み後に `closed` lifecycle event を追記し、session 紐付きなら
   Concordia の報告 channel へ best-effort で通知する。通知失敗は取り下げを巻き戻さない
@@ -117,8 +117,9 @@ POST /api/local-prs/:id/close  UI セッション
 ```
 
 どちらも merge / retry と同じ認可 (破壊的操作なので token / セッション必須) で、
-本文の `{"reason": "..."}` は任意。ダッシュボードの「取り下げ」ボタンは本文を
-送らないため、本文が読めない要求でも取り下げ自体は通し、理由だけ `null` になる。
+本文の `{"reason": "..."}` は必須。欠落・非文字列・空白だけの理由は 400 になり、
+取り下げ状態は書き込まれない。ダッシュボードの「取り下げ」ボタンは理由を入力させ、
+trim 後の値を JSON で送る。キャンセル時は要求を送らない。
 ボタンは merge と違い `test_ok` を要求せず、審査が終わっている open な PR
 (`queued` / `running` 以外) に出る — 落ちた審査こそ取り下げたい。
 
@@ -128,6 +129,7 @@ POST /api/local-prs/:id/close  UI セッション
 
 - `test_ok` の PR を取り下げると `closed` + `closeReason` (trim 済み) + `closedAt`
   になり、`testWorkflowProducts()` から消え、`closed` 通知が 1 通出ること
+- 理由の欠落と空白だけの値は状態と通知を変えずに拒否されること
 - 取り下げ済みは merge も retry も 2 度目の close も拒否されること
 - 審査中 (`queued`) の close が拒否されること
 - squash マージ中の close が拒否され、マージが踏み潰されずに `merged` になること
@@ -143,11 +145,12 @@ POST /api/local-prs/:id/close  UI セッション
 判定に影響しないこと。
 
 `test/server.test.mjs`: close が token / セッションを要求すること、両 API が id を
-デコードして理由を渡すこと、本文なしでも取り下げられること。
+デコードして理由を渡すこと、本文なしを拒否すること。
 
 `test/ui.test.mjs`: board のカードに「取り下げ」ボタンが出て `close` を叩くこと。
-UI は生成した client script の文字列でしか検証できないので、ボタンの表示条件
-(`open` かつ `queued` / `running` 以外) は本体の分岐と合わせて読む必要がある。
+close request 生成は純粋関数として、理由の trim、空白の拒否、キャンセル時の無送信を
+振る舞いで検証する。ボタンの表示条件 (`open` かつ `queued` / `running` 以外) は
+生成した client script と本体の分岐を合わせて検証する。
 
 ## SPEC-STALE-REVIEW-REQUEUE: stale 審査の再投入上限
 

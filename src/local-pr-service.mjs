@@ -355,9 +355,17 @@ export class LocalPrService {
    * 審査中とマージ中は拒否する。 どちらも走っている処理が完了時に自分の結果を
    * 書き戻すので、 先に closed にしても上書きされる — 審査なら open へ戻ったように
    * 見えるだけ、 マージなら取り下げたはずの変更がそのまま main へ入る。
-   * 理由は必須にしない代わりに、 渡されたものは記録して後から辿れるようにする。
+   * 理由は必須。空白を trim した後の文字列を記録し、後から取り下げの判断を辿れるようにする。
    */
   async closePullRequest(id, { reason = null } = {}) {
+    // 取り下げは変更を main へ入れないまま board から消す。 理由が無いと、後から見た
+    // 人には「直し切れなかったのか、要らなくなったのか、既に入っているのか」が判別
+    // できず、同じ変更が作り直される。 バイパスマージが --reason を要求するのと同じ
+    // 理由で、取り下げにも必ず理由を残させる。
+    const closeReason = typeof reason === "string" ? reason.trim() : "";
+    if (!closeReason) {
+      throw new Error("Closing a local PR requires a reason (it is what makes the withdrawal reviewable).");
+    }
     // 同一プロセスの async merge が lock を持っているとき同期 wait すると、merge の
     // 継続自体を event loop ごと止める。既存の in-memory guard で即座に拒否する。
     if (this.#merging.has(id)) {
@@ -375,7 +383,7 @@ export class LocalPrService {
       return this.store.updatePullRequest(id, {
         status: "closed",
         closedAt: new Date().toISOString(),
-        closeReason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+        closeReason,
       });
     };
     const closed = this.lifecycleLockPath

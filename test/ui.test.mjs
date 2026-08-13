@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderDashboardPage } from "../src/ui-dashboard-page.mjs";
-import { PR_FILTER_SOURCE, renderPrBoardPage } from "../src/ui-pr-board-page.mjs";
+import {
+  PR_ACTION_SOURCE,
+  PR_FILTER_SOURCE,
+  renderPrBoardPage,
+} from "../src/ui-pr-board-page.mjs";
 import { renderSettingsPage } from "../src/ui-settings-page.mjs";
 import { renderReleasePage } from "../src/ui-release-page.mjs";
 import { PR_VIEW_SOURCE } from "../src/ui-pr-view-script.mjs";
@@ -51,6 +55,27 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
   // 審査が終わっている open な PR は、 マージせずに取り下げられる。
   assert.match(page, /runAction\(close, pr\.id, 'close'\)/);
   assert.match(page, /close\.textContent = '取り下げ'/);
+  assert.match(page, /actionRequestOptions\(action, window\.prompt\.bind\(window\)\)/);
+});
+
+function boardActions() {
+  return new Function(`${PR_ACTION_SOURCE}
+    return { actionRequestOptions };`)();
+}
+
+test("closing from the PR board requires and sends a trimmed reason", () => {
+  const { actionRequestOptions } = boardActions();
+  const options = actionRequestOptions("close", () => "  別経路で main へ入った  ");
+  assert.deepEqual(options, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: "別経路で main へ入った" }),
+  });
+  assert.equal(actionRequestOptions("close", () => null), null);
+  assert.throws(() => actionRequestOptions("close", () => "   "), /取り下げ理由/);
+  assert.deepEqual(actionRequestOptions("retry", () => {
+    throw new Error("prompt must not run");
+  }), { method: "POST" });
 });
 
 test("the PR page explains early QA above the board", () => {

@@ -34,6 +34,38 @@ test("a following flag cannot satisfy the required bypass reason", async () => {
   assert.equal(mergeCalled, false);
 });
 
+test("closing from the CLI requires a non-empty reason", async () => {
+  let closeCalled = false;
+  const pullRequest = {
+    id: "pr-1",
+    number: 1,
+    repository: "LUDIARS/Revisor",
+    status: "open",
+    checkStatus: "test_ok",
+    title: "withdraw",
+  };
+  await assert.rejects(
+    runLocalPrCommand(
+      ["pr", "close", "1", "--reason", "--json"],
+      {
+        stdout: { write() {} },
+        createContext: () => ({
+          store: { listPullRequests: () => [pullRequest] },
+          jobs: {},
+          localPrService: {
+            async closePullRequest() {
+              closeCalled = true;
+              return pullRequest;
+            },
+          },
+        }),
+      },
+    ),
+    /close requires --reason/,
+  );
+  assert.equal(closeCalled, false);
+});
+
 test("forwards --defer-push only through the CLI merge command", async () => {
   const pullRequest = {
     id: "pr-8",

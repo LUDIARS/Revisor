@@ -104,6 +104,23 @@ export const PR_FILTER_SOURCE = `
   }
 `;
 
+// 取り下げだけは監査用の理由が必要。DOM 操作と切り離して、キャンセル・空白・JSON
+// request の契約を生成ソースの文字列照合ではなく振る舞いで検証できるようにする。
+export const PR_ACTION_SOURCE = `
+  function actionRequestOptions(action, promptForReason) {
+    if (action !== 'close') return { method: 'POST' };
+    const entered = promptForReason('取り下げ理由を入力してください。');
+    if (entered === null) return null;
+    const reason = entered.trim();
+    if (!reason) throw new Error('取り下げ理由を入力してください。');
+    return {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    };
+  }
+`;
+
 const CONTROLLER_SOURCE = `
   const prCards = document.querySelector('#pr-cards');
   const prCounts = document.querySelector('#pr-counts');
@@ -250,10 +267,19 @@ const CONTROLLER_SOURCE = `
   }
 
   async function runAction(button, id, action) {
+    let options;
+    try {
+      options = actionRequestOptions(action, window.prompt.bind(window));
+    } catch (error) {
+      prActionMessage.textContent = error.message;
+      return;
+    }
+    // prompt のキャンセルは操作を中止しただけなのでエラー表示しない。
+    if (!options) return;
     button.disabled = true;
     prActionMessage.textContent = '';
     try {
-      await request('/api/local-prs/' + encodeURIComponent(id) + '/' + action, { method: 'POST' });
+      await request('/api/local-prs/' + encodeURIComponent(id) + '/' + action, options);
       await refresh();
     } catch (error) {
       prActionMessage.textContent = error.message;
@@ -450,7 +476,7 @@ const CONTROLLER_SOURCE = `
   refresh().finally(connectPrEvents);
 `;
 
-const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_DIFF_VIEW_SOURCE}${PR_FILTER_SOURCE}${PR_EVENTS_SOURCE}${CONTROLLER_SOURCE}`;
+const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_DIFF_VIEW_SOURCE}${PR_FILTER_SOURCE}${PR_ACTION_SOURCE}${PR_EVENTS_SOURCE}${CONTROLLER_SOURCE}`;
 
 export function renderPrBoardPage(sessionToken) {
   return renderPage({
