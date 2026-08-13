@@ -131,6 +131,57 @@ test("merges even after the base advanced, as long as the squash applies cleanly
   }
 });
 
+test("treats a rebased branch with no remaining diff as a logical merge", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    // Another landing applied the reviewed patch to main under a different
+    // commit, then rebase dropped the now-redundant feature commit.
+    git(fixture.repoPath, "cherry-pick", "refs/heads/feat/local");
+    git(fixture.repoPath, "branch", "-f", "feat/local", "main");
+    let scanned = false;
+    let published = false;
+
+    const mergeCommitSha = await squashMergeLocalPullRequest({
+      ...input,
+      scan: async () => {
+        scanned = true;
+        return { status: "passed" };
+      },
+      publish: async () => {
+        published = true;
+        return "unexpected-publication";
+      },
+      log: () => {},
+    });
+
+    assert.equal(mergeCommitSha, git(fixture.repoPath, "rev-parse", "refs/heads/main"));
+    assert.equal(scanned, false);
+    assert.equal(published, false);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("refuses an empty re-landing when the reviewed patch was discarded", async () => {
+  const fixture = repositoryFixture();
+  try {
+    const input = mergeInput(fixture);
+    git(fixture.repoPath, "branch", "-f", "feat/local", "main");
+
+    await assert.rejects(
+      squashMergeLocalPullRequest({ ...input, log: () => {} }),
+      StaleReviewError,
+    );
+    assert.equal(
+      git(fixture.repoPath, "rev-parse", "refs/heads/main"),
+      input.pullRequest.baseSha,
+    );
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("squash merges LFS-tracked changes without a local git-lfs binary", async () => {
   const fixture = repositoryFixture({ withLfs: true });
   try {

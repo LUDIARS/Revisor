@@ -20,6 +20,7 @@ import { classifyPreparedMerge, readPublishedBaseSha } from "./prepared-merge.mj
 import { publishMergedPullRequest } from "./release-publisher.mjs";
 import {
   advanceLocalBranch,
+  assertSafeSha,
   cleanupWorktrees,
   diffPatchId,
   git,
@@ -162,6 +163,32 @@ async function localBaseContainsPreparedMerge(rootPath, baseSha, mergeCommitSha)
   }
 }
 
+async function hasStagedChanges(worktreePath) {
+  return Boolean((await git(worktreePath, ["diff", "--cached", "--name-only"])).trim());
+}
+
+// An empty re-landing is safe only when the reviewed patch is already on the
+// base. A head may also become empty because somebody reset it and discarded
+// the reviewed work; `git cherry` distinguishes the equivalent-patch case
+// without trusting the branch pointer alone.
+async function assertReviewedContentAlreadyLanded(rootPath, reviewedHeadSha, baseSha) {
+  try {
+    assertSafeSha(reviewedHeadSha, "reviewed head sha");
+    assertSafeSha(baseSha, "base sha");
+    const cherry = await git(rootPath, ["cherry", baseSha, reviewedHeadSha]);
+    if (!cherry.split(/\r?\n/).some((line) => line.startsWith("+"))) return;
+  } catch (error) {
+    throw new StaleReviewError(
+      "The reviewed head cannot be verified against the current base; a new review is required.",
+      { cause: error, headSha: reviewedHeadSha },
+    );
+  }
+  throw new StaleReviewError(
+    "The reviewed content is not present on the current base; a new review is required.",
+    { headSha: reviewedHeadSha },
+  );
+}
+
 /**
  * GitHub 送出を保留したマージだけを記録する。
  *
@@ -225,19 +252,6 @@ async function attemptSquashMerge({
   await assertLocalVersionUnchanged(repository.rootPath, baseSha, headSha);
   // バイパスでは審査済みヘッドが存在しないことすらある (一度も審査が通っていない)。
   // 突き合わせる相手が無い以上、ここは比較そのものを行わない。
-  if (
-    !bypass
-    && headSha.toLowerCase() !== String(pullRequest.reviewedHeadSha).toLowerCase()
-  ) {
-    // rebase で SHA だけ変わったヘッドは審査結果を引き継ぐ。差分内容が審査時と
-    // 変わっていたら、それは未審査のコードなので再審査へ。
-    await assertReviewedContentUnchanged(
-      repository.rootPath,
-      pullRequest.reviewedHeadSha,
-      headSha,
-      baseSha,
-    );
-  }
   // A process can stop after the GitHub push or Release creation and before
   // local state is marked merged. A private recovery ref keeps both tagged
   // Releases and ordinary untagged merges reachable for an idempotent retry.
@@ -320,6 +334,33 @@ async function attemptSquashMerge({
       headSha,
       baseRef: pullRequest.baseRef,
     });
+    // A branch can be rebased onto a main that already contains its complete
+    // patch. Treat that as a logical no-op merge instead of trying to create
+    // an empty commit in the detached integration worktree.
+    if (!await hasStagedChanges(worktrees.head)) {
+      if (!bypass) {
+        await assertReviewedContentAlreadyLanded(
+          repository.rootPath,
+          pullRequest.reviewedHeadSha,
+          baseSha,
+        );
+      }
+      log(`Local PR ${pullRequest.id}: no remaining diff after re-landing on ${pullRequest.baseRef}.`);
+      return baseSha;
+    }
+    if (
+      !bypass
+      && headSha.toLowerCase() !== String(pullRequest.reviewedHeadSha).toLowerCase()
+    ) {
+      // rebase で SHA だけ変わったヘッドは審査結果を引き継ぐ。差分内容が審査時と
+      // 変わっていたら、それは未審査のコードなので再審査へ。
+      await assertReviewedContentUnchanged(
+        repository.rootPath,
+        pullRequest.reviewedHeadSha,
+        headSha,
+        baseSha,
+      );
+    }
     // commit も index を洗い直す過程でフィルタを起動する。 worktree add と
     // merge --squash だけ無効化しても、 最後のこの 1 本で git-lfs 不在に落ちる。
     await gitWithoutLfs(worktrees.head, [
