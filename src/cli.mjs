@@ -2,9 +2,12 @@
 import { resolveManagedServicePort } from "./catalog.mjs";
 import {
   hasGitHubAppCredentials,
+  hasDiscordWebhookUrl,
+  removeDiscordWebhookUrl,
   removeGitHubAppCredentials,
   resolveConfigPath,
   writeGitHubAppCredentials,
+  writeDiscordWebhookUrl,
 } from "./config.mjs";
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
@@ -43,6 +46,9 @@ function printHelp() {
     "  revisor config github-app status",
     "  revisor config github-app set --app-id <id> --private-key-stdin",
     "  revisor config github-app remove",
+    "  revisor config discord-webhook status",
+    "  revisor config discord-webhook set --stdin",
+    "  revisor config discord-webhook remove",
     "  revisor version show --repo <path>",
     "  revisor version set <MAJOR.MINOR.PATCH> --repo <path>",
     "  revisor guard-push --repo <path> --state <path>  # managed hook only",
@@ -98,6 +104,28 @@ export async function main(args, { stdin = process.stdin } = {}) {
   }
   if (args[0] === "config" && args[1] === "github-app" && args[2] === "status") {
     process.stdout.write(hasGitHubAppCredentials(process.env) ? "configured\n" : "not configured\n");
+    return 0;
+  }
+  if (args[0] === "config" && args[1] === "discord-webhook" && args[2] === "status") {
+    process.stdout.write(hasDiscordWebhookUrl(process.env) ? "configured\n" : "not configured\n");
+    return 0;
+  }
+  if (args[0] === "config" && args[1] === "discord-webhook" && args[2] === "set") {
+    if (!args.includes("--stdin")) {
+      throw new Error("discord-webhook set requires --stdin.");
+    }
+    writeDiscordWebhookUrl(await readStdin(stdin), process.env);
+    process.stdout.write("Discord webhook URL saved.\n");
+    return 0;
+  }
+  if (
+    args[0] === "config"
+    && args[1] === "discord-webhook"
+    && args[2] === "remove"
+    && args.length === 3
+  ) {
+    removeDiscordWebhookUrl(process.env);
+    process.stdout.write("Discord webhook URL removed.\n");
     return 0;
   }
   if (args[0] === "config" && args[1] === "github-app" && args[2] === "set") {

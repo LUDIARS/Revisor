@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { decryptString, encryptString, isEncryptedBlob } from "./crypto.mjs";
 import { RevisorError } from "./errors.mjs";
+import { isDiscordWebhookUrl } from "./discord-webhook.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { defaultFastLaneSlots, fastLaneReservation } from "./review-lane.mjs";
 
@@ -417,6 +418,45 @@ export function hasWorkflowToken(env = process.env) {
   } catch {
     return false;
   }
+}
+
+export function writeDiscordWebhookUrl(url, env = process.env) {
+  const value = String(url ?? "").trim();
+  if (!isDiscordWebhookUrl(value)) {
+    throw new RevisorError(
+      "Discord webhook URL must be a https://discord.com/api/webhooks/... URL.",
+    );
+  }
+  const configPath = resolveConfigPath(env);
+  const config = readConfig(env);
+  config.secrets.discordWebhookUrl = encryptString(
+    value,
+    readOrCreateMasterKey(configPath, env),
+  );
+  writeConfig(config, env);
+}
+
+export function removeDiscordWebhookUrl(env = process.env) {
+  const config = readConfig(env);
+  delete config.secrets.discordWebhookUrl;
+  writeConfig(config, env);
+}
+
+export function optionalDiscordWebhookUrl(env = process.env) {
+  const configPath = resolveConfigPath(env);
+  const blob = readConfig(env).secrets.discordWebhookUrl;
+  if (blob === undefined) return null;
+  try {
+    const value = decryptString(blob, readMasterKey(configPath, env)).trim();
+    if (!isDiscordWebhookUrl(value)) throw new Error("invalid webhook URL");
+    return value;
+  } catch (error) {
+    throw new RevisorError("Discord webhook URL could not be decrypted.", { cause: error });
+  }
+}
+
+export function hasDiscordWebhookUrl(env = process.env) {
+  return optionalDiscordWebhookUrl(env) !== null;
 }
 
 export function readGitHubAppCredentials(env = process.env) {

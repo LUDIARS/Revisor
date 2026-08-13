@@ -152,3 +152,21 @@ export async function notifyPullRequestLifecycle({
     text: pullRequestLifecycleMessage(event, pullRequest),
   });
 }
+
+/**
+ * lifecycle 通知を Revisor 自身の Discord webhook へ直接送る。Cc egress の
+ * 提出セッションの active 状態には依存しないため、CLI 提出 PR も通知できる。
+ */
+export async function notifyPullRequestLifecycleWebhook({
+  event,
+  pullRequest,
+  url,
+  post,
+}) {
+  if (!url || !pullRequest) return false;
+  return post({
+    url,
+    username: "Revisor",
+    text: pullRequestLifecycleMessage(event, pullRequest),
+  });
+}

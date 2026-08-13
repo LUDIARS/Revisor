@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   notifyPullRequestLifecycle,
+  notifyPullRequestLifecycleWebhook,
   pullRequestLifecycleMessage,
   pullRequestLifecycleTone,
 } from "../src/pr-lifecycle-notice.mjs";
@@ -137,6 +138,30 @@ test("does not publish a lifecycle notice for a sessionless PR", async () => {
     },
   });
   assert.equal(sent, false);
+  assert.equal(called, false);
+});
+
+test("posts lifecycle notices directly to a configured Discord webhook", async () => {
+  let input;
+  const sent = await notifyPullRequestLifecycleWebhook({
+    event: "created",
+    pullRequest: pr({ sessionId: null }),
+    url: "https://discord.com/api/webhooks/123456/abc",
+    post: async (value) => { input = value; return true; },
+  });
+  assert.equal(sent, true);
+  assert.equal(input.url, "https://discord.com/api/webhooks/123456/abc");
+  assert.equal(input.username, "Revisor");
+  assert.match(input.text, /LUDIARS\/Revisor#12/);
+});
+
+test("does not invoke a webhook post without a URL", async () => {
+  let called = false;
+  assert.equal(await notifyPullRequestLifecycleWebhook({
+    event: "created",
+    pullRequest: pr(),
+    post: async () => { called = true; return true; },
+  }), false);
   assert.equal(called, false);
 });
 

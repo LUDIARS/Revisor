@@ -1,4 +1,4 @@
-import { readSettings } from "./config.mjs";
+import { optionalDiscordWebhookUrl, readSettings } from "./config.mjs";
 import {
   notifyConcordia,
   notifyConcordiaChat,
@@ -8,7 +8,11 @@ import { JobStore, resolveJobsPath } from "./job-store.mjs";
 import { LocalPrReporter } from "./local-reporter.mjs";
 import { LocalPrService } from "./local-pr-service.mjs";
 import { PersistentPrReviewQueue } from "./persistent-queue.mjs";
-import { notifyPullRequestLifecycle } from "./pr-lifecycle-notice.mjs";
+import {
+  notifyPullRequestLifecycle,
+  notifyPullRequestLifecycleWebhook,
+} from "./pr-lifecycle-notice.mjs";
+import { postDiscordWebhook } from "./discord-webhook.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
 import { resolveDbPath } from "./revisor-db.mjs";
@@ -29,6 +33,7 @@ export function createReviewContext({
   stateStore,
   jobStore,
   startWorker,
+  postWebhook = postDiscordWebhook,
 } = {}) {
   const settings = readSettings(env);
   const statePath = stateStore?.path ?? resolveDbPath(env);
@@ -47,12 +52,23 @@ export function createReviewContext({
     baseUrl: optionalConcordiaUrl(cwd, readSettings(env).concordiaContextEnabled),
     notify: notifyConcordia,
   });
-  const announceLifecycle = (event, pullRequest) => notifyPullRequestLifecycle({
-    event,
-    pullRequest,
-    baseUrl: optionalConcordiaUrl(cwd, true),
-    notify: notifyConcordiaChat,
-  });
+  const announceLifecycle = async (event, pullRequest) => {
+    const webhookUrl = optionalDiscordWebhookUrl(env);
+    if (webhookUrl) {
+      return notifyPullRequestLifecycleWebhook({
+        event,
+        pullRequest,
+        url: webhookUrl,
+        post: postWebhook,
+      });
+    }
+    return notifyPullRequestLifecycle({
+      event,
+      pullRequest,
+      baseUrl: optionalConcordiaUrl(cwd, true),
+      notify: notifyConcordiaChat,
+    });
+  };
   const reporter = new LocalPrReporter(store, {
     afterCompleted: (id) => localPrService?.autoMergeIfEligible(id),
     notifyCompletion: announceCompletion,

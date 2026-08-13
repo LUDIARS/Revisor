@@ -7,6 +7,8 @@ import {
   readAllowedHosts,
   readSettings,
   hasWorkflowToken,
+  hasDiscordWebhookUrl,
+  optionalDiscordWebhookUrl,
   hasGitHubAppCredentials,
   readGitHubAppCredentials,
   readWorkflowToken,
@@ -14,6 +16,8 @@ import {
   writeWorkflowToken,
   writeGitHubAppCredentials,
   removeGitHubAppCredentials,
+  removeDiscordWebhookUrl,
+  writeDiscordWebhookUrl,
   writeSettings,
 } from "../src/config.mjs";
 
@@ -28,6 +32,28 @@ function fixture() {
     },
   };
 }
+
+test("encrypts, reads, and removes the Discord webhook URL", () => {
+  const state = fixture();
+  const webhookUrl = "https://discord.com/api/webhooks/123456/abc";
+  try {
+    assert.equal(optionalDiscordWebhookUrl(state.env), null);
+    assert.equal(hasDiscordWebhookUrl(state.env), false);
+    writeDiscordWebhookUrl(webhookUrl, state.env);
+    assert.equal(optionalDiscordWebhookUrl(state.env), webhookUrl);
+    assert.equal(hasDiscordWebhookUrl(state.env), true);
+    assert.equal(readFileSync(state.path, "utf8").includes(webhookUrl), false);
+    assert.throws(
+      () => writeDiscordWebhookUrl("https://example.com/webhook", state.env),
+      /Discord webhook URL must be a https:\/\/discord\.com\/api\/webhooks\/\.\.\. URL/,
+    );
+    removeDiscordWebhookUrl(state.env);
+    assert.equal(optionalDiscordWebhookUrl(state.env), null);
+    assert.equal(hasDiscordWebhookUrl(state.env), false);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
 
 test("stores settings and encrypts local workflow secrets", () => {
   const state = fixture();
