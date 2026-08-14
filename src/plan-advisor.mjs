@@ -22,8 +22,10 @@ export async function resolveAugurCli(augurFolder) {
   if (typeof augurFolder !== "string" || !augurFolder.trim()) {
     throw new Error("Augur folder is not configured");
   }
-  const cliPath = join(resolve(augurFolder), ...AUGUR_CLI_RELATIVE_PATH);
+  const resolvedFolder = resolve(augurFolder);
+  const cliPath = join(resolvedFolder, ...AUGUR_CLI_RELATIVE_PATH);
   await access(cliPath);
+  process.stderr.write(`[plan-advisor] augurFolder resolved to ${JSON.stringify(resolvedFolder)}\n`);
   return cliPath;
 }
 

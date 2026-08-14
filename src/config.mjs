@@ -5,7 +5,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { decryptString, encryptString, isEncryptedBlob } from "./crypto.mjs";
 import { RevisorError } from "./errors.mjs";
@@ -89,6 +89,18 @@ export function resolveConfigPath(
 
 function resolveKeyPath(configPath, env) {
   return env[KEY_PATH_ENV] ?? join(dirname(configPath), "revisor.config.key");
+}
+
+// anatomiaFolder / augurFolder は resolve(anatomiaFolder) で cwd 基準に解決されるため、
+// 相対パスのまま持つと呼び出し元プロセスの cwd 次第で別フォルダを指す
+// (2026-08-09 実障害: "../Anatomia" が cwd で揺れた)。cwd ではなく設定ファイルの
+// 置き場所という固定された基準で絶対化する。
+export function resolveToolFolder(input, env = process.env) {
+  const trimmed = typeof input === "string" ? input.trim() : "";
+  if (!trimmed) return trimmed;
+  if (isAbsolute(trimmed)) return trimmed;
+  const configDir = dirname(resolveConfigPath(env));
+  return resolve(configDir, trimmed);
 }
 
 function readMasterKey(configPath, env) {
@@ -180,9 +192,8 @@ export function readSettings(env = process.env) {
     // allowed to steal the last standard slot; fall back to the safe default.
   }
   return {
-    anatomiaFolder: typeof value.anatomiaFolder === "string"
-      ? value.anatomiaFolder
-      : base.anatomiaFolder,
+    // レガシー設定 ("../Anatomia" 等) にも効くよう読み取り時点で絶対パス化する。
+    anatomiaFolder: resolveToolFolder(value.anatomiaFolder, env) || base.anatomiaFolder,
     anatomiaReviewGateEnabled: value.anatomiaReviewGateEnabled !== false,
     fallbackReviewer: value.fallbackReviewer === "claude-opus"
       ? "claude-opus"
@@ -216,7 +227,7 @@ export function readSettings(env = process.env) {
     planAdvisor: PLAN_ADVISOR_VALUES.has(value.planAdvisor)
       ? value.planAdvisor
       : base.planAdvisor,
-    augurFolder: typeof value.augurFolder === "string" ? value.augurFolder : base.augurFolder,
+    augurFolder: resolveToolFolder(value.augurFolder, env) || base.augurFolder,
     securityScanEnabled: value.securityScanEnabled !== false,
     securityFailOnSeverity: SECURITY_SEVERITIES.has(value.securityFailOnSeverity)
       ? value.securityFailOnSeverity
@@ -236,10 +247,11 @@ export function readSettings(env = process.env) {
 }
 
 export function writeSettings(settings, env = process.env) {
-  const anatomiaFolder = typeof settings?.anatomiaFolder === "string"
+  const anatomiaFolderInput = typeof settings?.anatomiaFolder === "string"
     ? settings.anatomiaFolder.trim()
     : "";
-  if (!anatomiaFolder) throw new RevisorError("Anatomia folder is required.");
+  if (!anatomiaFolderInput) throw new RevisorError("Anatomia folder is required.");
+  const anatomiaFolder = resolveToolFolder(anatomiaFolderInput, env);
   if (
     settings.fallbackReviewer !== "codex-sol"
     && settings.fallbackReviewer !== "claude-opus"
@@ -301,7 +313,7 @@ export function writeSettings(settings, env = process.env) {
   }
   const augurFolder = settings.augurFolder === undefined
     ? current.augurFolder
-    : String(settings.augurFolder).trim();
+    : resolveToolFolder(String(settings.augurFolder).trim(), env);
   if (planAdvisor === "augur" && !augurFolder) {
     throw new RevisorError("Augur folder is required when Augur plans the review.");
   }

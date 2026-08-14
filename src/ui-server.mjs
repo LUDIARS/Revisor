@@ -3,6 +3,7 @@ import {
   hasGitHubAppCredentials,
   readAllowedHosts,
   readSettings,
+  resolveToolFolder,
   writeAllowedHosts,
   writeWorkflowToken,
   writeGitHubAppCredentials,
@@ -144,7 +145,9 @@ export function createUiRequestHandler({
             "Allowed hosts are saved from PUT /api/settings/allowed-hosts.",
           );
         }
-        await resolveAnatomiaCli(body.anatomiaFolder);
+        // Validate the same absolute location that writeSettings persists.
+        // Checking the raw relative path here would use the server cwd instead.
+        await resolveAnatomiaCli(resolveToolFolder(body.anatomiaFolder, env));
         const settings = writeSettings(body, env);
         if (typeof body.workflowToken === "string" && body.workflowToken.trim()) {
           writeWorkflowToken(body.workflowToken, env);

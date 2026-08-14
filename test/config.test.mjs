@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import {
   readAllowedHosts,
@@ -50,6 +50,80 @@ test("encrypts, reads, and removes the Discord webhook URL", () => {
     removeDiscordWebhookUrl(state.env);
     assert.equal(optionalDiscordWebhookUrl(state.env), null);
     assert.equal(hasDiscordWebhookUrl(state.env), false);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("resolves a relative anatomiaFolder to an absolute path on read, basis = config file directory (legacy config, cwd-independent)", () => {
+  // 2026-08-09 実障害: %LOCALAPPDATA%\LUDIARS\revisor.config.json に
+  // anatomiaFolder="../Anatomia" が保存されており、resolveAnatomiaCli() が
+  // 呼び出し元プロセスの cwd を基準に解決するため cwd 次第で別フォルダを指した。
+  // 基準は cwd ではなく設定ファイルの置き場所 (dirname(configPath)) に固定する。
+  const state = fixture();
+  try {
+    writeFileSync(state.path, JSON.stringify({
+      version: 1,
+      settings: { anatomiaFolder: "../Anatomia" },
+      secrets: {},
+    }), "utf8");
+    const resolved = readSettings(state.env).anatomiaFolder;
+    assert.ok(resolved.startsWith("Anatomia") === false, "must not stay relative");
+    assert.equal(resolved.endsWith("Anatomia"), true);
+    assert.equal(resolved, resolve(state.directory, "..", "Anatomia"));
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("resolved anatomiaFolder is independent of process cwd", () => {
+  const state = fixture();
+  const originalCwd = process.cwd();
+  try {
+    writeFileSync(state.path, JSON.stringify({
+      version: 1,
+      settings: { anatomiaFolder: "../Anatomia" },
+      secrets: {},
+    }), "utf8");
+    const fromOriginalCwd = readSettings(state.env).anatomiaFolder;
+    process.chdir(tmpdir());
+    const fromDifferentCwd = readSettings(state.env).anatomiaFolder;
+    assert.equal(fromDifferentCwd, fromOriginalCwd);
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("writeSettings persists an absolute anatomiaFolder even when given a relative one", () => {
+  const state = fixture();
+  try {
+    writeSettings({
+      anatomiaFolder: "../Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+    }, state.env);
+    const stored = JSON.parse(readFileSync(state.path, "utf8"));
+    assert.notEqual(stored.settings.anatomiaFolder, "../Anatomia");
+    assert.equal(stored.settings.anatomiaFolder, resolve(state.directory, "..", "Anatomia"));
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("writeSettings persists an absolute augurFolder even when given a relative one", () => {
+  const state = fixture();
+  try {
+    writeSettings({
+      anatomiaFolder: "/abs/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+      planAdvisor: "augur",
+      augurFolder: "../Augur",
+    }, state.env);
+    const stored = JSON.parse(readFileSync(state.path, "utf8"));
+    assert.notEqual(stored.settings.augurFolder, "../Augur");
+    assert.equal(stored.settings.augurFolder, resolve(state.directory, "..", "Augur"));
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

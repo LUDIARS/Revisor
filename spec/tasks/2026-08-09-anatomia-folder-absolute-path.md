@@ -42,3 +42,19 @@ worktree を指していた件。いずれも「動いてはいるが対象が�
 
 - `src/`
 - `spec/`
+
+## 実装状況 (2026-08-15)
+
+`src/config.mjs` に `resolveToolFolder(input, env)` を追加し、`readSettings`/`writeSettings`
+の両方で `anatomiaFolder`/`augurFolder` を絶対パス化する。基準は cwd ではなく
+`dirname(resolveConfigPath(env))` (設定ファイルの置き場所) に固定した。読み取り時にも
+絶対化するため、既に相対パスで保存済みのレガシー設定にも即座に効く。
+設定 API の存在確認も同じ `resolveToolFolder` を通すため、検証対象と保存先がずれない。
+
+`src/anatomia.mjs` の `resolveAnatomiaCli` と `src/plan-advisor.mjs` の `resolveAugurCli` に
+解決結果を stderr へ 1 行出す診断ログを追加した (`[anatomia] anatomiaFolder resolved to ...` /
+`[plan-advisor] augurFolder resolved to ...`)。パスは JSON 文字列として出力し、設定値中の
+改行などでログの行境界を崩せないようにしている。
+
+設定変更は既存の token ゲート付き `writeSettings` 経由のみで、`revisor.config.json` を
+直接編集していない。

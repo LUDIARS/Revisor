@@ -47,8 +47,10 @@ export async function resolveAnatomiaCli(anatomiaFolder) {
   if (typeof anatomiaFolder !== "string" || !anatomiaFolder.trim()) {
     throw new Error("Anatomia folder is not configured");
   }
-  const cliPath = join(resolve(anatomiaFolder), "bin", "anatomia.mjs");
+  const resolvedFolder = resolve(anatomiaFolder);
+  const cliPath = join(resolvedFolder, "bin", "anatomia.mjs");
   await access(cliPath);
+  process.stderr.write(`[anatomia] anatomiaFolder resolved to ${JSON.stringify(resolvedFolder)}\n`);
   return cliPath;
 }
 
