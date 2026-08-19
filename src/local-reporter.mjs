@@ -27,6 +27,7 @@ function anatomiaGateProjection(result) {
     status: gate.status,
     message: gate.message,
     reasons: Array.isArray(gate.reasons) ? gate.reasons : [],
+    advisories: Array.isArray(gate.advisories) ? gate.advisories : [],
   };
 }
 

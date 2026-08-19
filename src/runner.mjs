@@ -584,7 +584,11 @@ export function createPrReviewRunner({
       // the local PR identity that owns it, never an ambient mutable request.
       const executeReview = (options) => runStage(REVIEW_WORK_STAGES.REVIEW, options, 0);
       const executeTests = (options) => runStage(REVIEW_WORK_STAGES.TEST, options, 1);
-      const executeAnalysis = (options) => runStage(REVIEW_WORK_STAGES.ANALYZE, options, 1);
+      // Every PR analysis (baseline, front gate, final) goes through here, so the
+      // dual-layer enforcement decision is made once from settings.
+      const enforceDualLayerDomainGate = settings.anatomiaDualLayerGateMode === "enforced";
+      const executeAnalysis = (options) =>
+        runStage(REVIEW_WORK_STAGES.ANALYZE, { ...options, enforceDualLayerDomainGate }, 1);
       const executeInitialAnalysis = (options) =>
         runStage(REVIEW_WORK_STAGES.INITIAL_ANALYZE, options, 1);
       const executeSecurity = (options) => runStage(REVIEW_WORK_STAGES.SECURITY, options, 2);

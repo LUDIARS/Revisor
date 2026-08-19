@@ -467,3 +467,93 @@ test("blocks on a security result the policy cannot read", () => {
   const empty = evaluate(analysis(), { security: {} });
   assert.deepEqual(empty.reasons, ["the security scan produced no usable result"]);
 });
+
+// --- Anatomia dual-layer domain gate (advisory by default, enforced by flag) ---
+
+function dualLayer(mode, { unclassifiedAnchors = [], unownedClauses = [] } = {}) {
+  const programWouldBlock = unclassifiedAnchors.length > 0;
+  const businessWouldBlock = unownedClauses.length > 0;
+  return {
+    program: {
+      mode,
+      pass: !programWouldBlock,
+      wouldBlock: programWouldBlock,
+      blocking: mode === "enforced" && programWouldBlock,
+      unclassifiedAnchors,
+      businessUnownedAnchors: [],
+    },
+    business: {
+      mode,
+      pass: !businessWouldBlock,
+      wouldBlock: businessWouldBlock,
+      blocking: mode === "enforced" && businessWouldBlock,
+      skippedForDependencyOnlyChange: false,
+      unownedClauses,
+      programUnrefinedClauses: [],
+    },
+  };
+}
+
+function withDualLayer(base, layers) {
+  return {
+    ...base,
+    domain: { ...base.domain, dualLayer: layers.program },
+    spec: { changedFilesWithoutSpec: [], dualLayer: layers.business },
+  };
+}
+
+test("reports advisory dual-layer findings without blocking the merge", () => {
+  const outcome = evaluate(withDualLayer(analysis(), dualLayer("advisory", {
+    unclassifiedAnchors: ["fn:a", "fn:b"],
+    unownedClauses: [{ id: "c1", sourceFile: "spec/x.md", heading: "X" }],
+  })));
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, [
+    "Anatomia dual-layer (program): 2 changed anchor(s) unclassified",
+    "Anatomia dual-layer (business): 1 spec clause(s) unowned",
+  ]);
+});
+
+test("promotes dual-layer findings to blocking reasons only when Anatomia ran enforced", () => {
+  const outcome = evaluate(withDualLayer(analysis(), dualLayer("enforced", {
+    unclassifiedAnchors: ["fn:a"],
+  })));
+  assert.deepEqual(outcome.reasons, [
+    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+  ]);
+  assert.deepEqual(outcome.advisories, []);
+});
+
+test("a passing dual-layer gate adds neither reasons nor advisories", () => {
+  const outcome = evaluate(withDualLayer(analysis(), dualLayer("enforced")));
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, []);
+});
+
+test("keeps the legacy target-domain verdict alongside the dual-layer advisory", () => {
+  const legacy = analysis();
+  legacy.domain.hasTargetDomain = false;
+  const outcome = evaluate(withDualLayer(legacy, dualLayer("advisory", {
+    unclassifiedAnchors: ["fn:changed"],
+  })));
+  assert.deepEqual(outcome.reasons, ["target domain is still missing"]);
+  assert.deepEqual(outcome.advisories, [
+    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+  ]);
+});
+
+test("ignores an analysis from an Anatomia that has no dual-layer gate", () => {
+  const outcome = evaluate(analysis());
+  assert.equal("dualLayer" in outcome, false);
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, []);
+});
+
+test("a skipped domain review also skips the dual-layer verdict", () => {
+  const outcome = evaluate(
+    withDualLayer(analysis(), dualLayer("enforced", { unclassifiedAnchors: ["fn:a"] })),
+    { domainReviewEnabled: false },
+  );
+  assert.deepEqual(outcome.reasons, []);
+  assert.deepEqual(outcome.advisories, ["Anatomia domain review was skipped by cost validation mode"]);
+});

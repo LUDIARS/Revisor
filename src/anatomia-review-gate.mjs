@@ -18,7 +18,7 @@ function unavailableAnalysis(reason) {
 // result. That keeps a blocking Anatomia finding from reaching a model only to
 // be reported again after its review has already spent capacity.
 export function evaluateAnatomiaReviewGate({ analysis, cliPath, plan, classification }) {
-  const { reasons: gateReasons } = gateOutcome({
+  const { reasons: gateReasons, advisories } = gateOutcome({
     finalAnalysis: analysis,
     complexityScoreDelta: null,
     threshold: Number.POSITIVE_INFINITY,
@@ -49,6 +49,9 @@ export function evaluateAnatomiaReviewGate({ analysis, cliPath, plan, classifica
       ? `Anatomia review gate found ${reasons.length} blocking reason(s).`
       : "Anatomia review gate passed.",
     reasons,
+    // Non-blocking findings (the advisory dual-layer domain gate among them) ride
+    // along so the persisted gate verdict shows what the front gate saw.
+    advisories,
     analysis,
     cliPath,
   };

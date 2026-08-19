@@ -34,10 +34,16 @@ function isSecurityModel(value) {
   return value === "" || SECURITY_MODEL_PATTERN.test(value);
 }
 
+const DUAL_LAYER_GATE_MODES = new Set(["advisory", "enforced"]);
+
 function defaults() {
   return {
     anatomiaFolder: "",
     anatomiaReviewGateEnabled: true,
+    // Anatomia's dual-layer domain gate (program / business) starts advisory:
+    // its findings are surfaced next to the legacy target-domain verdict so the
+    // two can be compared during migration, and only "enforced" lets it block.
+    anatomiaDualLayerGateMode: "advisory",
     fallbackReviewer: "codex-sol",
     concordiaContextEnabled: true,
     workerCount: 1,
@@ -195,6 +201,9 @@ export function readSettings(env = process.env) {
     // レガシー設定 ("../Anatomia" 等) にも効くよう読み取り時点で絶対パス化する。
     anatomiaFolder: resolveToolFolder(value.anatomiaFolder, env) || base.anatomiaFolder,
     anatomiaReviewGateEnabled: value.anatomiaReviewGateEnabled !== false,
+    anatomiaDualLayerGateMode: DUAL_LAYER_GATE_MODES.has(value.anatomiaDualLayerGateMode)
+      ? value.anatomiaDualLayerGateMode
+      : base.anatomiaDualLayerGateMode,
     fallbackReviewer: value.fallbackReviewer === "claude-opus"
       ? "claude-opus"
       : base.fallbackReviewer,
@@ -355,12 +364,21 @@ export function writeSettings(settings, env = process.env) {
       "Security scan model must be a bare model name (letters, digits, dot, dash, underscore).",
     );
   }
+  const anatomiaDualLayerGateMode = settings.anatomiaDualLayerGateMode === undefined
+    ? current.anatomiaDualLayerGateMode
+    : settings.anatomiaDualLayerGateMode;
+  if (!DUAL_LAYER_GATE_MODES.has(anatomiaDualLayerGateMode)) {
+    throw new RevisorError(
+      "Anatomia dual-layer gate mode must be one of: advisory, enforced.",
+    );
+  }
   const config = readConfig(env);
   config.settings = {
     anatomiaFolder,
     anatomiaReviewGateEnabled: settings.anatomiaReviewGateEnabled === undefined
       ? current.anatomiaReviewGateEnabled
       : settings.anatomiaReviewGateEnabled !== false,
+    anatomiaDualLayerGateMode,
     fallbackReviewer: settings.fallbackReviewer,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,

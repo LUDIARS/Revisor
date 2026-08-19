@@ -79,6 +79,36 @@ export function needsTargetDomain(
     && hasAnalyzableChangedAnchors(analysis);
 }
 
+// Anatomia's dual-layer domain gate (spec/feature/domain-dual-layer.md) reports
+// a program layer (`analysis.domain.dualLayer`: changed anchors without a
+// program domain) and a business layer (`analysis.spec.dualLayer`: changed spec
+// clauses no business domain owns). Both carry `wouldBlock` regardless of mode
+// and `blocking` only when Anatomia ran enforced. During the migration the
+// verdict is surfaced as an advisory next to the legacy target-domain check so
+// the two can be compared; it becomes a merge-blocking reason only when the
+// caller asked Anatomia to enforce it. An analysis without the field (an older
+// Anatomia) is left alone.
+export function dualLayerFindings(analysis) {
+  const findings = [];
+  const program = analysis?.domain?.dualLayer;
+  if (program && program.wouldBlock === true) {
+    const count = Array.isArray(program.unclassifiedAnchors) ? program.unclassifiedAnchors.length : 0;
+    findings.push({
+      message: `Anatomia dual-layer (program): ${count} changed anchor(s) unclassified`,
+      blocking: program.mode === "enforced" && program.blocking === true,
+    });
+  }
+  const business = analysis?.spec?.dualLayer;
+  if (business && business.wouldBlock === true) {
+    const count = Array.isArray(business.unownedClauses) ? business.unownedClauses.length : 0;
+    findings.push({
+      message: `Anatomia dual-layer (business): ${count} spec clause(s) unowned`,
+      blocking: business.mode === "enforced" && business.blocking === true,
+    });
+  }
+  return findings;
+}
+
 function failedGateNames(verify) {
   if (!verify || verify.pass) return [];
   const failed = (verify.gates ?? [])
@@ -142,6 +172,13 @@ export function gateOutcome({
         ? "target domain is not applicable (no production code change)"
         : "target domain is not applicable (no analyzable changed functions)",
     );
+  }
+  // The dual-layer verdict is part of the domain review, so a plan that skips
+  // the domain review skips it as well instead of re-raising it under a new name.
+  if (domainReviewEnabled) {
+    for (const finding of dualLayerFindings(finalAnalysis)) {
+      (finding.blocking ? reasons : advisories).push(finding.message);
+    }
   }
   if (finalAnalysis.quality.changedOrphans.length > 0) {
     advisories.push(

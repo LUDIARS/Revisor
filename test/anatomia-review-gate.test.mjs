@@ -88,3 +88,30 @@ test("records an unavailable Anatomia gate and permits LLM review", async () => 
   });
   assert.equal(result.analysis.architecture.verify.pass, true);
 });
+
+test("carries an advisory dual-layer finding through the front gate without blocking", async () => {
+  const analysis = passingAnalysis();
+  analysis.domain.dualLayer = {
+    mode: "advisory", pass: false, wouldBlock: true, blocking: false,
+    unclassifiedAnchors: ["fn:new"], businessUnownedAnchors: [],
+  };
+  const result = await gate({ analyze: async () => analysis });
+  assert.equal(result.status, "passed");
+  assert.deepEqual(result.reasons, []);
+  assert.deepEqual(result.advisories, [
+    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+  ]);
+});
+
+test("blocks at the front gate when the enforced dual-layer gate is blocking", async () => {
+  const analysis = passingAnalysis();
+  analysis.domain.dualLayer = {
+    mode: "enforced", pass: false, wouldBlock: true, blocking: true,
+    unclassifiedAnchors: ["fn:new"], businessUnownedAnchors: [],
+  };
+  const result = await gate({ analyze: async () => analysis });
+  assert.equal(result.status, "blocked");
+  assert.deepEqual(result.reasons, [
+    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+  ]);
+});

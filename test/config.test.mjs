@@ -135,6 +135,7 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.deepEqual(readSettings(state.env), {
       anatomiaFolder: "",
       anatomiaReviewGateEnabled: true,
+      anatomiaDualLayerGateMode: "advisory",
       fallbackReviewer: "codex-sol",
       concordiaContextEnabled: true,
       workerCount: 1,
@@ -176,6 +177,8 @@ test("stores settings and encrypts local workflow secrets", () => {
       securityScanModel: " gpt-5.6-terra ",
     }, state.env);
     assert.equal(readSettings(state.env).anatomiaReviewGateEnabled, false);
+    // Untouched by that write: the dual-layer gate keeps its advisory default.
+    assert.equal(readSettings(state.env).anatomiaDualLayerGateMode, "advisory");
     assert.deepEqual(readSettings(state.env).securityScanEnabled, false);
     assert.equal(readSettings(state.env).securityFailOnSeverity, "medium");
     assert.equal(readSettings(state.env).securityMaxCostUsd, 2.5);
@@ -443,6 +446,34 @@ test("rejects an out-of-range threshold, an unknown advisor and Augur without a 
       () => writeSettings({ ...base, planAdvisor: "augur", augurFolder: "" }, state.env),
       /Augur folder is required/,
     );
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("the Anatomia dual-layer gate mode defaults to advisory and only accepts advisory|enforced", () => {
+  const state = fixture();
+  try {
+    const required = {
+      anatomiaFolder: "E:/Document/Ars/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+    };
+    assert.equal(readSettings(state.env).anatomiaDualLayerGateMode, "advisory");
+    writeSettings({ ...required, anatomiaDualLayerGateMode: "enforced" }, state.env);
+    assert.equal(readSettings(state.env).anatomiaDualLayerGateMode, "enforced");
+    // A write that omits the key keeps the current value.
+    writeSettings({ ...required, workerCount: 2 }, state.env);
+    assert.equal(readSettings(state.env).anatomiaDualLayerGateMode, "enforced");
+    assert.throws(
+      () => writeSettings({ ...required, anatomiaDualLayerGateMode: "strict" }, state.env),
+      /advisory, enforced/,
+    );
+    // A persisted value the reader does not know falls back to advisory.
+    const stored = JSON.parse(readFileSync(state.path, "utf8"));
+    stored.settings.anatomiaDualLayerGateMode = "bogus";
+    writeFileSync(state.path, JSON.stringify(stored));
+    assert.equal(readSettings(state.env).anatomiaDualLayerGateMode, "advisory");
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

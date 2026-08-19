@@ -43,6 +43,11 @@ function parseJson(text, label) {
   }
 }
 
+function isBlockingDualLayerAnalysis(analysis) {
+  return analysis?.domain?.dualLayer?.blocking === true
+    || analysis?.spec?.dualLayer?.blocking === true;
+}
+
 export async function resolveAnatomiaCli(anatomiaFolder) {
   if (typeof anatomiaFolder !== "string" || !anatomiaFolder.trim()) {
     throw new Error("Anatomia folder is not configured");
@@ -81,15 +86,45 @@ export async function ensureInitialAnalysis({ cliPath, repoPath, repository }) {
   return { project, analysis };
 }
 
-export async function analyzePr({ cliPath, cwd, base }) {
-  const result = await runProcess({
+// The dual-layer domain gate is advisory unless Revisor is configured to enforce
+// it. Only then is the flag forwarded, so Anatomia's own exit code (which turns
+// non-zero on a blocking dual-layer finding) stays unchanged in advisory mode.
+export async function analyzePr({
+  cliPath,
+  cwd,
+  base,
+  enforceDualLayerDomainGate = false,
+  run = runProcess,
+}) {
+  const result = await run({
     command: process.execPath,
-    args: [cliPath, "pr-review", "--repo", cwd, "--base", base, "--json"],
+    args: [
+      cliPath,
+      "pr-review",
+      "--repo",
+      cwd,
+      "--base",
+      base,
+      "--json",
+      ...(enforceDualLayerDomainGate === true ? ["--enforce-dual-layer-domain-gate"] : []),
+    ],
     cwd,
     timeoutMs: 10 * 60_000,
     env: analysisEnv({ ANATOMIA_CACHE: "off" }),
   });
   if (!result.ok) {
+    // In enforced mode, Anatomia intentionally exits non-zero after emitting
+    // the JSON verdict for a blocking dual-layer finding. Preserve that verdict
+    // so the caller blocks the PR instead of treating enforcement as an
+    // unavailable analysis. Other non-zero exits remain analysis failures.
+    if (enforceDualLayerDomainGate === true) {
+      try {
+        const analysis = parseJson(result.stdout, "Anatomia PR analysis");
+        if (isBlockingDualLayerAnalysis(analysis)) return analysis;
+      } catch {
+        // The normal error below deliberately omits potentially sensitive CLI output.
+      }
+    }
     throw new Error(`Anatomia PR analysis failed: ${
       result.stderr.trim() || result.stdout.trim()
     }`);
