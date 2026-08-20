@@ -163,3 +163,121 @@ test("installs a managed pre-push hook without overwriting an existing hook", as
     rmSync(state.directory, { recursive: true, force: true });
   }
 });
+
+test("認可されたブランチ送出は通し、base の認可までは広げない", async () => {
+  const state = fixture();
+  const statePath = join(state.directory, "state.json");
+  const store = new LocalPrStore({ path: statePath });
+  store.registerRepository({
+    repository: "LUDIARS/Product",
+    rootPath: state.repoPath,
+    baseRef: "main",
+    testCases: [{ name: "unit" }],
+  });
+  try {
+    git(state.repoPath, "checkout", "-b", "feat/thing");
+    writeFileSync(join(state.repoPath, "feature.txt"), "safe feature\n", "utf8");
+    git(state.repoPath, "add", "feature.txt");
+    git(state.repoPath, "commit", "-m", "feature");
+    const headSha = git(state.repoPath, "rev-parse", "HEAD");
+
+    const branch = await guardMainPush({
+      repoPath: state.repoPath,
+      statePath,
+      input: `refs/heads/feat/thing ${headSha} refs/heads/feat/thing ${"0".repeat(40)}\n`,
+      authorizedBranchPublication: true,
+    });
+    assert.equal(branch.allowed, true);
+    assert.deepEqual(branch.blockedRefs ?? [], []);
+    assert.ok(branch.scannedAddedLines > 0);
+
+    // ブランチ送出の認可は base 送出の認可ではない。
+    const base = await guardMainPush({
+      repoPath: state.repoPath,
+      statePath,
+      input: `${headSha} ${headSha} refs/heads/main ${state.baseSha}\n`,
+      authorizedBranchPublication: true,
+    });
+    assert.equal(base.allowed, false);
+    assert.equal(base.publicationRequired, true);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("新規ブランチは tip だけでなく分岐点まで遡って漏洩を見る", async () => {
+  const state = fixture();
+  const statePath = join(state.directory, "state.json");
+  const store = new LocalPrStore({ path: statePath });
+  store.registerRepository({
+    repository: "LUDIARS/Product",
+    rootPath: state.repoPath,
+    baseRef: "main",
+    testCases: [{ name: "unit" }],
+  });
+  try {
+    git(state.repoPath, "checkout", "-b", "feat/leaky");
+    // 秘密は途中のコミットで入り、 tip では別ファイルしか触らない。
+    writeFileSync(
+      join(state.repoPath, "config.js"),
+      `const token = "${"gh" + "p_"}abcdefghijklmnopqrstuvwxyz123456";\n`,
+      "utf8",
+    );
+    git(state.repoPath, "add", "config.js");
+    git(state.repoPath, "commit", "-m", "unsafe middle");
+    writeFileSync(join(state.repoPath, "readme.txt"), "docs\n", "utf8");
+    git(state.repoPath, "add", "readme.txt");
+    git(state.repoPath, "commit", "-m", "safe tip");
+    const headSha = git(state.repoPath, "rev-parse", "HEAD");
+
+    const result = await guardMainPush({
+      repoPath: state.repoPath,
+      statePath,
+      input: `refs/heads/feat/leaky ${headSha} refs/heads/feat/leaky ${"0".repeat(40)}\n`,
+      authorizedBranchPublication: true,
+    });
+    assert.equal(result.allowed, false);
+    assert.equal(result.amendRequired, true);
+    assert.ok(result.findings.length > 0);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("途中で削除された秘密も送出履歴に残るため拒む", async () => {
+  const state = fixture();
+  const statePath = join(state.directory, "state.json");
+  const store = new LocalPrStore({ path: statePath });
+  store.registerRepository({
+    repository: "LUDIARS/Product",
+    rootPath: state.repoPath,
+    baseRef: "main",
+    testCases: [{ name: "unit" }],
+  });
+  try {
+    git(state.repoPath, "checkout", "-b", "feat/removed-secret");
+    writeFileSync(
+      join(state.repoPath, "config.js"),
+      `const token = "${"gh" + "p_"}abcdefghijklmnopqrstuvwxyz123456";\n`,
+      "utf8",
+    );
+    git(state.repoPath, "add", "config.js");
+    git(state.repoPath, "commit", "-m", "unsafe middle");
+    writeFileSync(join(state.repoPath, "config.js"), "const token = process.env.TOKEN;\n", "utf8");
+    git(state.repoPath, "add", "config.js");
+    git(state.repoPath, "commit", "-m", "remove secret");
+    const headSha = git(state.repoPath, "rev-parse", "HEAD");
+
+    const result = await guardMainPush({
+      repoPath: state.repoPath,
+      statePath,
+      input: `refs/heads/feat/removed-secret ${headSha} refs/heads/feat/removed-secret ${"0".repeat(40)}\n`,
+      authorizedBranchPublication: true,
+    });
+    assert.equal(result.allowed, false);
+    assert.equal(result.amendRequired, true);
+    assert.ok(result.findings.length > 0);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});

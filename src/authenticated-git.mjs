@@ -9,7 +9,7 @@ export function githubRemoteUrl(repository) {
   return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}.git`;
 }
 
-function authenticatedEnvironment(token, env) {
+function authenticatedEnvironment(token, env, { authorizedPublication = true } = {}) {
   const header = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
   return {
     ...env,
@@ -17,17 +17,25 @@ function authenticatedEnvironment(token, env) {
     GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
     GIT_CONFIG_VALUE_0: `Authorization: Basic ${header}`,
     GIT_TERMINAL_PROMPT: "0",
-    REVISOR_PUBLISHING: "1",
-    ALLOW_MAIN_PUSH: "1",
+    ...(authorizedPublication
+      ? { REVISOR_PUBLISHING: "1", ALLOW_MAIN_PUSH: "1" }
+      : {}),
   };
 }
 
-export async function runAuthenticatedGit({ cwd, args, token, env = process.env }) {
-  const result = await runProcess({
+export async function runAuthenticatedGit({
+  cwd,
+  args,
+  token,
+  env = process.env,
+  authorizedPublication = true,
+  run = runProcess,
+}) {
+  const result = await run({
     command: "git",
     args,
     cwd,
-    env: authenticatedEnvironment(token, env),
+    env: authenticatedEnvironment(token, env, { authorizedPublication }),
     timeoutMs: 120_000,
   });
   if (!result.ok) {

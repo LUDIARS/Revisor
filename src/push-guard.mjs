@@ -7,6 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { BRANCH_PUSH_ENV_FLAG } from "./branch-push-flag.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { LocalPrStore, redirectLegacyStorePath } from "./state-store.mjs";
 import { git } from "./workspace.mjs";
@@ -149,21 +150,33 @@ function parsePushLines(input) {
       record.localRef && record.localSha && record.remoteRef && record.remoteSha);
 }
 
-async function pushDiff(repoPath, record) {
-  if (ZERO_SHA.test(record.remoteSha)) {
-    return git(repoPath, [
-      "show",
-      "--format=",
-      "--no-ext-diff",
-      record.localSha,
-      "--",
-    ]);
+async function forkPoint(repoPath, baseRef, localSha) {
+  try {
+    return await git(repoPath, ["merge-base", `refs/heads/${baseRef}`, localSha]);
+  } catch {
+    // base がまだ無い / 到達しない (孤立ブランチ) 場合は分岐点が無い。
+    return null;
   }
+}
+
+async function pushDiff(repoPath, record, baseRef) {
+  let range;
+  if (ZERO_SHA.test(record.remoteSha)) {
+    // 新規 ref には remote 側の比較対象が無い。 base からの分岐点まで遡って走査する。
+    // 分岐点が無い孤立履歴は、到達可能な全コミットを走査する。
+    const fork = baseRef ? await forkPoint(repoPath, baseRef, record.localSha) : null;
+    range = fork ? `${fork}..${record.localSha}` : record.localSha;
+  } else {
+    range = `${record.remoteSha}..${record.localSha}`;
+  }
+  // A final-tree diff misses a secret added and later deleted in the same
+  // branch. GitHub receives every commit in this range, so scan every patch.
   return git(repoPath, [
-    "diff",
+    "log",
+    "--format=",
+    "--patch",
     "--no-ext-diff",
-    record.remoteSha,
-    record.localSha,
+    range,
     "--",
   ]);
 }
@@ -174,6 +187,7 @@ export async function guardMainPush({
   input,
   now = () => new Date().toISOString(),
   authorizedPublication = process.env.REVISOR_PUBLISHING === "1",
+  authorizedBranchPublication = process.env[BRANCH_PUSH_ENV_FLAG] === "1",
 }) {
   // 配布済み hook は旧 revisor.state.json のパスを焼き込んでいる。 再インストール
   // なしで database を見つけられるよう、旧パスはここで読み替える。
@@ -181,12 +195,16 @@ export async function guardMainPush({
   const repository = store.findRepositoryByPath(repoPath);
   if (!repository) throw new Error(`Repository is not registered in Revisor: ${repoPath}`);
   const pushes = parsePushLines(input);
-  const blockedRefs = pushes
-    .filter((record) =>
-      record.remoteRef.startsWith("refs/heads/")
-      && record.remoteRef !== `refs/heads/${repository.baseRef}`
-      && !ZERO_SHA.test(record.localSha))
-    .map((record) => record.remoteRef);
+  const branchPushes = pushes.filter((record) =>
+    record.remoteRef.startsWith("refs/heads/")
+    && record.remoteRef !== `refs/heads/${repository.baseRef}`
+    && !ZERO_SHA.test(record.localSha));
+  // 作業ブランチは既定では出さない。 通れるのは Revisor 自身のブランチ送出
+  // (`branch-push.mjs`) が旗を立てた子プロセスだけで、 直接の `git push` は
+  // これまでどおり落ちる。 base とタグの認可はこの旗では動かない。
+  const blockedRefs = authorizedBranchPublication
+    ? []
+    : branchPushes.map((record) => record.remoteRef);
   const checkedAt = now();
   if (blockedRefs.length > 0) {
     store.updatePushGuard(repository.repository, {
@@ -227,8 +245,9 @@ export async function guardMainPush({
   }
   let scannedAddedLines = 0;
   const findings = [];
-  for (const record of mainPushes) {
-    const result = scanAddedDiffForLeaks(await pushDiff(repoPath, record));
+  // 認可されたブランチ送出も GitHub へ出る。 base と同じ漏洩走査を通す。
+  for (const record of [...mainPushes, ...(authorizedBranchPublication ? branchPushes : [])]) {
+    const result = scanAddedDiffForLeaks(await pushDiff(repoPath, record, repository.baseRef));
     scannedAddedLines += result.scannedAddedLines;
     findings.push(...result.findings);
   }

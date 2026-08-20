@@ -1,6 +1,6 @@
 {
   "name": "remote-publication",
-  "description": "Publication of an approved squash commit to the registered GitHub base, with private prepared refs for retry and an optional human-selected major/minor tag and GitHub Release.",
+  "description": "Publication of an approved squash commit to the registered GitHub base, with private prepared refs for retry and an optional human-selected major/minor tag and GitHub Release, plus the separately authorized push of a working branch that never touches the base or tags.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -20,6 +20,12 @@
       "pathPattern": "(^|/)test/(?:authenticated\\-git|base\\-reconcile|base\\-relanding|deferred\\-publication|github\\-app|github\\-reachability|github\\-workflow\\-publication|manual\\-release|pending\\-publish|plain\\-git\\-publication|publication\\-coordinator|publication\\-state|publish\\-pending|push\\-guard|release\\-contracts|release\\-preparation|release\\-service|repository\\-workflow|version\\-root)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {
+      "pathPattern": "(^|/)src/(?:branch\\-push|branch\\-push\\-flag)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/branch\\-push\\.test\\.mjs$"
+    },
+    {
       "pathPattern": "(^|/)test/deferred-publish\\.test\\.mjs$"
     },
     {
@@ -32,10 +38,12 @@
     "base-publication",
     "atomic-release-publication",
     "release-version-selection",
-    "release-note-leakage-gate"
+    "release-note-leakage-gate",
+    "authorized-branch-push"
   ],
   "specRefs": [
-    "remote-publication — reviewed main and human-selected Release publication"
+    "remote-publication — reviewed main and human-selected Release publication",
+    "spec/plan/branch-push-design.md — authorized working-branch push"
   ],
   "rationale": "The same transaction owns recovery of the prepared squash, remote base/tag consistency, Release metadata, and local completion. Review admission and generic workspace primitives remain separate domains."
 }

@@ -11,6 +11,7 @@ import {
 } from "./config.mjs";
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
+import { pushBranch } from "./branch-push.mjs";
 import { option, runLocalPrCommand } from "./local-pr-commands.mjs";
 import { runReviewWorker } from "./worker-command.mjs";
 import { startRevisor } from "./server.mjs";
@@ -51,6 +52,8 @@ function printHelp() {
     "  revisor config discord-webhook remove",
     "  revisor version show --repo <path>",
     "  revisor version set <MAJOR.MINOR.PATCH> --repo <path>",
+    "  revisor push [--repo <path>] [--branch <name>] [--remote-branch <name>]",
+    "               [--force-with-lease] [--actor <label>]  # 作業ブランチだけを GitHub へ送る",
     "  revisor guard-push --repo <path> --state <path>  # managed hook only",
     "",
   ].join("\n"));
@@ -159,6 +162,20 @@ export async function main(args, { stdin = process.stdin } = {}) {
     }
     const version = await writeLocalVersion(repoPath, args[2]);
     process.stdout.write(`${version}\n`);
+    return 0;
+  }
+  if (args[0] === "push") {
+    const result = await pushBranch({
+      cwd: option(args, "--repo") ?? process.cwd(),
+      branch: option(args, "--branch"),
+      remoteBranch: option(args, "--remote-branch"),
+      forceWithLease: args.includes("--force-with-lease"),
+      actor: option(args, "--actor"),
+    });
+    process.stdout.write(
+      `Pushed ${result.repository} ${result.branch} -> ${result.remoteBranch} `
+      + `(${result.headSha.slice(0, 12)}).\n`,
+    );
     return 0;
   }
   if (args[0] === "guard-push") {
