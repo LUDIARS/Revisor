@@ -137,6 +137,8 @@ test("stores settings and encrypts local workflow secrets", () => {
       anatomiaReviewGateEnabled: true,
       anatomiaDualLayerGateMode: "advisory",
       fallbackReviewer: "codex-sol",
+      // 空文字は「モデルを強制しない」。
+      forcedReviewModel: "",
       concordiaContextEnabled: true,
       workerCount: 1,
       fastLaneSlots: 0,

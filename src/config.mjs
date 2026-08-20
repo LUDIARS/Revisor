@@ -12,6 +12,7 @@ import { RevisorError } from "./errors.mjs";
 import { isDiscordWebhookUrl } from "./discord-webhook.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { defaultFastLaneSlots, fastLaneReservation } from "./review-lane.mjs";
+import { isForcedReviewModel } from "./forced-review-model.mjs";
 
 const LOCAL_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CONFIG_PATH_ENV = "REVISOR_CONFIG_PATH";
@@ -45,6 +46,9 @@ function defaults() {
     // two can be compared during migration, and only "enforced" lets it block.
     anatomiaDualLayerGateMode: "advisory",
     fallbackReviewer: "codex-sol",
+    // 空文字は「強制しない」。差分規模から選ばれる tier ごとモデルを
+    // 踏み潰して全審査を1モデルに固定したいときだけ設定する。
+    forcedReviewModel: "",
     concordiaContextEnabled: true,
     workerCount: 1,
     fastLaneSlots: 0,
@@ -207,6 +211,9 @@ export function readSettings(env = process.env) {
     fallbackReviewer: value.fallbackReviewer === "claude-opus"
       ? "claude-opus"
       : base.fallbackReviewer,
+    forcedReviewModel: isForcedReviewModel(value.forcedReviewModel)
+      ? value.forcedReviewModel
+      : base.forcedReviewModel,
     concordiaContextEnabled: value.concordiaContextEnabled !== false,
     workerCount,
     fastLaneSlots,
@@ -280,6 +287,15 @@ export function writeSettings(settings, env = process.env) {
     throw new RevisorError(error instanceof Error ? error.message : String(error));
   }
   const current = readSettings(env);
+  // 未設定 (undefined) は現在値の維持、明示された値は登録済みモデルのみ。
+  // 未知の値を黙って "" に落とすと「強制したつもりで効いていない」状態に
+  // なるため、書き込み時点で拒否する。
+  const forcedReviewModel = settings.forcedReviewModel === undefined
+    ? current.forcedReviewModel
+    : settings.forcedReviewModel;
+  if (!isForcedReviewModel(forcedReviewModel)) {
+    throw new RevisorError("Forced review model is invalid.");
+  }
   const skipCostValidation = (key) => {
     if (settings[key] !== undefined) return settings[key] === true;
     if (settings.costValidationModeEnabled !== undefined) {
@@ -380,6 +396,7 @@ export function writeSettings(settings, env = process.env) {
       : settings.anatomiaReviewGateEnabled !== false,
     anatomiaDualLayerGateMode,
     fallbackReviewer: settings.fallbackReviewer,
+    forcedReviewModel,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,
     fastLaneSlots,

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { claudeSessionCapacityUnavailable } from "./claude-capacity.mjs";
+import { forcedReviewerFor } from "./forced-review-model.mjs";
 import { runNamedCli } from "./process.mjs";
 
 // Persisted reviewer ids identify a provider family for config compatibility.
@@ -11,13 +12,22 @@ export function reviewerInvocation(reviewer, {
   tier = "economy",
   effort = "medium",
   sessionId = null,
+  forcedModel = "",
 } = {}) {
+  // A forced model replaces the tier-derived one but must belong to the
+  // reviewer being invoked; the callers resolve the reviewer from the same
+  // registry, so a mismatch here is a wiring bug rather than bad config.
+  if (forcedModel && forcedReviewerFor(forcedModel) !== reviewer) {
+    throw new Error(
+      `Forced review model '${forcedModel}' does not belong to reviewer '${reviewer}'.`,
+    );
+  }
   if (reviewer === "claude-opus") {
     return {
       name: "claude",
       args: [
         "--model",
-        tier === "strong" ? "opus" : "sonnet",
+        forcedModel || (tier === "strong" ? "opus" : "sonnet"),
         "--effort",
         effort,
         "--permission-mode",
@@ -33,7 +43,7 @@ export function reviewerInvocation(reviewer, {
       args: [
         "exec",
         "--model",
-        tier === "strong" ? "gpt-5.6-sol" : "gpt-5.6-terra",
+        forcedModel || (tier === "strong" ? "gpt-5.6-sol" : "gpt-5.6-terra"),
         "-c",
         `model_reasoning_effort=${effort}`,
         "--sandbox",
@@ -63,17 +73,27 @@ export async function runReviewer({
   readOnly = false,
   tier = "economy",
   effort = "medium",
+  // 呼び出し側が明示的に渡す。既定を「設定ファイルを読む」にすると、
+  // レビューを呼ぶだけのテストがマシンの設定に左右される。注入点は
+  // review-work.mjs の REVIEW ステージ 1 箇所に集約する。
+  forcedModel = "",
 }, {
   runCli = runNamedCli,
   sessionIdFactory = randomUUID,
   detectClaudeCapacity = claudeSessionCapacityUnavailable,
 } = {}) {
-  const sessionId = reviewer === "claude-opus" ? sessionIdFactory() : null;
-  const invocation = reviewerInvocation(reviewer, {
+  // Every review path — judge, investigator, test autofix, narrative and the
+  // plan advisor — funnels into this function, so resolving the override here
+  // is what makes "forced" mean forced. Doing it at the selection sites would
+  // leave whichever caller was missed quietly running the old model.
+  const activeReviewer = forcedReviewerFor(forcedModel) ?? reviewer;
+  const sessionId = activeReviewer === "claude-opus" ? sessionIdFactory() : null;
+  const invocation = reviewerInvocation(activeReviewer, {
     readOnly,
     tier,
     effort,
     sessionId,
+    forcedModel,
   });
   const result = await runCli({
     ...invocation,
@@ -81,7 +101,7 @@ export async function runReviewer({
     stdin: prompt,
     timeoutMs,
   });
-  if (result.ok || reviewer !== "claude-opus") return result;
+  if (result.ok || activeReviewer !== "claude-opus") return result;
   const unavailable = await detectClaudeCapacity({ cwd, sessionId });
   if (!unavailable) return result;
   return {

@@ -17,6 +17,17 @@ const BODY = `
         </select>
       </div>
       <div class="field">
+        <label for="forced-review-model">レビューモデルの強制指定</label>
+        <select id="forced-review-model">
+          <option value="">強制しない（差分規模から自動選択）</option>
+          <option value="opus">Claude Opus に固定</option>
+          <option value="sonnet">Claude Sonnet に固定</option>
+          <option value="gpt-5.6-sol">Codex Sol に固定</option>
+          <option value="gpt-5.6-terra">Codex Terra に固定</option>
+        </select>
+        <span class="note">指定するとレビュアー選定・tier によるモデル選択・容量不足時の系列切替をすべて上書きし、全レビューがこのモデルで走ります。容量不足になっても別系列へは切り替わらず、審査が失敗として表面化します。</span>
+      </div>
+      <div class="field">
         <label class="check">
           <input id="anatomia-review-gate" type="checkbox">
           LLM レビュー前に Anatomia の機械ゲートを実行する
@@ -205,6 +216,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     const state = await request('/api/settings');
     document.querySelector('#anatomia-folder').value = state.settings.anatomiaFolder;
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
+    document.querySelector('#forced-review-model').value = state.settings.forcedReviewModel ?? '';
     document.querySelector('#anatomia-review-gate').checked = state.settings.anatomiaReviewGateEnabled;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
     document.querySelector('#fast-lane-slots').value = String(state.settings.fastLaneSlots);
@@ -272,6 +284,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
         body: JSON.stringify({
           anatomiaFolder: document.querySelector('#anatomia-folder').value,
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
+          forcedReviewModel: document.querySelector('#forced-review-model').value,
           anatomiaReviewGateEnabled: document.querySelector('#anatomia-review-gate').checked,
           workerCount: Number(document.querySelector('#worker-count').value),
           fastLaneSlots: Number(document.querySelector('#fast-lane-slots').value),

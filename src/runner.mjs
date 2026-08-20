@@ -15,6 +15,7 @@ import { reconcileNarrativeForReview } from "./pr-narrative.mjs";
 import { runPlannedTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { assessMergeRisk, assessRuntimeVerification } from "./merge-risk.mjs";
+import { forcedReviewerFor } from "./forced-review-model.mjs";
 import { advisePlan } from "./plan-advisor.mjs";
 import { runSecurityScan, skippedSecurityScan } from "./security-scan.mjs";
 import {
@@ -114,6 +115,7 @@ async function worktreeChangeFingerprint(cwd) {
 async function autofixFailingTests({
   request,
   reviewer,
+  forcedReviewModel = "",
   worktreePath,
   mergeBase,
   initialCi,
@@ -136,7 +138,7 @@ async function autofixFailingTests({
         timeoutMs: reviewerTimeoutMs,
         tier: "economy",
         effort: "low",
-      }, runReview);
+      }, runReview, { forcedModel: forcedReviewModel });
       activeReviewer = result.reviewer;
       if (!result.ok) return { ...result, changed: false };
       const profile = await readChangeProfile(worktreePath, mergeBase);
@@ -169,17 +171,29 @@ function testAutofixHumanQuestion(status) {
   return "Registered tests still fail after the bounded automated autofix attempts.";
 }
 
-export async function runReviewWithCapacityFallback(options, execute) {
+export async function runReviewWithCapacityFallback(
+  options,
+  execute,
+  { forcedModel = "" } = {},
+) {
   if (typeof execute !== "function") {
     throw new TypeError("A reviewer executor function is required.");
   }
-  const first = await execute(options);
+  // A forced model pins the reviewer family too, so the reported reviewer
+  // matches what actually ran instead of the one selection asked for.
+  const forcedReviewer = forcedReviewerFor(forcedModel);
+  const reviewer = forcedReviewer ?? options.reviewer;
+  const first = await execute({ ...options, reviewer });
   if (first.ok || !reviewerCapacityUnavailable(first)) {
-    return { ...first, reviewer: options.reviewer };
+    return { ...first, reviewer };
   }
-  const reviewer = alternateReviewer(options.reviewer);
-  const second = await execute({ ...options, reviewer });
-  return { ...second, reviewer };
+  // The capacity fallback exists to keep reviews moving by switching provider
+  // family. While a model is forced that switch would silently review with the
+  // model the operator excluded, so the capacity failure is surfaced instead.
+  if (forcedReviewer) return { ...first, reviewer };
+  const alternate = alternateReviewer(reviewer);
+  const second = await execute({ ...options, reviewer: alternate });
+  return { ...second, reviewer: alternate };
 }
 
 // The baseline analysis exists only to produce a complexity delta, and the
@@ -593,7 +607,9 @@ export function createPrReviewRunner({
         runStage(REVIEW_WORK_STAGES.INITIAL_ANALYZE, options, 1);
       const executeSecurity = (options) => runStage(REVIEW_WORK_STAGES.SECURITY, options, 2);
       const reviewWithFallback = (options) =>
-        runReviewWithCapacityFallback(options, executeReview);
+        runReviewWithCapacityFallback(options, executeReview, {
+          forcedModel: settings.forcedReviewModel,
+        });
       // The plan is decided from the submitted diff, before any expensive stage
       // runs, so the change profile is the first thing this review establishes.
       let submitted = await readChangeProfile(worktrees.head, worktrees.mergeBase);
@@ -673,10 +689,15 @@ export function createPrReviewRunner({
         env,
         transport,
       });
-      let externalReviewer = reviewerForProvider(
-        authorContext?.provider,
-        settings.fallbackReviewer,
-      );
+      // The forced model overrides the author-based cross-check selection so
+      // the plan advisor and narrative reconciliation — which call the reviewer
+      // directly rather than through the capacity wrapper — report and run the
+      // same reviewer as every other stage.
+      let externalReviewer = forcedReviewerFor(settings.forcedReviewModel)
+        ?? reviewerForProvider(
+          authorContext?.provider,
+          settings.fallbackReviewer,
+        );
       let plan = await advisePlan({
         // The default is deterministic. An explicitly configured advisor is a
         // separate, visible model cost and remains subject to the plan floor.
@@ -802,6 +823,7 @@ export function createPrReviewRunner({
           runReview: executeReview,
           runTests: executeTests,
           reviewerTimeoutMs,
+          forcedReviewModel: settings.forcedReviewModel,
         });
         externalReviewer = autofix.reviewer;
         initialCi = autofix.ci;
@@ -1052,6 +1074,7 @@ export function createPrReviewRunner({
           runReview: executeReview,
           runTests: executeTests,
           reviewerTimeoutMs,
+          forcedReviewModel: settings.forcedReviewModel,
         });
         reviewer = autofix.reviewer;
         finalCi = autofix.ci;

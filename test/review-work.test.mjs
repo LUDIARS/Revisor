@@ -10,6 +10,7 @@ test("runs exactly the requested review stage", async () => {
     runTests: async (options) => { invoked.push(["tests", options]); return "tests"; },
     review: async (options) => { invoked.push(["review", options]); return "review"; },
     security: async (options) => { invoked.push(["security", options]); return "security"; },
+    forcedReviewModel: () => "",
   };
   const cases = [
     [REVIEW_WORK_STAGES.ANALYZE, "analysis", "anatomia"],
@@ -22,7 +23,12 @@ test("runs exactly the requested review stage", async () => {
   for (const [stage, result, executor] of cases) {
     const options = { stage };
     assert.equal(await runReviewWork({ stage, options }, executors), result);
-    assert.deepEqual(invoked.pop(), [executor, options]);
+    // レビューステージだけは強制モデルの解決結果を足して渡す。
+    // 他のステージは options をそのまま素通しする。
+    const expected = stage === REVIEW_WORK_STAGES.REVIEW
+      ? { forcedModel: "", ...options }
+      : options;
+    assert.deepEqual(invoked.pop(), [executor, expected]);
   }
 });
 
