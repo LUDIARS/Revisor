@@ -172,7 +172,7 @@ application domain を作ると、実在しない責務をカタログ等へ割�
   変更は `false`。
 - 適用先: `needsTargetDomain` を正本として、マージゲート、レビュアープロンプト、
   `humanQuestion`、マージリスクの `missing_domain` 加点が同じ signal を共有する。
-  テスト関数等が解析可能でも、対象ドメインの新設や `.anatomia/domains` への帰属を
+  テスト関数等が解析可能でも、対象ドメインの新設や `spec/domains` への帰属を
   要求しない。
 - 再判定: レビュー後の最終差分でも変更種別を再分類する。autofix が業務コードを
   追加した場合は `codeDomainRequired=true` に戻り、通常どおり対象ドメインを要求する。

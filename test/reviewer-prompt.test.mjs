@@ -16,6 +16,8 @@ function analysis({ anchors, hasTargetDomain = false }) {
 test("asks for a domain when Anatomia found unassigned changed functions", () => {
   const instruction = domainInstruction({ analysis: analysis({ anchors: ["fn:changed"] }) });
   assert.match(instruction, /Infer the target domain/);
+  assert.match(instruction, /spec\/domains/);
+  assert.doesNotMatch(instruction, /\.anatomia\/domains/);
   assert.match(instruction, /PR_GATE_NEEDS_HUMAN/);
 });
 

@@ -1,27 +1,20 @@
 {
   "name": "managed-git-runtime",
   "description": "Revisor が起動する Git executable と protected configuration の境界。Windows の managed Git 検証、SourceTree 拒否、cwd の command-scoped trust、および登録 source だけを許可する invocation-scoped global trust file を所有する。",
-  "presetRules": [
-    {
-      "preset": "couplingCap",
-      "params": {
-        "targetPattern": "src/(?:git-runtime|git-trust)\\.mjs$",
-        "by": "path",
-        "maxFanOut": 9007199254740991
-      }
-    }
-  ],
+  "presetRules": [],
+  "templateRules": [],
   "membership": [
     {
       "pathPattern": "(^|/)src/(?:git-runtime|git-trust)\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/(?:git-runtime|git-trust)\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "src/(?:git-runtime|git-trust)\\.mjs$"
     }
   ],
-  "templateRules": [],
   "cardTemplate": "Summarise the managed-git-runtime domain: verified Git executable selection, command-scoped cwd trust, and exact registered-source trust inherited by local transport without wildcard scope.",
-  "source": "spec-draft",
   "mechanics": [
     "managed-git-executable",
     "sourcetree-runtime-rejection",
@@ -33,6 +26,5 @@
     "managed-git-runtime — deterministic Git for review operations",
     "managed-git-runtime — Revisor-only global Git trust"
   ],
-  "rationale": "process.mjs は policy-neutral な子プロセス寿命を所有し、local-workspace はどの登録 source を clone/fetch するかを決める。この domain はその間で Git executable と Git protected config の正しい起動形だけを所有し、任意 process 実行や repository lifecycle を取り込まない。",
-  "updatedAt": "2026-08-09T00:00:00.000Z"
+  "rationale": "process.mjs は policy-neutral な子プロセス寿命を所有し、local-workspace はどの登録 source を clone/fetch するかを決める。この domain はその間で Git executable と Git protected config の正しい起動形だけを所有し、任意 process 実行や repository lifecycle を取り込まない。"
 }

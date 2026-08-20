@@ -20,7 +20,7 @@ export function domainInstruction({
     return [
       "Anatomia found no target domain for the changed functions.",
       "Infer the target domain from the PR diff and optional original-session context.",
-      "Add or update both an AIFormat-compatible spec and the minimal .anatomia/domains membership definition so the changed functions are attributable.",
+      "Add or update both an AIFormat-compatible spec and the minimal spec/domains membership definition so the changed functions are attributable.",
       "Do not invent a domain if the context is insufficient; include PR_GATE_NEEDS_HUMAN in your final response.",
     ].join(" ");
   }
@@ -29,7 +29,7 @@ export function domainInstruction({
       docsOnly
         ? "This change touches documentation files only, so documentation is its own domain."
         : "This change touches documentation and configuration files only, which declare settings rather than behaviour and own no code domain.",
-      "Do not add a code domain or .anatomia/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
+      "Do not add a code domain or spec/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
       docsOnly
         ? "Do check that the documentation stays consistent with the specs and behaviour it describes."
         : "Do check that the changed values stay consistent with the specs, schemas and behaviour that read them.",
@@ -40,7 +40,7 @@ export function domainInstruction({
   if (!codeDomainRequired) {
     return [
       "This change contains no production code (change kind 'code'), so it owns no application code domain even if tests or operational files contain parseable functions.",
-      "Do not add a code domain or .anatomia/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
+      "Do not add a code domain or spec/domains membership for it, and do not report PR_GATE_NEEDS_HUMAN for a missing target domain.",
       "Review the changed non-code artifact against the behaviour or contract it validates or configures.",
     ].join(" ");
   }

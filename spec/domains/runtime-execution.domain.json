@@ -1,0 +1,27 @@
+{
+  "name": "runtime-execution",
+  "description": "Policy-neutral child-process execution primitives used by Revisor adapters, including captured output, timeout termination, Windows shim handling, and per-call environment forwarding.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "src/process\\.mjs$"
+    },
+    {
+      "namePattern": "runNamedCli|runProcess"
+    },
+    {
+      "pathPattern": "(^|/)test/process\\.test\\.mjs$"
+    }
+  ],
+  "cardTemplate": "Summarise the runtime-execution domain: policy-neutral child-process invocation, timeout ownership, captured output, and environment forwarding.",
+  "mechanics": [
+    "child-process-invocation",
+    "timeout-termination",
+    "environment-forwarding"
+  ],
+  "specRefs": [
+    "runtime-execution — policy-neutral child-process boundary"
+  ],
+  "rationale": "Security-scan policy owns the meaning and lifecycle of CODEX_SECURITY_STATE_DIR. The generic process runner only forwards an optional environment and owns the spawned process lifecycle, so it remains reusable by CI and other adapters without importing review-gate policy."
+}

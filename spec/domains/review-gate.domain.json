@@ -1,43 +1,32 @@
 {
   "name": "review-gate",
   "description": "ローカル PR のマージ可否判定ポリシー。CI・Anatomia ゲート・leakage・セキュリティスキャン・complexity・レビュアー出力を集約して reasons (ブロック) / advisories (非ブロック) に振り分ける。業務コードを含まない変更は application domain の対象外とし、他の審査は維持する。セキュリティ finding・未完了スキャン・解釈できないスキャン結果はブロックし、設定無効以外のスキップは advisory とする。",
-  "presetRules": [
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
     {
-      "preset": "couplingCap",
-      "params": {
-        "targetPattern": "src/review-gate",
-        "by": "path",
-        "maxFanOut": 9007199254740991
-      }
+      "pathPattern": "src/review-gate"
     },
     {
-      "preset": "couplingCap",
-      "params": {
-        "targetPattern": "gateOutcome|isDocsOnlyChange|needsTargetDomain|buildGateResult|domainInstruction|classifyChange|assessMergeRisk",
-        "by": "name",
-        "maxFanOut": 9007199254740991
-      }
+      "pathPattern": "src/security-scan"
     },
     {
-      "preset": "couplingCap",
-      "params": {
-        "targetPattern": "src/security-scan",
-        "by": "path",
-        "maxFanOut": 9007199254740991
-      }
+      "namePattern": "gateOutcome|isDocsOnlyChange|needsTargetDomain|buildGateResult|domainInstruction|classifyChange|assessMergeRisk"
     },
     {
-      "preset": "couplingCap",
-      "params": {
-        "targetPattern": "runSecurityScan|scanArgs|scanEnv|extractFindings|sanitizeFinding|severityRank|skippedSecurityScan",
-        "by": "name",
-        "maxFanOut": 9007199254740991
-      }
+      "namePattern": "runSecurityScan|scanArgs|scanEnv|extractFindings|sanitizeFinding|severityRank|skippedSecurityScan"
+    },
+    {
+      "pathPattern": "(^|/)src/(?:anatomia\\-review\\-gate|change\\-classification|ci|leakage|merge\\-risk)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:anatomia\\-review\\-gate|change\\-classification|ci|leakage|merge\\-risk)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:review-gate|security-scan)\\.test\\.mjs$"
     }
   ],
-  "templateRules": [],
   "cardTemplate": "Summarise the \"review-gate\" domain: ローカル PR のマージ可否判定ポリシー (gate/advisory 判定・非コード変更の application domain 除外・セキュリティスキャン結果の扱い)。",
-  "source": "spec-draft",
   "mechanics": [
     "merge-gate-policy",
     "docs-only-relaxation",
@@ -54,6 +43,5 @@
     "security-scan — codex-security スキャンの起動と結果の正規化 (終了コード→status、保持は severity/rule/file/line のみ)",
     "security-scan — 環境変数 CODEX_SECURITY_STATE_DIR (スキャンごとの専用 state ディレクトリ / 綴り違いの除去 / 削除失敗を握り潰す)"
   ],
-  "rationale": "マージ可否の判定基準は runner (審査オーケストレーション) から独立した単一のポリシー責務。gateOutcome / needsTargetDomain を正本とし、レビュアープロンプト・humanQuestion も同じ判定を共有する。スキャナの起動は security-scan が担い、ゲートは status のみを解釈する。スキャナ起動時の環境 (state ディレクトリの隔離) も security-scan の責務で、process.mjs は環境を受け取るだけの汎用プリミティブとして domain 外に置く。",
-  "updatedAt": "2026-08-04T00:00:00.000Z"
+  "rationale": "マージ可否の判定基準は runner (審査オーケストレーション) から独立した単一のポリシー責務。gateOutcome / needsTargetDomain を正本とし、レビュアープロンプト・humanQuestion も同じ判定を共有する。スキャナの起動は security-scan が担い、ゲートは status のみを解釈する。スキャナ起動時の環境 (state ディレクトリの隔離) も security-scan の責務で、process.mjs は環境を受け取るだけの汎用プリミティブとして domain 外に置く。"
 }

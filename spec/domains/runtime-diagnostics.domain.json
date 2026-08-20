@@ -1,16 +1,8 @@
 {
   "name": "runtime-diagnostics",
   "description": "Revisor process and merge observability: bounded secret-safe JSONL delivery, process heartbeat and ending classification, merge-stage events, and review-worker lifecycle events. Logging is best-effort and must not change signal, merge, or worker behavior.",
-  "presetRules": [
-    {
-      "preset": "couplingCap",
-      "params": {
-        "targetPattern": "src/(?:runtime-diagnostics|service-log)\\.mjs$",
-        "by": "path",
-        "maxFanOut": 9007199254740991
-      }
-    }
-  ],
+  "presetRules": [],
+  "templateRules": [],
   "membership": [
     {
       "pathPattern": "(^|/)src/(?:runtime-diagnostics|service-log)\\.mjs$"
@@ -24,11 +16,18 @@
     },
     {
       "pathPattern": "(^|/)test/worker-pool\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "src/(?:runtime-diagnostics|service-log)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)src/(?:merge\\-failure\\-log)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:merge\\-failure\\-log)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     }
   ],
-  "templateRules": [],
   "cardTemplate": "Summarise the runtime-diagnostics domain: secret-safe JSONL delivery, heartbeat and process-ending evidence, merge-stage events, and review-worker lifecycle observation that never changes runtime behavior.",
-  "source": "spec-draft",
   "mechanics": [
     "structured-service-log",
     "process-ending-classification",
@@ -42,6 +41,5 @@
     "runtime-diagnostics — heartbeat interval and event-loop lag contract",
     "runtime-diagnostics — signal observation preserves shutdown behavior"
   ],
-  "rationale": "Diagnostics is an output boundary, not merge policy or worker scheduling. The dedicated modules own record safety and process observation; narrow worker membership covers only the lifecycle points that emit diagnostics, while local-merge and LocalPrService remain in their existing publication and PR-lifecycle domains.",
-  "updatedAt": "2026-08-11T00:00:00.000Z"
+  "rationale": "Diagnostics is an output boundary, not merge policy or worker scheduling. The dedicated modules own record safety and process observation; narrow worker membership covers only the lifecycle points that emit diagnostics, while local-merge and LocalPrService remain in their existing publication and PR-lifecycle domains."
 }

@@ -1,27 +1,26 @@
 {
   "name": "ui-http-boundary",
   "description": "ローカル UI の HTTP 受口。Host 認可 (loopback + 登録済み許可Host)、UI セッション認可、設定と許可Host の登録エンドポイントを担う。許可Host の登録は初期設定の成立を前提にしない独立した境界で、保存成功時だけプロセス内の許可一覧を差し替える。PR の審査判定や状態遷移は持たず localPrService / queue へ委譲する。",
-  "presetRules": [
-    {
-      "preset": "couplingCap",
-      "params": {
-        "targetPattern": "(?:src/(?:ui-server|ui-security|host-policy)|test/ui-server-allowed-hosts\\.test)\\.mjs$",
-        "by": "path",
-        "maxFanOut": 9007199254740991
-      }
-    }
-  ],
+  "presetRules": [],
+  "templateRules": [],
   "membership": [
     {
       "pathPattern": "(^|/)src/(?:ui-server|ui-security|host-policy)\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/ui-server-allowed-hosts\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(?:src/(?:ui-server|ui-security|host-policy)|test/ui-server-allowed-hosts\\.test)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)src/(?:auth|server)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:auth|server)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     }
   ],
-  "templateRules": [],
   "cardTemplate": "Summarise the \"ui-http-boundary\" domain: ローカル UI の HTTP 受口 (Host 認可・UI セッション認可・設定/許可Host 登録)。許可Host 登録は初期設定と独立し、同一プロセスへ即時反映する。",
-  "source": "spec-draft",
   "mechanics": [
     "host-allow-list-authorization",
     "ui-session-header-authorization",
@@ -34,6 +33,5 @@
     "ui-http-boundary — 許可Host登録の独立性",
     "ui-http-boundary — 汎用設定 endpoint との分離"
   ],
-  "rationale": "許可Host の登録は他のどの設定より先に成立していなければならない。Anatomia フォルダを必須とする writeSettings と同じ境界に置くと、リモートから設定を始めるための Host を許可できず、初期設定そのものが開始できない。認可 (誰がこのプロセスに触れてよいか) は表示 (review-ui) や審査判定 (review-gate) とは別の責務で、host-policy / ui-security はこの境界の判定関数として同居させる。",
-  "updatedAt": "2026-08-04T00:00:00.000Z"
+  "rationale": "許可Host の登録は他のどの設定より先に成立していなければならない。Anatomia フォルダを必須とする writeSettings と同じ境界に置くと、リモートから設定を始めるための Host を許可できず、初期設定そのものが開始できない。認可 (誰がこのプロセスに触れてよいか) は表示 (review-ui) や審査判定 (review-gate) とは別の責務で、host-policy / ui-security はこの境界の判定関数として同居させる。"
 }

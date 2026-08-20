@@ -1,0 +1,41 @@
+{
+  "name": "remote-publication",
+  "description": "Publication of an approved squash commit to the registered GitHub base, with private prepared refs for retry and an optional human-selected major/minor tag and GitHub Release.",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:git-publication|local-merge|prepared-merge|release-notes|release-publisher|release-version)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:git-publication|local-merge|prepared-merge|release-notes|release-version)\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "src/(?:git-publication|local-merge|prepared-merge|release-notes|release-publisher|release-version)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)src/(?:authenticated\\-git|base\\-reconcile|base\\-relanding|deferred\\-publication|github\\-app|github\\-reachability|github\\-workflow\\-publication|manual\\-release|pending\\-publish|plain\\-git\\-publication|publication\\-coordinator|publication\\-state|publish\\-pending|push\\-guard|release\\-contracts|release\\-preparation|release\\-service|repository\\-workflow|version\\-root)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:authenticated\\-git|base\\-reconcile|base\\-relanding|deferred\\-publication|github\\-app|github\\-reachability|github\\-workflow\\-publication|manual\\-release|pending\\-publish|plain\\-git\\-publication|publication\\-coordinator|publication\\-state|publish\\-pending|push\\-guard|release\\-contracts|release\\-preparation|release\\-service|repository\\-workflow|version\\-root)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/deferred-publish\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/fixtures/publication-lock-holder\\.mjs$"
+    }
+  ],
+  "cardTemplate": "Summarise the remote-publication domain: approved squash publication, prepared-ref recovery, remote divergence protection, and optional human-selected major/minor Release creation.",
+  "mechanics": [
+    "prepared-merge-recovery",
+    "base-publication",
+    "atomic-release-publication",
+    "release-version-selection",
+    "release-note-leakage-gate"
+  ],
+  "specRefs": [
+    "remote-publication — reviewed main and human-selected Release publication"
+  ],
+  "rationale": "The same transaction owns recovery of the prepared squash, remote base/tag consistency, Release metadata, and local completion. Review admission and generic workspace primitives remain separate domains."
+}
