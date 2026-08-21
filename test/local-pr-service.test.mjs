@@ -14,7 +14,7 @@ import { LocalPrReporter } from "../src/local-reporter.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
 import { JobStore } from "../src/job-store.mjs";
 import { resolveMergeRepositoryPath } from "../src/merge-repository.mjs";
-import { PrReviewQueue } from "../src/queue.mjs";
+import { createReviewQueueHarness } from "./helpers/review-queue-harness.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
 import { GENIUS_HUMAN_DECISION_REASON } from "../src/human-decision.mjs";
 
@@ -363,18 +363,22 @@ test("re-reviews an unchanged head and drops the previous outcome", async () => 
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
   const runs = [];
   const releases = [];
-  const queue = new PrReviewQueue(async (request) => {
-    runs.push(request);
-    await new Promise((resolve) => releases.push(resolve));
-    return {
-      conclusion: "action_required",
-      reviewedHeadSha: request.headSha,
-      intentReviewCompleted: true,
-      reviewer: "codex-sol",
-      ci: [{ name: "unit", status: "failed", exitCode: 1, durationMs: 12 }],
-      reasons: ["1 registered test case(s) failed"],
-    };
-  }, { concurrency: 1, reporter: new LocalPrReporter(store) });
+  const queue = createReviewQueueHarness({
+    directory: fixture.directory,
+    reporter: new LocalPrReporter(store),
+    run: async (request) => {
+      runs.push(request);
+      await new Promise((resolve) => releases.push(resolve));
+      return {
+        conclusion: "action_required",
+        reviewedHeadSha: request.headSha,
+        intentReviewCompleted: true,
+        reviewer: "codex-sol",
+        ci: [{ name: "unit", status: "failed", exitCode: 1, durationMs: 12 }],
+        reasons: ["1 registered test case(s) failed"],
+      };
+    },
+  });
   const service = new LocalPrService({
     store,
     queue,
@@ -418,6 +422,7 @@ test("re-reviews an unchanged head and drops the previous outcome", async () => 
     assert.deepEqual(runs[1].verificationTargets, ["tests"]);
     assert.equal(runs[1].previousReview.reviewedHeadSha, submitted.headSha);
   } finally {
+    await queue.idle();
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });
@@ -432,24 +437,25 @@ test("a superseded job neither overwrites nor announces the current review", asy
   const releases = [];
   const announced = [];
   let supersededHead = null;
-  const queue = new PrReviewQueue(async (request) => {
-    runs.push(request);
-    await new Promise((resolve) => releases.push(resolve));
-    if (request.headSha === supersededHead) {
-      throw new Error(`head SHA changed before review (expected ${supersededHead})`);
-    }
-    return {
-      conclusion: "success",
-      reviewedHeadSha: request.headSha,
-      intentReviewCompleted: true,
-      reviewer: "codex-sol",
-      ci: [],
-    };
-  }, {
-    concurrency: 1,
+  const queue = createReviewQueueHarness({
+    directory: fixture.directory,
     reporter: new LocalPrReporter(store, {
       notifyCompletion: (pullRequest) => { announced.push(pullRequest.checkStatus); },
     }),
+    run: async (request) => {
+      runs.push(request);
+      await new Promise((resolve) => releases.push(resolve));
+      if (request.headSha === supersededHead) {
+        throw new Error(`head SHA changed before review (expected ${supersededHead})`);
+      }
+      return {
+        conclusion: "success",
+        reviewedHeadSha: request.headSha,
+        intentReviewCompleted: true,
+        reviewer: "codex-sol",
+        ci: [],
+      };
+    },
   });
   const service = new LocalPrService({
     store,
@@ -501,6 +507,7 @@ test("a superseded job neither overwrites nor announces the current review", asy
     assert.equal(settled.reviewedHeadSha, movedHead);
     assert.deepEqual(announced, ["test_ok"]);
   } finally {
+    await queue.idle();
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });

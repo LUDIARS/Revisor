@@ -62,6 +62,22 @@ test("a forced re-review replaces a settled job for the same head", async () => 
   }
 });
 
+test("a forced re-review never doubles a job that is still running", async () => {
+  const fixture = storeFixture();
+  try {
+    const first = await fixture.store.enqueue(request());
+    await fixture.store.claimNext();
+
+    const forced = await fixture.store.enqueue(request(), { force: true });
+    assert.equal(forced.created, false, "force cannot start a second run of the same head");
+    assert.equal(forced.job.id, first.job.id);
+    assert.equal(fixture.store.state().running, 1);
+    assert.equal(fixture.store.state().queued, 0);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("claiming is exclusive and records the holding process", async () => {
   const fixture = storeFixture();
   try {

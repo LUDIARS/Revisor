@@ -5,7 +5,7 @@ import { ensureReviewWorker } from "./worker-spawn.mjs";
 function ignoreWorkerError() {}
 
 /**
- * `PrReviewQueue` と同じ投入面を持つが、実行はしない永続キュー。
+ * 審査キューの投入面。 job を記録するだけで、実行はワーカー側が担う。
  *
  * 投入したプロセスは job を記録してワーカーの起動を確かめたら終わってよい。
  * 提出コマンドが審査の完了まで生き続ける必要が無くなり、常駐バックエンドも要らなくなる。

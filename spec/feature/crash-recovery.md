@@ -19,7 +19,7 @@ updated: 2026-07-30
 
 ## 1. 問題
 
-レビューキュー (`src/queue.mjs`) は **in-memory** (`#pending` / `#running`) だが、
+当時のレビューキュー (in-process の `PrReviewQueue`; 現在は削除済み) は **in-memory** だが、
 PR の `checkStatus` は state ファイル (`revisor.state.json`) に永続化される。
 このため Revisor プロセスが job 実行中に落ちる / 再起動すると:
 
@@ -29,7 +29,7 @@ PR の `checkStatus` は state ファイル (`revisor.state.json`) に永続化�
    再投入もできない
 
 ```js
-// src/queue.mjs
+// 当時の in-process キューの再投入ガード
 if (!force || existing.status === "queued" || existing.status === "running") {
 ```
 

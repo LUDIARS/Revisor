@@ -20,16 +20,16 @@
       "namePattern": "^(validateFastLanePromotion|validateReviewRetry)$"
     },
     {
-      "pathPattern": "(^|/)src/(?:queue|worker\\-entry|worker\\-spawn)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:worker\\-entry|worker\\-spawn)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:queue|worker\\-entry|worker\\-spawn)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:worker\\-entry|worker\\-spawn)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/persistent-queue\\.test\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/helpers/barrier-children\\.mjs$"
+      "pathPattern": "(^|/)test/helpers/(?:barrier-children|review-queue-harness)\\.mjs$"
     }
   ],
   "cardTemplate": "Summarise the review-queue-scheduling domain: durable lane assignment, independent FIFO order, explicit promotion, and fixed standard/fast capacity partitions.",
