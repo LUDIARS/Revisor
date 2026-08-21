@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { claudeSessionCapacityUnavailable } from "./claude-capacity.mjs";
 import { forcedReviewerFor } from "./forced-review-model.mjs";
-import { runNamedCli } from "./process.mjs";
+import { runCodexAwareCli } from "./codex-runtime.mjs";
 
 // Persisted reviewer ids identify a provider family for config compatibility.
 // The review strategy chooses its concrete economy/strong model and effort;
@@ -93,7 +93,7 @@ export async function runReviewer({
   // review-work.mjs の REVIEW ステージ 1 箇所に集約する。
   forcedModel = "",
 }, {
-  runCli = runNamedCli,
+  runCli = runCodexAwareCli,
   sessionIdFactory = randomUUID,
   detectClaudeCapacity = claudeSessionCapacityUnavailable,
 } = {}) {

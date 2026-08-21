@@ -1,6 +1,6 @@
 {
   "name": "runtime-execution",
-  "description": "Policy-neutral child-process execution primitives used by Revisor adapters, including captured output, timeout termination, Windows shim handling, and per-call environment forwarding.",
+  "description": "Policy-neutral child-process execution primitives used by Revisor adapters, including captured output, timeout termination, platform launch shims (the Windows cmd.exe shim for npm CLIs and the opt-in WSL launch for the codex CLI), and per-call environment forwarding.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -12,16 +12,26 @@
     },
     {
       "pathPattern": "(^|/)test/process\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "src/codex-runtime\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/codex-runtime\\.test\\.mjs$"
+    },
+    {
+      "namePattern": "runCodexAwareCli|buildWslCodexArgs|codexRuntimeConfig|windowsPathToWslPath|posixShellQuote|quoteWslBinary|wslLauncherEnv"
     }
   ],
   "cardTemplate": "Summarise the runtime-execution domain: policy-neutral child-process invocation, timeout ownership, captured output, and environment forwarding.",
   "mechanics": [
     "child-process-invocation",
     "timeout-termination",
-    "environment-forwarding"
+    "environment-forwarding",
+    "wsl-launch-selection"
   ],
   "specRefs": [
     "runtime-execution — policy-neutral child-process boundary"
   ],
-  "rationale": "Security-scan policy owns the meaning and lifecycle of CODEX_SECURITY_STATE_DIR. The generic process runner only forwards an optional environment and owns the spawned process lifecycle, so it remains reusable by CI and other adapters without importing review-gate policy."
+  "rationale": "Security-scan policy owns the meaning and lifecycle of CODEX_SECURITY_STATE_DIR. The generic process runner only forwards an optional environment and owns the spawned process lifecycle, so it remains reusable by CI and other adapters without importing review-gate policy. The WSL launch selection lives here for the same reason as the cmd.exe shim: it answers \"how is a CLI started on this host\", not \"what should be reviewed\". It is opt-in through REVISOR_CODEX_RUNTIME and defaults to native, so review policy never has to know which runtime a reviewer ran on."
 }
