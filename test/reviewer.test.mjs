@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   alternateReviewer,
   reviewerCapacityUnavailable,
+  reviewerForProvider,
   reviewerInvocation,
   runReviewer,
 } from "../src/reviewer.mjs";
@@ -83,4 +84,18 @@ test("promotes a structured Claude rate limit to the capacity fallback signal", 
   assert.deepEqual(invocation.args.slice(-3), ["--session-id", sessionId, "--print"]);
   assert.equal(reviewerCapacityUnavailable(result), true);
   assert.match(result.stderr, /rate_limit.*429/);
+});
+
+test("uses the fallback reviewer unless opposite-model review is enabled", () => {
+  // 既定 (無効) では作成者の provider を見ない。実装委託が Claude 主体になり、
+  // 反対モデル固定だとほぼ全 PR が codex-sol へ流れていた。
+  for (const provider of ["claude", "codex", "gemini", undefined]) {
+    assert.equal(reviewerForProvider(provider, "claude-opus"), "claude-opus");
+    assert.equal(reviewerForProvider(provider, "codex-sol"), "codex-sol");
+  }
+  const opposite = { oppositeModelReviewEnabled: true };
+  assert.equal(reviewerForProvider("claude", "claude-opus", opposite), "codex-sol");
+  assert.equal(reviewerForProvider("codex", "codex-sol", opposite), "claude-opus");
+  // 判別できない provider は有効時でも fallback のまま。
+  assert.equal(reviewerForProvider("gemini", "claude-opus", opposite), "claude-opus");
 });

@@ -36,6 +36,9 @@ function isSecurityModel(value) {
 }
 
 const DUAL_LAYER_GATE_MODES = new Set(["advisory", "enforced"]);
+// 保存できるレビュアー id。reviewerInvocation が知っている系列と 1:1 で、
+// ここに無い値は設定として受け付けない。
+const REVIEWERS = new Set(["codex-sol", "claude-opus"]);
 
 function defaults() {
   return {
@@ -45,7 +48,15 @@ function defaults() {
     // its findings are surfaced next to the legacy target-domain verdict so the
     // two can be compared during migration, and only "enforced" lets it block.
     anatomiaDualLayerGateMode: "advisory",
-    fallbackReviewer: "codex-sol",
+    // 既定のレビュアーを Claude 系列にする。実装委託が Claude 主体になり、
+    // 反対モデルレビューを既定で外した結果、既定側に居るモデルがそのまま
+    // 全リポジトリの審査モデルになる。Codex 側の推論コストを抑えるのが狙い。
+    fallbackReviewer: "claude-opus",
+    // 反対モデルレビュー (作成者と別系列で審査する) を行うかどうか。既定は
+    // 無効で、作成者の provider に関係なく fallbackReviewer が使われる。
+    // 有効にすると独立した目で見られる代わりに、審査モデルが作成者側の
+    // 裏返しで決まるためモデルコストを運用側から寄せられなくなる。
+    oppositeModelReviewEnabled: false,
     // 空文字は「強制しない」。差分規模から選ばれる tier ごとモデルを
     // 踏み潰して全審査を1モデルに固定したいときだけ設定する。
     forcedReviewModel: "",
@@ -208,9 +219,17 @@ export function readSettings(env = process.env) {
     anatomiaDualLayerGateMode: DUAL_LAYER_GATE_MODES.has(value.anatomiaDualLayerGateMode)
       ? value.anatomiaDualLayerGateMode
       : base.anatomiaDualLayerGateMode,
-    fallbackReviewer: value.fallbackReviewer === "claude-opus"
-      ? "claude-opus"
+    // 既知の 2 値はそのまま保つ。片方だけを見て残りを既定へ落とすと、
+    // 既定を入れ替えたときに保存済みの明示設定まで書き換わってしまう。
+    fallbackReviewer: REVIEWERS.has(value.fallbackReviewer)
+      ? value.fallbackReviewer
       : base.fallbackReviewer,
+    // 既定は defaults() から取る。真偽値を `=== true` で畳むと、キーを持たない
+    // 旧設定が既定ではなく常に false へ落ちる。既定を反転させたとき新規設定だけ
+    // 効いて既存環境が黙って取り残される。
+    oppositeModelReviewEnabled: typeof value.oppositeModelReviewEnabled === "boolean"
+      ? value.oppositeModelReviewEnabled
+      : base.oppositeModelReviewEnabled,
     forcedReviewModel: isForcedReviewModel(value.forcedReviewModel)
       ? value.forcedReviewModel
       : base.forcedReviewModel,
@@ -268,10 +287,7 @@ export function writeSettings(settings, env = process.env) {
     : "";
   if (!anatomiaFolderInput) throw new RevisorError("Anatomia folder is required.");
   const anatomiaFolder = resolveToolFolder(anatomiaFolderInput, env);
-  if (
-    settings.fallbackReviewer !== "codex-sol"
-    && settings.fallbackReviewer !== "claude-opus"
-  ) {
+  if (!REVIEWERS.has(settings.fallbackReviewer)) {
     throw new RevisorError("Fallback reviewer is invalid.");
   }
   const workerCount = Number(settings.workerCount);
@@ -396,6 +412,9 @@ export function writeSettings(settings, env = process.env) {
       : settings.anatomiaReviewGateEnabled !== false,
     anatomiaDualLayerGateMode,
     fallbackReviewer: settings.fallbackReviewer,
+    oppositeModelReviewEnabled: settings.oppositeModelReviewEnabled === undefined
+      ? current.oppositeModelReviewEnabled
+      : settings.oppositeModelReviewEnabled === true,
     forcedReviewModel,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,

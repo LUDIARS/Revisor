@@ -263,3 +263,26 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
    巻き添えになる。
 6. 書き込み時は未知の値を黙って空文字へ落とさず拒否する。「強制したつもりで効いていない」
    状態を作らないため。
+
+## SPEC-OPPOSITE-MODEL-REVIEW: 反対モデルレビューを設定で選ぶ
+
+作成者の provider と別系列のモデルへ審査させる「反対モデルレビュー」は、既定では
+行わない設定 `oppositeModelReviewEnabled` (既定 false) とする。
+
+1. 無効のとき、審査に使う外部レビュアーは作成者の provider に関係なく
+   `fallbackReviewer` である。有効のときは従来どおり codex 作成 → `claude-opus`、
+   claude 作成 → `claude-opus` 以外 (`codex-sol`)、判別不能 → `fallbackReviewer`。
+2. 既定を無効にしたのは、実装委託が Claude 主体になった結果ほぼ全ての local PR が
+   `codex-sol` へ流れ、Codex (gpt-5.6-sol / gpt-5.6-terra) の推論コストだけが
+   積み上がっていたため。捨てるのは「作成者と別のモデルが見る」独立性であり、
+   独立性を優先する運用は設定で戻す。
+3. `fallbackReviewer` の既定は `claude-opus`。反対モデル強制を外すと既定側の
+   レビュアーがそのまま全リポジトリの審査モデルになるため、既定はコストを抑えたい
+   側へ置く。保存済みの値は既知の 2 値ならそのまま維持し、既定の入れ替えで運用者の
+   明示設定を書き換えない。
+4. 容量不足時の系列切替 (`alternateReviewer` / `runReviewWithCapacityFallback`) は
+   この設定と独立に残す。`claude-opus` が rate limit で落ちた審査は従来どおり
+   `codex-sol` へ退避する。ただし `forcedReviewModel` が設定されている間は
+   SPEC-FORCED-REVIEW-MODEL 3 のとおり切り替えない。
+5. モデルの強制指定はこの設定より強い。`forcedReviewModel` があるときは反対モデル
+   レビューの有効・無効に関わらず指定モデルの系列が使われる。

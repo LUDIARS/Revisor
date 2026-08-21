@@ -1,6 +1,6 @@
 {
   "name": "review-plan",
-  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, bounded test autofix, capacity fallback, model-free deterministic re-verification, and best-effort PR narrative reconciliation, and an operator-set forced review model that overrides reviewer selection, tier-derived model choice and the capacity family switch.",
+  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, an operator-selectable opposite-model review policy, bounded test autofix, capacity fallback, model-free deterministic re-verification, and best-effort PR narrative reconciliation, and an operator-set forced review model that overrides reviewer selection, tier-derived model choice and the capacity family switch.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -36,6 +36,7 @@
   "mechanics": [
     "review-stage-planning",
     "reviewer-strategy",
+    "opposite-model-review-policy",
     "bounded-test-autofix",
     "provider-capacity-fallback",
     "deterministic-re-verification",

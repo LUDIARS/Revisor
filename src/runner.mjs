@@ -697,6 +697,7 @@ export function createPrReviewRunner({
         ?? reviewerForProvider(
           authorContext?.provider,
           settings.fallbackReviewer,
+          { oppositeModelReviewEnabled: settings.oppositeModelReviewEnabled === true },
         );
       let plan = await advisePlan({
         // The default is deterministic. An explicitly configured advisor is a

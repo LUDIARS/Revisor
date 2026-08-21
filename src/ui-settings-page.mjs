@@ -17,6 +17,13 @@ const BODY = `
         </select>
       </div>
       <div class="field">
+        <label class="check">
+          <input id="opposite-model-review" type="checkbox">
+          作成者と別系列のモデルにレビューさせる（反対モデルレビュー）
+        </label>
+        <span class="note">有効にすると Codex が書いた PR は Claude、Claude が書いた PR は Codex が審査します。無効なら作成者に関係なく上のレビュアーを使います。</span>
+      </div>
+      <div class="field">
         <label for="forced-review-model">レビューモデルの強制指定</label>
         <select id="forced-review-model">
           <option value="">強制しない（差分規模から自動選択）</option>
@@ -216,6 +223,8 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     const state = await request('/api/settings');
     document.querySelector('#anatomia-folder').value = state.settings.anatomiaFolder;
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
+    document.querySelector('#opposite-model-review').checked =
+      state.settings.oppositeModelReviewEnabled === true;
     document.querySelector('#forced-review-model').value = state.settings.forcedReviewModel ?? '';
     document.querySelector('#anatomia-review-gate').checked = state.settings.anatomiaReviewGateEnabled;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
@@ -284,6 +293,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
         body: JSON.stringify({
           anatomiaFolder: document.querySelector('#anatomia-folder').value,
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
+          oppositeModelReviewEnabled: document.querySelector('#opposite-model-review').checked,
           forcedReviewModel: document.querySelector('#forced-review-model').value,
           anatomiaReviewGateEnabled: document.querySelector('#anatomia-review-gate').checked,
           workerCount: Number(document.querySelector('#worker-count').value),

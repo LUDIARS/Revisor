@@ -55,7 +55,22 @@ export function reviewerInvocation(reviewer, {
   throw new Error(`Unsupported reviewer '${reviewer}'.`);
 }
 
-export function reviewerForProvider(provider, fallbackReviewer) {
+// 反対モデルレビュー (作成者と別系列のモデルへ審査させる) は既定で行わない。
+// 独立した目で見る利点と引き換えに、実装委託が Claude 主体になった今は
+// ほぼ全ての PR が codex-sol へ流れ、Codex (gpt-5.6-sol / gpt-5.6-terra) の
+// 推論コストだけが積み上がっていた。既定では `fallbackReviewer` を素直に使い、
+// 独立性を優先したい運用だけ設定で反対モデルへ戻す。
+// 設定の読み取りと解釈は config 側の責務なので、ここは解釈済みの真偽値だけを
+// 受け取り、選択規則そのものに徹する。
+/**
+ * 反対モデルレビューが有効なときだけ作成者の provider から相手系列を選ぶ。
+ *
+ * @implements SPEC-OPPOSITE-MODEL-REVIEW
+ */
+export function reviewerForProvider(provider, fallbackReviewer, {
+  oppositeModelReviewEnabled = false,
+} = {}) {
+  if (!oppositeModelReviewEnabled) return fallbackReviewer;
   if (provider === "codex") return "claude-opus";
   if (provider === "claude") return "codex-sol";
   return fallbackReviewer;
