@@ -1,7 +1,8 @@
 import { access, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RevisorError } from "./errors.mjs";
-import { git } from "./workspace.mjs";
+import { resolveVersionRootPath } from "./version-root.mjs";
+import { assertSafeRef, git } from "./workspace.mjs";
 
 export const LOCAL_VERSION_FILE = ".revisor-version";
 export const UNINITIALIZED_VERSION = "uninitialized";
@@ -187,6 +188,33 @@ export async function assertLocalVersionUnchanged(rootPath, baseSha, headSha) {
       `${LOCAL_VERSION_FILE} is Revisor-owned local state and cannot be changed by a local PR.`,
     );
   }
+}
+
+/**
+ * 版数ファイルの突合を**登録 checkout** の base branch で行う。
+ *
+ * 隔離マージリポジトリ (`merge-repository.mjs`) の base は初期化時に一度だけ複製され、
+ * 以後 Revisor が所有して登録 checkout からは決して追随しない。 そのため登録 checkout
+ * 側が後から `.revisor-version` を commit すると、 凍結された base から見て「PR が版数
+ * ファイルを足した」ように見え、 その版数ファイルを含む**すべての** PR が
+ * `.revisor-version is Revisor-owned local state` で永久に止まる。
+ * 実際に 2026-08-21 に複数リポジトリの取り込みが同時に停止した。
+ *
+ * PR が版数ファイルを触ったかどうかは、 その PR が分岐した系譜 — すなわち登録 checkout
+ * の base — としか比較できない。 隔離リポジトリの base は突合先にならない。
+ *
+ * @param {{ rootPath: string, registeredRootPath?: string }} repository
+ * @param {{ baseRef: string, headRef: string }} refs
+ */
+export async function assertLocalVersionUnchangedAgainstRegisteredBase(repository, refs) {
+  const rootPath = resolveVersionRootPath(repository);
+  assertSafeRef(refs.baseRef, "base_ref");
+  assertSafeRef(refs.headRef, "head_ref");
+  const [baseSha, headSha] = await Promise.all([
+    git(rootPath, ["rev-parse", "--verify", `refs/heads/${refs.baseRef}`]),
+    git(rootPath, ["rev-parse", "--verify", `refs/heads/${refs.headRef}`]),
+  ]);
+  await assertLocalVersionUnchanged(rootPath, baseSha, headSha);
 }
 
 export async function writeLocalVersion(rootPath, tag) {

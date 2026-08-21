@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   assertLocalVersionUnchanged,
+  assertLocalVersionUnchangedAgainstRegisteredBase,
   initializeLocalVersion,
   inspectLocalVersionState,
   LOCAL_VERSION_FILE,
@@ -112,6 +113,74 @@ test("rejects a version-file change from a feature branch", async () => {
     const headSha = git(repoPath, "rev-parse", "HEAD");
     await assert.rejects(
       assertLocalVersionUnchanged(repoPath, baseSha, headSha),
+      /Revisor-owned local state/,
+    );
+  } finally {
+    rmSync(repoPath, { recursive: true, force: true });
+  }
+});
+
+test("compares the version file against the registered base, not the frozen merge base", async () => {
+  const registeredPath = mkdtempSync(join(tmpdir(), "revisor-version-registered-"));
+  const mergePath = mkdtempSync(join(tmpdir(), "revisor-version-merge-"));
+  try {
+    git(registeredPath, "init");
+    git(registeredPath, "checkout", "-b", "main");
+    git(registeredPath, "config", "user.name", "Test");
+    git(registeredPath, "config", "user.email", "test@example.invalid");
+    writeFileSync(join(registeredPath, "product.txt"), "base\n", "utf8");
+    git(registeredPath, "add", "product.txt");
+    git(registeredPath, "commit", "-m", "base");
+    // The isolated merge repository is cloned once and its base is never
+    // refreshed afterwards, so it freezes a main that predates the version file.
+    rmSync(mergePath, { recursive: true, force: true });
+    git(registeredPath, "clone", "--no-checkout", "--", registeredPath, mergePath);
+    git(mergePath, "config", "user.name", "Test");
+    git(mergePath, "config", "user.email", "test@example.invalid");
+
+    writeFileSync(join(registeredPath, LOCAL_VERSION_FILE), `${UNINITIALIZED_VERSION}\n`, "utf8");
+    git(registeredPath, "add", LOCAL_VERSION_FILE);
+    git(registeredPath, "commit", "-m", "chore: bootstrap Revisor version state");
+    git(registeredPath, "checkout", "-b", "feat/product");
+    writeFileSync(join(registeredPath, "product.txt"), "changed\n", "utf8");
+    git(registeredPath, "add", "product.txt");
+    git(registeredPath, "commit", "-m", "change product");
+    git(mergePath, "fetch", "--no-tags", registeredPath, "+refs/heads/feat/product:refs/heads/feat/product");
+
+    const frozenBaseSha = git(mergePath, "rev-parse", "--verify", "refs/heads/main");
+    const headSha = git(mergePath, "rev-parse", "--verify", "refs/heads/feat/product");
+    // The frozen base cannot tell "the registration committed the file" from
+    // "this PR changed it", which is what used to stop every unrelated PR.
+    await assert.rejects(
+      assertLocalVersionUnchanged(mergePath, frozenBaseSha, headSha),
+      /Revisor-owned local state/,
+    );
+    await assertLocalVersionUnchangedAgainstRegisteredBase(
+      { rootPath: mergePath, registeredRootPath: registeredPath },
+      { baseRef: "main", headRef: "feat/product" },
+    );
+  } finally {
+    rmSync(registeredPath, { recursive: true, force: true });
+    rmSync(mergePath, { recursive: true, force: true });
+  }
+});
+
+test("still rejects a branch that changes the version file on the registered base", async () => {
+  const repoPath = repositoryFixture();
+  try {
+    git(repoPath, "config", "user.name", "Test");
+    git(repoPath, "config", "user.email", "test@example.invalid");
+    git(repoPath, "checkout", "-b", "main");
+    git(repoPath, "commit", "-m", "base");
+    git(repoPath, "checkout", "-b", "feat/version-change");
+    writeFileSync(join(repoPath, LOCAL_VERSION_FILE), "3.0.0\n", "utf8");
+    git(repoPath, "add", LOCAL_VERSION_FILE);
+    git(repoPath, "commit", "-m", "change managed version");
+    await assert.rejects(
+      assertLocalVersionUnchangedAgainstRegisteredBase(
+        { rootPath: repoPath },
+        { baseRef: "main", headRef: "feat/version-change" },
+      ),
       /Revisor-owned local state/,
     );
   } finally {

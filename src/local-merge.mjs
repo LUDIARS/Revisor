@@ -13,7 +13,7 @@ import {
   forgetPreparedReleaseTag,
   rememberPreparedMerge,
 } from "./git-publication.mjs";
-import { assertLocalVersionUnchanged } from "./local-version.mjs";
+import { assertLocalVersionUnchangedAgainstRegisteredBase } from "./local-version.mjs";
 import { rememberPendingPublish } from "./pending-publish.mjs";
 import { isDeferredPublication } from "./publication-state.mjs";
 import { classifyPreparedMerge, readPublishedBaseSha } from "./prepared-merge.mjs";
@@ -271,7 +271,13 @@ async function attemptSquashMerge({
     headSha,
     reviewedHeadSha: pullRequest.reviewedHeadSha,
   });
-  await assertLocalVersionUnchanged(repository.rootPath, baseSha, headSha);
+  // 突合先は隔離リポジトリの凍結 base ではなく登録 checkout の base。 凍結 base は
+  // 登録側が後から commit した版数ファイルを知らないので、 そこと比べると無関係な PR が
+  // まとめて止まる (理由は local-version.mjs 側に記載)。
+  await assertLocalVersionUnchangedAgainstRegisteredBase(repository, {
+    baseRef: pullRequest.baseRef,
+    headRef: pullRequest.headRef,
+  });
   // バイパスでは審査済みヘッドが存在しないことすらある (一度も審査が通っていない)。
   // 突き合わせる相手が無い以上、ここは比較そのものを行わない。
   if (
