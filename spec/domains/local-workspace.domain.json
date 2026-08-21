@@ -24,11 +24,18 @@
     },
     {
       "pathPattern": "(^|/)test/workspace\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)src/scratch-space\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/scratch-space\\.test\\.mjs$"
     }
   ],
   "cardTemplate": "Summarise the \"local-workspace\" domain: 登録 source からの隔離 merge repository、local ref / SHA の安全性検証、固定 SHA の使い捨て detached worktree、差分内容の指紋、compare-and-swap の branch 前進、best-effort cleanup。",
   "mechanics": [
     "disposable-worktree-lifecycle",
+    "scratch-space-placement",
     "isolated-merge-repository",
     "registered-source-safe-directory",
     "ref-validation",
@@ -40,6 +47,7 @@
     "local-workspace — ref の安全性",
     "local-workspace — 差分内容の指紋",
     "local-workspace — 使い捨て worktree の生成",
+    "local-workspace — SPEC-REVIEW-SCRATCH-ROOT",
     "local-workspace — cleanup の best-effort 範囲",
     "local-workspace — worktree の清潔さと branch 前進",
     "local-workspace — 登録 checkout と merge repository の分離"

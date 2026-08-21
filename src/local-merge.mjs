@@ -1,7 +1,6 @@
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSettings } from "./config.mjs";
+import { makeScratchDir } from "./scratch-space.mjs";
 import { BaseMovedError, MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { relandHeadOnBase } from "./base-relanding.mjs";
 import { reconcileBaseWithRemote } from "./base-reconcile.mjs";
@@ -362,7 +361,7 @@ async function attemptSquashMerge({
       prepared.mergeCommitSha,
     );
   }
-  const root = await mkdtemp(join(tmpdir(), "revisor-squash-merge-"));
+  const root = await makeScratchDir("revisor-squash-merge-", readSettings(env));
   const worktrees = {
     root,
     head: join(root, "integration"),

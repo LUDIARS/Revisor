@@ -111,6 +111,63 @@ test("writeSettings persists an absolute anatomiaFolder even when given a relati
   }
 });
 
+test("writeSettings keeps an absolute reviewScratchRoot and defaults to empty", () => {
+  const state = fixture();
+  try {
+    writeSettings({
+      anatomiaFolder: "/abs/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+    }, state.env);
+    assert.equal(readSettings(state.env).reviewScratchRoot, "");
+
+    writeSettings({
+      anatomiaFolder: "/abs/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+      reviewScratchRoot: " /scratch/revisor ",
+    }, state.env);
+    assert.equal(readSettings(state.env).reviewScratchRoot, "/scratch/revisor");
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+// 相対パスは解決の基点が呼び出し側の cwd で変わる。審査は使い捨て worktree を
+// cwd にして走るので、保存を許すと同じ設定が実行ごとに別の場所を指す。
+test("writeSettings refuses a relative reviewScratchRoot", () => {
+  const state = fixture();
+  try {
+    assert.throws(() => writeSettings({
+      anatomiaFolder: "/abs/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+      reviewScratchRoot: "scratch",
+    }, state.env), /absolute path/);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+// 保存済みの設定が壊れていても Revisor 全体が起動不能にならないこと。読み取りは
+// 既定へ落とすだけにしてある。
+test("readSettings falls back to the OS temporary directory for an invalid stored value", () => {
+  const state = fixture();
+  try {
+    writeSettings({
+      anatomiaFolder: "/abs/Anatomia",
+      fallbackReviewer: "codex-sol",
+      workerCount: 1,
+    }, state.env);
+    const stored = JSON.parse(readFileSync(state.path, "utf8"));
+    stored.settings.reviewScratchRoot = "relative/path";
+    writeFileSync(state.path, JSON.stringify(stored));
+    assert.equal(readSettings(state.env).reviewScratchRoot, "");
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
 test("writeSettings persists an absolute augurFolder even when given a relative one", () => {
   const state = fixture();
   try {
@@ -134,6 +191,8 @@ test("stores settings and encrypts local workflow secrets", () => {
   try {
     assert.deepEqual(readSettings(state.env), {
       anatomiaFolder: "",
+      // 空欄は「OS の一時領域を使う」。作業領域の置き場所は設定しない限り既定のまま。
+      reviewScratchRoot: "",
       anatomiaReviewGateEnabled: true,
       anatomiaDualLayerGateMode: "advisory",
       // 反対モデルレビューを既定で外したので、既定のレビュアーがそのまま

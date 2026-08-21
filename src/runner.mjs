@@ -574,7 +574,7 @@ export function createPrReviewRunner({
     const repoPath = request.rootPath;
     const worktrees = await mutateWorktrees(
       repoPath,
-      () => prepareLocalWorktrees(request),
+      () => prepareLocalWorktrees(request, settings),
     );
     try {
       const runStage = (stage, options, priority) => {

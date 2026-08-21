@@ -11,10 +11,9 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readGitHubAppCredentials } from "./config.mjs";
+import { readGitHubAppCredentials, readSettings } from "./config.mjs";
+import { makeScratchDir } from "./scratch-space.mjs";
 import { GitHubAppClient } from "./github-app.mjs";
 import { githubRemoteUrl, runAuthenticatedGit } from "./authenticated-git.mjs";
 import { RevisorError } from "./errors.mjs";
@@ -79,7 +78,7 @@ export async function reconcileBaseWithRemote({
 
   // 双方に固有コミットがある。使い捨て worktree で merge commit を作り、クリーンに
   // 解決できたときだけ base を前進させる (監視 checkout は触らない)。
-  const root = await mkdtemp(join(tmpdir(), "revisor-base-reconcile-"));
+  const root = await makeScratchDir("revisor-base-reconcile-", readSettings(env));
   const worktrees = { root, head: join(root, "reconcile"), base: join(root, "unused") };
   try {
     await runGit(rootPath, [

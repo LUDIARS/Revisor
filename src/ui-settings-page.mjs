@@ -10,6 +10,11 @@ const BODY = `
         <input id="anatomia-folder" required placeholder="E:\\\\Document\\\\Ars\\\\Anatomia">
       </div>
       <div class="field">
+        <label for="review-scratch-root">審査の作業領域</label>
+        <input id="review-scratch-root" placeholder="空欄ならOSの一時領域">
+        <span class="note">審査・マージ・走査が作る使い捨て worktree の置き場所です。空欄なら OS の一時領域（システムドライブ）を使います。1 審査につき登録リポジトリの worktree を2本作り、その上で登録テストがビルド成果物を吐くため、Rust や C++ のリポジトリでは数GB単位で消費します。システムドライブの空きが乏しいときは、空きのあるドライブの絶対パスを指定してください。</span>
+      </div>
+      <div class="field">
         <label for="fallback-reviewer">Cc文脈がない場合のレビュアー</label>
         <select id="fallback-reviewer">
           <option value="codex-sol">Codex（Terra / Sol 自動選択）</option>
@@ -222,6 +227,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
   async function refreshSettings() {
     const state = await request('/api/settings');
     document.querySelector('#anatomia-folder').value = state.settings.anatomiaFolder;
+    document.querySelector('#review-scratch-root').value = state.settings.reviewScratchRoot ?? '';
     document.querySelector('#fallback-reviewer').value = state.settings.fallbackReviewer;
     document.querySelector('#opposite-model-review').checked =
       state.settings.oppositeModelReviewEnabled === true;
@@ -292,6 +298,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           anatomiaFolder: document.querySelector('#anatomia-folder').value,
+          reviewScratchRoot: document.querySelector('#review-scratch-root').value,
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
           oppositeModelReviewEnabled: document.querySelector('#opposite-model-review').checked,
           forcedReviewModel: document.querySelector('#forced-review-model').value,

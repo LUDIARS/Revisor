@@ -1,7 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { runProcess } from "./process.mjs";
+import { makeScratchDir } from "./scratch-space.mjs";
 
 const SAFE_REF = /^(?![-/])(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+(?<!\/)$/;
 const SAFE_SHA = /^[0-9a-fA-F]{7,64}$/;
@@ -179,8 +179,11 @@ export function inspectLocalPullRequest(repoPath, headRef, baseRef) {
  * `request.rootPath` は登録元 checkout (head の在処であり、 autofix の反映先)、
  * `request.reviewRootPath` は差分の起点となる base ref を持つ merge repository。
  * 後者が無いまま審査を走らせると起点が登録元へ戻ってしまうので、 省略は許さない。
+ *
+ * `settings.reviewScratchRoot` は worktree を置く親ディレクトリ。 省略した呼び出しは
+ * OS の一時領域へ落ちる (`spec/feature/local-workspace.md` SPEC-REVIEW-SCRATCH-ROOT)。
  */
-export async function prepareLocalWorktrees(request) {
+export async function prepareLocalWorktrees(request, settings = {}) {
   const repoPath = request.rootPath;
   if (typeof repoPath !== "string" || !repoPath.trim()) {
     throw new TypeError("A review request must carry the registered repository root path.");
@@ -201,7 +204,7 @@ export async function prepareLocalWorktrees(request) {
       `head SHA changed before review (expected ${request.headSha}, found ${inspected.headSha})`,
     );
   }
-  const root = await mkdtemp(join(tmpdir(), "revisor-local-pr-"));
+  const root = await makeScratchDir("revisor-local-pr-", settings);
   const worktrees = {
     root,
     head: join(root, "head"),

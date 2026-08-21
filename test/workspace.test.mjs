@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
@@ -100,6 +100,27 @@ test("cleanup removes both disposable worktrees and the temp root", async () => 
       .filter(Boolean);
     assert.equal(remaining.length, 1);
   } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// 設定の目的は「審査 worktree を別ドライブへ逃がす」ことなので、置き場所の単体試験
+// だけでは足りない。設定は読めているのに worktree が OS 一時領域に出る配線漏れを、
+// 実際の worktree 生成経路で捕まえる。親が未作成でも作られることも同時に見る。
+test("places the disposable worktrees under the configured scratch root", async () => {
+  const fixture = repositoryFixture();
+  const scratchRoot = join(fixture.directory, "scratch", "revisor");
+  let worktrees = null;
+  try {
+    worktrees = await prepareLocalWorktrees(request(fixture), {
+      reviewScratchRoot: scratchRoot,
+    });
+
+    assert.equal(dirname(worktrees.root), scratchRoot);
+    assert.equal(existsSync(worktrees.head), true);
+    assert.equal(existsSync(worktrees.base), true);
+  } finally {
+    if (worktrees) await cleanupWorktrees(fixture.repoPath, worktrees);
     rmSync(fixture.directory, { recursive: true, force: true });
   }
 });

@@ -1,7 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import { runNamedCli } from "./process.mjs";
+import { makeScratchDir } from "./scratch-space.mjs";
 
 const MAX_FINDINGS = 100;
 // A scanner title or path field can carry an unbounded excerpt of the scanned
@@ -166,9 +165,9 @@ export async function runSecurityScan({
   diffBase,
   settings,
   execute = runNamedCli,
-  makeOutputDir = () => mkdtemp(join(tmpdir(), "revisor-security-scan-")),
+  makeOutputDir = () => makeScratchDir("revisor-security-scan-", settings),
   removeOutputDir = (path) => rm(path, { recursive: true, force: true }),
-  makeStateDir = () => mkdtemp(join(tmpdir(), "revisor-security-state-")),
+  makeStateDir = () => makeScratchDir("revisor-security-state-", settings),
   removeStateDir = (path) => rm(path, { recursive: true, force: true }),
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {

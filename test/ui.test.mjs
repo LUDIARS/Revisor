@@ -333,6 +333,16 @@ test("the settings page owns the security scan effort and model", () => {
   assert.match(page, /<option value="xhigh">xhigh<\/option>/);
 });
 
+// 作業領域の入力欄が落ちると、読み込み時の `.value` 代入で設定ページ全体が死ぬ。
+// 欄と送信の両方をここで固定する。
+test("the settings page owns the review scratch root", () => {
+  const page = renderSettingsPage("session-nonce");
+  assert.match(page, /id="review-scratch-root"/);
+  assert.match(page, /reviewScratchRoot: document\.querySelector\('#review-scratch-root'\)/);
+  // 空欄は「OS の一時領域」。未設定の設定ファイルでも代入が undefined にならないこと。
+  assert.match(page, /state\.settings\.reviewScratchRoot \?\? ''/);
+});
+
 // `PUT /api/settings` now answers 400 when the body carries `allowedHosts`, so
 // one stray line in the general form would break every settings save. The
 // textarea is also filled on load only: refreshing after a general save would

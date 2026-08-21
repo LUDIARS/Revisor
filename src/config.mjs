@@ -43,6 +43,10 @@ const REVIEWERS = new Set(["codex-sol", "claude-opus"]);
 function defaults() {
   return {
     anatomiaFolder: "",
+    // 審査・マージ・走査の使い捨て作業領域を置く親ディレクトリ。空なら OS の
+    // 一時領域。システムドライブの空きが乏しい機械で、審査ごとに作られる
+    // 登録リポジトリの worktree とそのビルド成果物を別ドライブへ逃がすための口。
+    reviewScratchRoot: "",
     anatomiaReviewGateEnabled: true,
     // Anatomia's dual-layer domain gate (program / business) starts advisory:
     // its findings are surfaced next to the legacy target-domain verdict so the
@@ -215,6 +219,13 @@ export function readSettings(env = process.env) {
   return {
     // レガシー設定 ("../Anatomia" 等) にも効くよう読み取り時点で絶対パス化する。
     anatomiaFolder: resolveToolFolder(value.anatomiaFolder, env) || base.anatomiaFolder,
+    // 読み取りは寛容にする。相対パスや非文字列が保存されていても既定 (OS の
+    // 一時領域) へ落とすだけにして、設定 1 つで Revisor 全体が起動不能に
+    // ならないようにする。不正値を拒むのは書き込み側の責務。
+    reviewScratchRoot: typeof value.reviewScratchRoot === "string"
+      && isAbsolute(value.reviewScratchRoot.trim())
+      ? value.reviewScratchRoot.trim()
+      : base.reviewScratchRoot,
     anatomiaReviewGateEnabled: value.anatomiaReviewGateEnabled !== false,
     anatomiaDualLayerGateMode: DUAL_LAYER_GATE_MODES.has(value.anatomiaDualLayerGateMode)
       ? value.anatomiaDualLayerGateMode
@@ -396,6 +407,18 @@ export function writeSettings(settings, env = process.env) {
       "Security scan model must be a bare model name (letters, digits, dot, dash, underscore).",
     );
   }
+  // 相対パスを受け付けない。使い捨て作業領域は審査中の worktree を cwd にして
+  // 作られるので、相対だと同じ設定が実行のたびに別の場所を指す。
+  const scratchInput = settings.reviewScratchRoot;
+  const reviewScratchRoot = scratchInput === undefined
+    ? current.reviewScratchRoot
+    : (typeof scratchInput === "string" ? scratchInput.trim() : scratchInput);
+  if (typeof reviewScratchRoot !== "string"
+    || (reviewScratchRoot !== "" && !isAbsolute(reviewScratchRoot))) {
+    throw new RevisorError(
+      "Review scratch root must be an absolute path, or empty to use the OS temporary directory.",
+    );
+  }
   const anatomiaDualLayerGateMode = settings.anatomiaDualLayerGateMode === undefined
     ? current.anatomiaDualLayerGateMode
     : settings.anatomiaDualLayerGateMode;
@@ -407,6 +430,7 @@ export function writeSettings(settings, env = process.env) {
   const config = readConfig(env);
   config.settings = {
     anatomiaFolder,
+    reviewScratchRoot,
     anatomiaReviewGateEnabled: settings.anatomiaReviewGateEnabled === undefined
       ? current.anatomiaReviewGateEnabled
       : settings.anatomiaReviewGateEnabled !== false,
