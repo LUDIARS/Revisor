@@ -37,12 +37,12 @@ export function failedVerificationTargets(pullRequest) {
  */
 export function retryReviewScope(pullRequest, currentHeadSha, { reviewedContentUnchanged } = {}) {
   const reasons = Array.isArray(pullRequest?.reasons) ? pullRequest.reasons : [];
-  const sameReviewedHead = reviewedContentUnchanged ?? (
-    typeof pullRequest?.reviewedHeadSha === "string"
-    && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase()
-  );
+  const sameHeadSha = typeof pullRequest?.reviewedHeadSha === "string"
+    && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase();
+  const contentUnchanged = reviewedContentUnchanged ?? sameHeadSha;
+  const resolvedConflict = conflictResolutionAfterReview(pullRequest);
   if (pullRequest?.intentReviewCompleted !== true
-      || !sameReviewedHead
+      || !(contentUnchanged || resolvedConflict)
       || reasons.some((reason) => REVIEW_REASON.test(reason))
       || REVIEW_ERROR.test(String(pullRequest?.error ?? ""))) {
     return { reviewMode: "full", verificationTargets: [] };
@@ -62,10 +62,24 @@ export function retryReviewScope(pullRequest, currentHeadSha, { reviewedContentU
     reusedReview: {
       reviewedHeadSha: pullRequest.reviewedHeadSha ?? null,
       currentHeadSha: String(currentHeadSha),
-      matchedBy: pullRequest?.reviewedHeadSha
-        && pullRequest.reviewedHeadSha.toLowerCase() === String(currentHeadSha).toLowerCase()
+      matchedBy: sameHeadSha
         ? "head_sha"
-        : "diff_content",
+        : contentUnchanged
+          ? "diff_content"
+          : "merge_conflict_resolution",
     },
   };
+}
+
+/**
+ * 審査通過後に base との衝突でマージが落ちた PR は、 衝突解消で差分内容が変わっていても
+ * モデルレビューを払い直さない (neco 判断 2026-08-22)。 決定論的検査は全部回す。
+ * 記録 (`mergeConflictAfterReview`) は local-pr-service がマージ失敗時に書き、
+ * 再投入時に消費する。 審査済み SHA が別の審査で置き換わっていたら引き継がない。
+ */
+export function conflictResolutionAfterReview(pullRequest) {
+  const record = pullRequest?.mergeConflictAfterReview;
+  if (!record || typeof record.reviewedHeadSha !== "string") return false;
+  return typeof pullRequest?.reviewedHeadSha === "string"
+    && record.reviewedHeadSha.toLowerCase() === pullRequest.reviewedHeadSha.toLowerCase();
 }

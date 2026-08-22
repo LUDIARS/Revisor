@@ -358,6 +358,79 @@ test("re-queues a reviewed local PR against a moved head with a full intent revi
   }
 });
 
+// 衝突解消後の引き継ぎは「モデルレビューを飛ばす」だけの話で、 差分内容は実際に
+// 変わっている。 `reviewedContentUnchanged` を引き継ぎ判断の結果で上書きすると、
+// runner が前回の runtimeVerification をそのまま流用し (`runner.mjs`)、 変わった内容に
+// 対する「人間の動作確認が必要」がマージ阻止要因から消える。 事実のまま渡すことを固定する。
+test("hands a resolved merge conflict to the runner as changed content", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submitted = [];
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request) {
+        submitted.push(request);
+        return { id: `job-${submitted.length}` };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    // 審査を通ったあと base と衝突してマージが落ちた PR の状態。
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "action_required",
+      reviewedHeadSha: pullRequest.headSha,
+      intentReviewCompleted: true,
+      reviewer: "codex-sol",
+      reasons: ["The head conflicts with the current 'main' in 1 file(s): product.txt"],
+      runtimeVerification: { required: true, score: 40 },
+      mergeConflictAfterReview: {
+        reviewedHeadSha: pullRequest.headSha,
+        conflictedPaths: ["product.txt"],
+        at: "2026-08-22T00:00:00.000Z",
+      },
+    });
+
+    // 衝突を解消して head を進める (差分内容は審査時と別物になる)。
+    git(fixture.repoPath, "checkout", "feat/local");
+    writeFileSync(join(fixture.repoPath, "product.txt"), "base\nfeature\nresolved\n", "utf8");
+    git(fixture.repoPath, "add", "product.txt");
+    git(fixture.repoPath, "commit", "-m", "resolve conflict");
+    git(fixture.repoPath, "checkout", "main");
+    const resolvedHead = git(fixture.repoPath, "rev-parse", "feat/local");
+
+    await service.retryPullRequest(pullRequest.id);
+    assert.equal(submitted.length, 2);
+    assert.equal(submitted[1].headSha, resolvedHead);
+    // モデルレビューは飛ばす。 決定論的検査は全部回す。
+    assert.equal(submitted[1].reviewMode, "verification");
+    assert.deepEqual(
+      submitted[1].verificationTargets,
+      ["leakage", "tests", "anatomia", "security"],
+    );
+    // 内容は変わっているので、 runner に「同一内容」として渡してはいけない。
+    assert.equal(submitted[1].reviewedContentUnchanged, false);
+    assert.equal(submitted[1].previousReview.reviewedHeadSha, pullRequest.headSha);
+    // 記録は使い捨て。 次の head を無条件に免除しないよう再投入で消えている。
+    assert.equal(store.getPullRequest(pullRequest.id).mergeConflictAfterReview, null);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
 test("re-reviews an unchanged head and drops the previous outcome", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });

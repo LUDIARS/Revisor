@@ -508,9 +508,13 @@ export class LocalPrService {
       );
     }
     await assertLocalVersionUnchanged(repository.rootPath, refs.baseSha, refs.headSha);
-    let scope = retryReviewScope(pullRequest, refs.headSha, {
-      reviewedContentUnchanged: await this.#reviewedContentUnchanged(repository, pullRequest, refs),
-    });
+    // 内容一致は patch-id で見た事実であって、 引き継ぎ判断の結果ではない。
+    // 衝突解消の引き継ぎ (`merge_conflict_resolution`) はモデルレビューだけを飛ばす話で、
+    // 差分内容は実際に変わっている。 ここで true に倒すと runner が前回の
+    // runtimeVerification をそのまま流用し、 変わった内容に対する「人間の動作確認が必要」が
+    // 消える (merge-risk / pr-disposition のマージ阻止要因)。 事実のまま渡す。
+    const reviewedContentUnchanged = await this.#reviewedContentUnchanged(repository, pullRequest, refs);
+    let scope = retryReviewScope(pullRequest, refs.headSha, { reviewedContentUnchanged });
     const previousValidationMode = [...(pullRequest.reviewPlan?.validationMode?.skipped ?? [])].sort();
     const currentValidationMode = pullRequest.reviewPlan
       ? validationModeSkips(this.loadSettings())
@@ -536,7 +540,7 @@ export class LocalPrService {
       // The refs may be unchanged, and the queue caches settled jobs by exact
       // head, so an unforced re-review would resolve to the run being retried.
       { force: true },
-      { announceFailure, requestOptions: { ...scope, previousReview } },
+      { announceFailure, requestOptions: { ...scope, previousReview, reviewedContentUnchanged } },
     );
   }
 
@@ -752,6 +756,17 @@ export class LocalPrService {
         this.store.updatePullRequest(id, {
           checkStatus: "action_required",
           reasons: [error.message],
+          // 審査は通っている。 衝突解消で head が変わっても次の審査はモデルレビューを
+          // 飛ばせるよう、 どの審査結果を引き継いでよいかを残す (retry-review.mjs)。
+          ...(pullRequest.intentReviewCompleted === true && pullRequest.reviewedHeadSha
+            ? {
+                mergeConflictAfterReview: {
+                  reviewedHeadSha: pullRequest.reviewedHeadSha,
+                  conflictedPaths: error.conflictedPaths ?? [],
+                  at: new Date().toISOString(),
+                },
+              }
+            : {}),
         });
         throw error;
       }

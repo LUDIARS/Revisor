@@ -39,11 +39,18 @@ function anatomiaGateTone(status) {
 
 // The review outcome fields owned by `completed`, cleared. A re-review resolves
 // fresh refs, so the previous run's outcome must not be read as the current one.
+//
+// `mergeConflictAfterReview` is the exception in ownership: the service writes it
+// on a failed merge (`local-pr-service.mjs`) rather than `completed`. It is cleared
+// here because this is the only path back into review, which makes the record a
+// single-use ticket — it must not survive to exempt a later, unrelated head from
+// the model review (`conflictResolutionAfterReview` in `retry-review.mjs`).
 export function pendingReviewProjection() {
   return {
     reviewedHeadSha: null,
     reviewer: null,
     intentReviewCompleted: false,
+    mergeConflictAfterReview: null,
     ci: [],
     anatomia: null,
     anatomiaGate: null,
