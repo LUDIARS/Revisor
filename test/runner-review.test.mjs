@@ -223,3 +223,127 @@ test("does not compare against a persisted baseline without a function count", a
   assert.equal(result.complexityScoreDelta, null);
   assert.deepEqual(result.reasons, []);
 });
+
+function verificationFixture({ ci, autofixTests, commitAutofix, analyze, settings, runSecurity }) {
+  const testCases = [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }];
+  const classification = classifyChange({ changedPaths: ["server/src/index.ts"], unifiedDiff: "" });
+  return runPartialVerification({
+    request: {
+      repository: "LUDIARS/Revisor",
+      number: 926,
+      headSha: "b".repeat(40),
+      headRef: "feat/x",
+      reviewMode: "verification",
+      verificationTargets: ["tests"],
+      testCases,
+      previousReview: {
+        reviewedHeadSha: "a".repeat(40),
+        intentReviewCompleted: true,
+        reviewer: "codex-sol",
+        reviewPlan: { source: "deterministic", stages: [], testSelection: { selected: [], skipped: [] } },
+        anatomia: { ...passingAnalysis(90), baselineComplexityScore: 90 },
+        leakage: { totalFindings: 0 },
+        ci: [{ name: "unit", status: "passed" }],
+        security: { status: "passed", totalFindings: 0 },
+        runtimeVerification: { score: 100, required: false, factors: [], evidence: [] },
+      },
+    },
+    submitted: { classification, unifiedDiff: "" },
+    settings: settings ?? { costValidationModeEnabled: false },
+    worktrees: { head: "head-worktree", base: "base-worktree", mergeBase: "merge-base" },
+    anatomiaCliPath: null,
+    env: {},
+    runSecurity: runSecurity ?? (async () => ({ status: "passed", totalFindings: 0 })),
+    complexityDropThreshold: 10,
+    analyze: analyze ?? (async () => passingAnalysis(90)),
+    runTests: async () => ci,
+    runReview: async () => ({ ok: true, stdout: "", stderr: "" }),
+    repoPath: "repo",
+    autofixTests,
+    commitAutofix,
+    readProfile: async () => ({ classification, unifiedDiff: "+ fixed" }),
+    resolveCli: async () => "anatomia-cli",
+  });
+}
+
+test("verification mode repairs failing registered tests with the bounded autofix", async () => {
+  const calls = [];
+  const result = await verificationFixture({
+    ci: [{ name: "unit", status: "failed" }],
+    autofixTests: async ({ initialCi }) => {
+      calls.push("autofix");
+      assert.equal(initialCi[0].status, "failed");
+      return { ci: [{ name: "unit", status: "passed" }], status: "passed", reviewer: "codex-sol" };
+    },
+    commitAutofix: async () => {
+      calls.push("commit");
+      return "c".repeat(40);
+    },
+    analyze: async ({ cliPath, cwd }) => {
+      calls.push(`analyze:${cwd}`);
+      return passingAnalysis(90);
+    },
+  });
+  assert.deepEqual(calls.slice(0, 2), ["autofix", "commit"]);
+  assert.ok(calls.includes("analyze:head-worktree"), "anatomia is re-run on the repaired head");
+  assert.equal(result.reviewedHeadSha, "c".repeat(40));
+  assert.match(result.contextSource, /^partial-verification-after-test-autofix:/);
+  assert.equal(result.humanQuestion, null);
+  assert.deepEqual(result.reasons, []);
+});
+
+test("verification mode asks a human when the autofix cannot repair the tests", async () => {
+  let committed = false;
+  const result = await verificationFixture({
+    ci: [{ name: "unit", status: "failed" }],
+    autofixTests: async () => ({
+      ci: [{ name: "unit", status: "failed" }],
+      status: "exhausted",
+      reviewer: "codex-sol",
+    }),
+    commitAutofix: async () => {
+      committed = true;
+      return "c".repeat(40);
+    },
+  });
+  assert.equal(committed, false);
+  assert.equal(result.reviewedHeadSha, "b".repeat(40));
+  assert.match(result.humanQuestion, /still fail after the bounded automated autofix/);
+  assert.ok(result.reasons.length > 0, "failed tests stay a blocking reason");
+});
+
+test("validation mode keeps the autofix model out of verification", async () => {
+  let autofixCalled = false;
+  const result = await verificationFixture({
+    ci: [{ name: "unit", status: "failed" }],
+    settings: { costValidationModeEnabled: true, costValidationSkipReview: true },
+    autofixTests: async () => {
+      autofixCalled = true;
+      return { ci: [{ name: "unit", status: "passed" }], status: "passed", reviewer: "codex-sol" };
+    },
+    commitAutofix: async () => "c".repeat(40),
+  });
+  assert.equal(autofixCalled, false, "no review model runs while reviewer_autofix is skipped");
+  assert.equal(result.reviewedHeadSha, "b".repeat(40));
+  assert.match(result.contextSource, /^partial-verification:/);
+  assert.ok(result.reasons.length > 0, "failed tests stay a blocking reason");
+});
+
+test("a repaired head re-runs the security scan instead of reusing the previous one", async () => {
+  const scanned = [];
+  const result = await verificationFixture({
+    ci: [{ name: "unit", status: "failed" }],
+    autofixTests: async () => ({
+      ci: [{ name: "unit", status: "passed" }],
+      status: "passed",
+      reviewer: "codex-sol",
+    }),
+    commitAutofix: async () => "c".repeat(40),
+    runSecurity: async () => {
+      scanned.push("security");
+      return { status: "passed", totalFindings: 0 };
+    },
+  });
+  assert.deepEqual(scanned, ["security"], "the autofixed code is scanned, not the pre-fix code");
+  assert.deepEqual(result.reasons, []);
+});

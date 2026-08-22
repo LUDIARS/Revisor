@@ -411,6 +411,14 @@ export async function runPartialVerification({
   complexityDropThreshold,
   analyze = analyzePr,
   runTests = runPlannedTests,
+  // テスト autofix に要る依存。 runReview が無ければ autofix は走らず従来どおり人間待ちになる。
+  runReview = null,
+  reviewerTimeoutMs,
+  repoPath = null,
+  commitAutofix = commitAndAdvanceAutofix,
+  autofixTests = autofixFailingTests,
+  readProfile = readChangeProfile,
+  resolveCli = resolveAnatomiaCli,
 }) {
   const previous = request.previousReview;
   const targets = new Set(request.verificationTargets ?? []);
@@ -424,16 +432,12 @@ export async function runPartialVerification({
   if (!targets.has("anatomia") && !analysis) {
     throw new Error("Partial verification requires the previous Anatomia result.");
   }
-  const plan = planVerification({
+  let plan = planVerification({
     classification: submitted.classification,
     testCases: request.testCases,
     validationMode: settings,
   });
-  const leakage = targets.has("leakage")
-    ? scanAddedDiffForLeaks(submitted.unifiedDiff)
-    : previous.leakage;
-  if (!leakage) throw new Error("Partial verification requires the previous leakage result.");
-  const ci = targets.has("tests")
+  let ci = targets.has("tests")
     ? await runTests({
         worktreePath: worktrees.head,
         testCases: request.testCases,
@@ -442,6 +446,74 @@ export async function runPartialVerification({
       })
     : previous.ci;
   if (!Array.isArray(ci)) throw new Error("Partial verification requires the previous test result.");
+  // 意図との一致は人間判断だが、 決定論的検査 (登録テスト) の失敗はどのみち LLM が直す
+  // 修正なので、 モデルレビューを飛ばす verification でも有界 autofix は回す (neco 判断 2026-08-22)。
+  // 修正が入った場合は head が進むので、 以降の leakage / anatomia / security は
+  // 修正後の内容で取り直す。
+  let reviewedHeadSha = request.headSha;
+  let reviewer = previous.reviewer;
+  let autofixApplied = false;
+  let autofixStatus = null;
+  // 検証モードは「レビューモデルを呼ばない」ことを約束する。 全体レビュー経路と同じく、
+  // reviewer_autofix が skipped なら失敗した登録テストはそのまま blocking 証跡に残す。
+  if (targets.has("tests")
+      && !testsPassed(ci)
+      && isTestAutofixEnabled(plan)
+      && typeof runReview === "function") {
+    const autofix = await autofixTests({
+      request,
+      reviewer: forcedReviewerFor(settings.forcedReviewModel) ?? previous.reviewer,
+      worktreePath: worktrees.head,
+      mergeBase: worktrees.mergeBase,
+      initialCi: ci,
+      testCases: request.testCases,
+      plan,
+      env,
+      runReview,
+      runTests,
+      reviewerTimeoutMs,
+      forcedReviewModel: settings.forcedReviewModel,
+    });
+    reviewer = autofix.reviewer;
+    ci = autofix.ci;
+    autofixStatus = autofix.status;
+    if (testsPassed(ci)) {
+      const preAutofixClassification = submitted.classification;
+      submitted = await readProfile(worktrees.head, worktrees.mergeBase);
+      autofixApplied = true;
+      // 修正で変更種別が動くと、 担当する登録テストの選定も変わる。 古い plan のまま
+      // 「通った」と記録すると、 一度も走っていないテストが通ったことになる。
+      if (changeKindsDiffer(preAutofixClassification, submitted.classification)) {
+        plan = planVerification({
+          classification: submitted.classification,
+          testCases: request.testCases,
+          validationMode: settings,
+        });
+        ci = await verifyAutofixPlan({
+          worktreePath: worktrees.head,
+          testCases: request.testCases,
+          plan,
+          env,
+          runTests,
+        });
+      }
+      if (repoPath) {
+        reviewedHeadSha = await commitAutofix(worktrees.head, repoPath, request);
+      }
+    }
+  }
+  const autofixFailed = targets.has("tests") && !testsPassed(ci) && autofixStatus !== null;
+  const leakage = targets.has("leakage") || autofixApplied
+    ? scanAddedDiffForLeaks(submitted.unifiedDiff)
+    : previous.leakage;
+  if (!leakage) throw new Error("Partial verification requires the previous leakage result.");
+  // 修正後の内容は前回の審査対象と別物なので、 引き継いだ決定論的証跡は使えない。
+  // anatomia と security は取り直す (leakage は上で取り直し済み)。
+  if (autofixApplied && !targets.has("anatomia")) {
+    targets.add("anatomia");
+    analysis = null;
+  }
+  if (autofixApplied) targets.add("security");
   let baselineComplexity = typeof previous.anatomia?.baselineComplexityScore === "number"
     ? {
         score: previous.anatomia.baselineComplexityScore,
@@ -451,15 +523,17 @@ export async function runPartialVerification({
       }
     : null;
   if (targets.has("anatomia")) {
+    // autofix で anatomia が後から対象に入った場合、 呼び出し側は CLI を解決していない。
+    const cliPath = anatomiaCliPath ?? await resolveCli(settings.anatomiaFolder);
     const [currentAnalysis, baseline] = await Promise.all([
       analyze({
-        cliPath: anatomiaCliPath,
+        cliPath,
         cwd: worktrees.head,
         base: worktrees.mergeBase,
       }),
       stageEnabled(plan, "anatomia_code_analysis")
         ? analyze({
-            cliPath: anatomiaCliPath,
+            cliPath,
             cwd: worktrees.base,
             base: "HEAD",
           })
@@ -486,9 +560,11 @@ export async function runPartialVerification({
     baseline: baselineComplexity
       ? { quality: { complexity: baselineComplexity } }
       : null,
-    reviewer: previous.reviewer,
-    contextSource: `partial-verification:${[...targets].join(",")}`,
-    reviewedHeadSha: request.headSha,
+    reviewer,
+    contextSource: autofixApplied
+      ? `partial-verification-after-test-autofix:${[...targets].join(",")}`
+      : `partial-verification:${[...targets].join(",")}`,
+    reviewedHeadSha,
     complexityDropThreshold,
     initialLeakage: leakage,
     leakage,
@@ -500,7 +576,8 @@ export async function runPartialVerification({
     security,
     intentReviewCompleted: previous.intentReviewCompleted === true,
   });
-  const runtimeVerification = sameReviewedHead
+  // autofix が入った head は審査時の内容と別物なので、 引き継ぎの前提が消える。
+  const runtimeVerification = sameReviewedHead && !autofixApplied
     ? (previous.runtimeVerification ?? result.runtimeVerification)
     : result.runtimeVerification;
   const mergeRisk = assessMergeRisk({
@@ -519,12 +596,14 @@ export async function runPartialVerification({
     ...result,
     runtimeVerification,
     mergeRisk,
-    humanQuestion: needsTargetDomain(
-      analysis,
-      submitted.classification.docsOrConfigOnly,
-      submitted.classification.codeDomainRequired,
-      stageEnabled(plan, "anatomia_domain_review"),
-    ) ? targetDomainQuestion(request.repository, request.number) : null,
+    humanQuestion: autofixFailed
+      ? testAutofixHumanQuestion(autofixStatus)
+      : needsTargetDomain(
+          analysis,
+          submitted.classification.docsOrConfigOnly,
+          submitted.classification.codeDomainRequired,
+          stageEnabled(plan, "anatomia_domain_review"),
+        ) ? targetDomainQuestion(request.repository, request.number) : null,
   };
 }
 
@@ -634,6 +713,9 @@ export function createPrReviewRunner({
           complexityDropThreshold,
           analyze: executeAnalysis,
           runTests: executeTests,
+          runReview: executeReview,
+          reviewerTimeoutMs,
+          repoPath,
         });
       }
       let initialLeakage = scanAddedDiffForLeaks(submitted.unifiedDiff);
