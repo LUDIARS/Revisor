@@ -87,8 +87,8 @@ test("promotes a structured Claude rate limit to the capacity fallback signal", 
 });
 
 test("uses the fallback reviewer unless opposite-model review is enabled", () => {
-  // 既定 (無効) では作成者の provider を見ない。実装委託が Claude 主体になり、
-  // 反対モデル固定だとほぼ全 PR が codex-sol へ流れていた。
+  // オプションを渡さない呼び出しは作成者の provider を見ない。運用の既定
+  // (defaults().oppositeModelReviewEnabled) は有効で、runner が明示的に渡す。
   for (const provider of ["claude", "codex", "gemini", undefined]) {
     assert.equal(reviewerForProvider(provider, "claude-opus"), "claude-opus");
     assert.equal(reviewerForProvider(provider, "codex-sol"), "codex-sol");

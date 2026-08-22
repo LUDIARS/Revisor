@@ -195,11 +195,10 @@ test("stores settings and encrypts local workflow secrets", () => {
       reviewScratchRoot: "",
       anatomiaReviewGateEnabled: true,
       anatomiaDualLayerGateMode: "advisory",
-      // 反対モデルレビューを既定で外したので、既定のレビュアーがそのまま
-      // 全リポジトリの審査モデルになる。Codex 側の推論コストを抑えるため
-      // 既定は Claude 系列。
-      fallbackReviewer: "claude-opus",
-      oppositeModelReviewEnabled: false,
+      // 反対モデルレビューが既定。fallbackReviewer は provider 不明時の
+      // 保険で、Codex 系列。
+      fallbackReviewer: "codex-sol",
+      oppositeModelReviewEnabled: true,
       // 空文字は「モデルを強制しない」。
       forcedReviewModel: "",
       concordiaContextEnabled: true,
@@ -547,29 +546,29 @@ test("the Anatomia dual-layer gate mode defaults to advisory and only accepts ad
 test("keeps a stored fallback reviewer and persists the opposite-model toggle", () => {
   const state = fixture();
   try {
-    // 既定を claude-opus へ入れ替えても、明示保存された codex-sol は残る。
+    // 既定が codex-sol でも、明示保存された claude-opus は残る。
     // 片方だけを見て残りを既定へ落とす正規化だと、ここが黙って書き換わる。
     writeSettings({
       anatomiaFolder: "E:/Document/Ars/Anatomia",
-      fallbackReviewer: "codex-sol",
+      fallbackReviewer: "claude-opus",
       workerCount: 1,
     }, state.env);
-    assert.equal(readSettings(state.env).fallbackReviewer, "codex-sol");
-    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, false);
+    assert.equal(readSettings(state.env).fallbackReviewer, "claude-opus");
+    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, true);
     writeSettings({
       anatomiaFolder: "E:/Document/Ars/Anatomia",
-      fallbackReviewer: "codex-sol",
+      fallbackReviewer: "claude-opus",
       workerCount: 1,
-      oppositeModelReviewEnabled: true,
+      oppositeModelReviewEnabled: false,
     }, state.env);
-    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, true);
+    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, false);
     // 省略した書き込みは運用者が選んだ値を維持する。
     writeSettings({
       anatomiaFolder: "E:/Document/Ars/Anatomia",
-      fallbackReviewer: "codex-sol",
+      fallbackReviewer: "claude-opus",
       workerCount: 2,
     }, state.env);
-    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, true);
+    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, false);
     // キーを持たない旧設定は既定 (defaults()) を採る。真偽値を `=== true` で
     // 畳むと、ここが既定ではなく常に false になり、既定を反転させたときに
     // 既存環境だけ黙って取り残される。
@@ -577,11 +576,11 @@ test("keeps a stored fallback reviewer and persists the opposite-model toggle", 
     delete stored.settings.oppositeModelReviewEnabled;
     writeFileSync(state.path, JSON.stringify(stored));
     // defaults().oppositeModelReviewEnabled と同じ値。既定を変えるならここも動く。
-    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, false);
+    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, true);
     // 真偽値でない永続値も既定へ落とす。
     stored.settings.oppositeModelReviewEnabled = "yes";
     writeFileSync(state.path, JSON.stringify(stored));
-    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, false);
+    assert.equal(readSettings(state.env).oppositeModelReviewEnabled, true);
     assert.throws(
       () => writeSettings({
         anatomiaFolder: "E:/Document/Ars/Anatomia",

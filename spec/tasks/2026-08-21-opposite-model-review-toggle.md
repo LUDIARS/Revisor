@@ -21,3 +21,11 @@ Claude 主体になった現在はほぼ全ての local PR が `codex-sol` へ�
 - 設定の意味・既定を変えた理由をコード内コメントと spec (SPEC-OPPOSITE-MODEL-REVIEW) に残し、
   レビュアー選択と設定解釈の責務を混ぜない。
 - 変更に対応する単体テストを追加・更新する。
+
+## 追記 (2026-08-22)
+
+既定の向きだけを neco の指示で戻した。`oppositeModelReviewEnabled` の既定は true、
+`fallbackReviewer` の既定は `codex-sol`。Claude 主体の実装を Claude 自身が審査する形に
+なるのを避けるためで、コストを寄せたい運用は設定で無効にする。上の完了条件のうち既定値を
+述べた 2 点は当日の記録として残す。現行の規則は SPEC-OPPOSITE-MODEL-REVIEW を正とする。
+トグルの存在・保存規則・容量切替との独立性は変えていない。

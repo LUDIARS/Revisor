@@ -52,15 +52,15 @@ function defaults() {
     // its findings are surfaced next to the legacy target-domain verdict so the
     // two can be compared during migration, and only "enforced" lets it block.
     anatomiaDualLayerGateMode: "advisory",
-    // 既定のレビュアーを Claude 系列にする。実装委託が Claude 主体になり、
-    // 反対モデルレビューを既定で外した結果、既定側に居るモデルがそのまま
-    // 全リポジトリの審査モデルになる。Codex 側の推論コストを抑えるのが狙い。
-    fallbackReviewer: "claude-opus",
-    // 反対モデルレビュー (作成者と別系列で審査する) を行うかどうか。既定は
-    // 無効で、作成者の provider に関係なく fallbackReviewer が使われる。
-    // 有効にすると独立した目で見られる代わりに、審査モデルが作成者側の
-    // 裏返しで決まるためモデルコストを運用側から寄せられなくなる。
-    oppositeModelReviewEnabled: false,
+    // 反対モデルレビューが既定なので、fallbackReviewer は作成者の provider が
+    // 判別できないときだけ使われる。Codex 系列を既定にして、Claude 主体の
+    // 実装が Claude 自身の審査に倒れないようにする。
+    fallbackReviewer: "codex-sol",
+    // 反対モデルレビュー (作成者と別系列で審査する) を行うかどうか。一時的に
+    // 既定を無効にして全審査を Claude 系列へ寄せたが、作成者と同じ系列が
+    // 自分の実装を通す形になるため neco の指示で既定を有効へ戻した
+    // (2026-08-22)。コストを寄せたい運用だけ設定で無効にする。
+    oppositeModelReviewEnabled: true,
     // 空文字は「強制しない」。差分規模から選ばれる tier ごとモデルを
     // 踏み潰して全審査を1モデルに固定したいときだけ設定する。
     forcedReviewModel: "",
