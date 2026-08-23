@@ -149,3 +149,86 @@ test("does not rewind a base branch that already contains the published merge", 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].args[0], "ls-remote");
 });
+
+test("creates the base branch on the first publication into an empty repository", async () => {
+  const calls = [];
+  await pushReleaseAtomically({
+    repository: "LUDIARS/Product",
+    rootPath: "C:/Product",
+    baseRef: "main",
+    expectedBaseSha: EXPECTED_BASE,
+    mergeCommitSha: MERGE_COMMIT,
+    tag: "v0.3.0",
+    token: "installation-token",
+    runGit: async () => {
+      throw new Error("An empty remote has nothing to compare against.");
+    },
+    runRemoteGit: async (request) => {
+      calls.push(request);
+      // Both the base lookup and the emptiness probe find no refs at all.
+      return "";
+    },
+  });
+
+  assert.equal(calls.length, 3);
+  // The emptiness probe must list every ref: filtering it would read a
+  // repository that merely lacks the base branch as empty.
+  assert.deepEqual(calls[1].args, ["ls-remote", "https://github.com/LUDIARS/Product.git"]);
+  assert.deepEqual(calls[2].args, [
+    "push",
+    "--atomic",
+    "https://github.com/LUDIARS/Product.git",
+    `${MERGE_COMMIT}:refs/heads/main`,
+    "refs/tags/v0.3.0:refs/tags/v0.3.0",
+  ]);
+  assert.doesNotMatch(calls[2].args.join(" "), /installation-token/);
+});
+
+test("creates the base branch without --atomic when the first publication has no tag", async () => {
+  const calls = [];
+  await pushPublishedCommit({
+    repository: "LUDIARS/Product",
+    rootPath: "C:/Product",
+    baseRef: "main",
+    expectedBaseSha: EXPECTED_BASE,
+    mergeCommitSha: MERGE_COMMIT,
+    tag: null,
+    token: "installation-token",
+    runGit: async () => {
+      throw new Error("An empty remote has nothing to compare against.");
+    },
+    runRemoteGit: async (request) => {
+      calls.push(request);
+      return "";
+    },
+  });
+
+  assert.deepEqual(calls.at(-1).args, [
+    "push",
+    "https://github.com/LUDIARS/Product.git",
+    `${MERGE_COMMIT}:refs/heads/main`,
+  ]);
+});
+
+test("still refuses a missing base branch when the repository has other refs", async () => {
+  await assert.rejects(
+    pushPublishedCommit({
+      repository: "LUDIARS/Product",
+      rootPath: "C:/Product",
+      baseRef: "main",
+      expectedBaseSha: EXPECTED_BASE,
+      mergeCommitSha: MERGE_COMMIT,
+      tag: null,
+      token: "installation-token",
+      runGit: async () => {
+        throw new Error("The publication must fail before comparing commits.");
+      },
+      runRemoteGit: async (request) => {
+        assert.equal(request.args[0], "ls-remote");
+        // No refs/heads/main, but the repository is not empty.
+        return `${REMOTE_BASE}	refs/heads/legacy`;
+      },
+    }),
+    /GitHub branch 'main' does not exist\./,
+  );
+});

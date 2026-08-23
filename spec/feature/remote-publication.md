@@ -14,7 +14,7 @@ related:
   - ../architecture.md
   - ./pr-lifecycle.md
   - ./security-scan.md
-updated: 2026-08-08
+updated: 2026-08-23
 ---
 
 # remote-publication — reviewed main and operator-triggered Release publication
@@ -42,6 +42,12 @@ currently checked-out registered base HEAD:
 5. create an annotated tag on current base HEAD;
 6. atomically push base plus tag through the GitHub App;
 7. create the GitHub Release and only then update local version state.
+
+公開先の base ブランチは既に GitHub 側に存在していることが前提で、Revisor は base
+を早送りするだけで作らない。例外は **ref を 1 つも持たない空のリポジトリ**への初回公開
+だけで、この場合は動かす履歴が無いので base ブランチを新規に作る (tag があれば同じ
+push に載せる)。ref を持つリポジトリで base だけが見つからないのは削除・改名の兆候
+なので、従来どおり `GitHub branch '<base>' does not exist.` で止める。
 
 Manual Release and PR merge share one publication coordinator. They cannot
 select a version or move base/tag refs concurrently. A stale or duplicate

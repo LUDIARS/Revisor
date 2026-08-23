@@ -151,6 +151,37 @@ async function remoteState({
   };
 }
 
+// A GitHub repository created but never pushed to has no refs at all.
+// Publishing into it has to create the base branch, because there is nothing
+// to move. This stays separate from "the base is missing on a repository that
+// has other refs": there the base was deleted or renamed, and recreating it
+// from a single merge would hide that.
+async function remoteHasNoRefs({ repository, rootPath, token, env, runRemoteGit }) {
+  const output = await runRemoteGit({
+    cwd: rootPath,
+    args: ["ls-remote", githubRemoteUrl(repository)],
+    token,
+    env,
+  });
+  return output.trim().length === 0;
+}
+
+// `--atomic` only matters once more than one ref moves; a single-refspec push
+// is already atomic and older remotes need not advertise the capability.
+function pushRefspecs({ repository, rootPath, refspecs, token, env, runRemoteGit }) {
+  return runRemoteGit({
+    cwd: rootPath,
+    args: [
+      "push",
+      ...(refspecs.length > 1 ? ["--atomic"] : []),
+      githubRemoteUrl(repository),
+      ...refspecs,
+    ],
+    token,
+    env,
+  });
+}
+
 export async function pushPublishedCommit({
   repository,
   rootPath,
@@ -173,7 +204,16 @@ export async function pushPublishedCommit({
     runRemoteGit,
   });
   if (!remote.baseSha) {
-    throw new RevisorError(`GitHub branch '${baseRef}' does not exist.`);
+    if (!await remoteHasNoRefs({ repository, rootPath, token, env, runRemoteGit })) {
+      throw new RevisorError(`GitHub branch '${baseRef}' does not exist.`);
+    }
+    // First publication. No remote history can be lost, so the branch is
+    // created by a plain push; the fast-forward checks below have nothing to
+    // compare against.
+    const initial = [`${mergeCommitSha}:refs/heads/${baseRef}`];
+    if (tag) initial.push(`refs/tags/${tag}:refs/tags/${tag}`);
+    await pushRefspecs({ repository, rootPath, refspecs: initial, token, env, runRemoteGit });
+    return;
   }
   let remoteAlreadyContainsMerge = remote.baseSha.toLowerCase() === mergeCommitSha.toLowerCase();
   if (!remoteAlreadyContainsMerge) {
@@ -213,17 +253,7 @@ export async function pushPublishedCommit({
   }
   if (tag && !remote.tagSha) refspecs.push(`refs/tags/${tag}:refs/tags/${tag}`);
   if (refspecs.length === 0) return;
-  await runRemoteGit({
-    cwd: rootPath,
-    args: [
-      "push",
-      ...(refspecs.length > 1 ? ["--atomic"] : []),
-      githubRemoteUrl(repository),
-      ...refspecs,
-    ],
-    token,
-    env,
-  });
+  await pushRefspecs({ repository, rootPath, refspecs, token, env, runRemoteGit });
 }
 
 export async function pushReleaseAtomically(request) {
