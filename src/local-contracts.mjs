@@ -9,6 +9,7 @@ const SAFE_COMMAND_PART = /^[^\0\r\n"&|<>^%!]*$/;
 const JAPANESE_CHARACTER = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/;
 const SENSITIVE_URL_PARAMETER =
   /^(?:access_?)?token$|^(?:api_?)?key$|^auth(?:orization)?$|^credential$|^password$|^secret$|^(?:sig|signature)$/i;
+const SHA = /^[a-f0-9]{40}$/i;
 
 function object(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -22,6 +23,26 @@ function text(value, label, maximum = 255) {
     throw new Error(`${label} is invalid.`);
   }
   return value.trim();
+}
+
+function nullableString(value, label, maximum = Infinity) {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length > maximum) {
+    throw new Error(`${label} is invalid.`);
+  }
+  return value;
+}
+
+function nonNegativeInteger(value, label) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+  return value;
+}
+
+function verificationTestIds(value) {
+  if (!Array.isArray(value)) throw new Error("bundle.testIds must be an array.");
+  return value.map((testId, index) => text(testId, `bundle.testIds[${index}]`));
 }
 
 function gitRef(value, label) {
@@ -276,5 +297,43 @@ export function validateReviewRetry(body) {
   object(body, "Request body");
   return {
     fastLane: reviewLaneFromOptIn(body.fast_lane) === REVIEW_LANES.FAST,
+  };
+}
+
+export function validateExternalVerification(body) {
+  object(body, "Request body");
+  const source = body.source;
+  if (source !== "augur") throw new Error("source is unsupported.");
+  if (typeof body.headSha !== "string" || !SHA.test(body.headSha)) {
+    throw new Error("headSha must be a 40-character hexadecimal SHA.");
+  }
+  const headSha = body.headSha.toLowerCase();
+  const decision = body.decision;
+  if (decision !== "accept") throw new Error("decision must be accept.");
+  const at = body.at;
+  if (typeof at !== "string") throw new Error("at must be an ISO timestamp.");
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(at) || Number.isNaN(Date.parse(at))) {
+    throw new Error("at must be an ISO timestamp.");
+  }
+  object(body.summary, "summary");
+  const summary = Object.fromEntries(
+    ["total", "passed", "failed", "skipped", "error"].map((key) =>
+      [key, nonNegativeInteger(body.summary[key], `summary.${key}`)]),
+  );
+  object(body.bundle, "bundle");
+  return {
+    source,
+    headSha,
+    runId: text(body.runId, "runId"),
+    decision,
+    by: text(body.by, "by"),
+    at,
+    summary,
+    bundle: {
+      kind: text(body.bundle.kind, "bundle.kind"),
+      testIds: verificationTestIds(body.bundle.testIds),
+    },
+    reportUrl: nullableString(body.reportUrl, "reportUrl"),
+    note: nullableString(body.note, "note", 2_000),
   };
 }

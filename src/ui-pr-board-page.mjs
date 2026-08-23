@@ -3,6 +3,7 @@ import { PR_DIFF_VIEW_SOURCE } from "./ui-pr-diff-view-script.mjs";
 import { renderPage } from "./ui-layout.mjs";
 import { PR_EVENTS_SOURCE } from "./ui-pr-events.mjs";
 import { PR_VIEW_SOURCE } from "./ui-pr-view-script.mjs";
+import { externalVerificationClears } from "./external-verification.mjs";
 
 // トップページは PR のトリアージ専用。 PC 幅では左にリスト・右に選択した PR の
 // 詳細の 2 ペインで、 リストを選び替えながら詳細を読み比べられる。 狭い画面では
@@ -336,6 +337,10 @@ const CONTROLLER_SOURCE = `
     testProducts.replaceChildren(...products.map((product) => {
       const item = element('li', product.checkStatus === 'test_ok' ? 'ok' : 'warn');
       item.textContent = product.repository + ' #' + product.number + ' — ' + product.status;
+      const verificationBadge = externalVerificationBadgeOf(product);
+      if (verificationBadge) {
+        item.append(badge(verificationBadge.label, verificationBadge.tone));
+      }
       item.addEventListener('click', () => selectPullRequest(product.pullRequestId));
       return item;
     }));
@@ -476,7 +481,7 @@ const CONTROLLER_SOURCE = `
   refresh().finally(connectPrEvents);
 `;
 
-const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${PR_DIFF_VIEW_SOURCE}${PR_FILTER_SOURCE}${PR_ACTION_SOURCE}${PR_EVENTS_SOURCE}${CONTROLLER_SOURCE}`;
+const SCRIPT = `${CLIENT_REQUEST_SOURCE}${externalVerificationClears.toString()}\n${PR_VIEW_SOURCE}${PR_DIFF_VIEW_SOURCE}${PR_FILTER_SOURCE}${PR_ACTION_SOURCE}${PR_EVENTS_SOURCE}${CONTROLLER_SOURCE}`;
 
 export function renderPrBoardPage(sessionToken) {
   return renderPage({

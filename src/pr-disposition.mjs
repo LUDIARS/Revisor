@@ -2,7 +2,8 @@ import {
   hasConcreteReviewFailure,
   isHumanOverrideableReviewHold,
 } from "./human-decision.mjs";
-import { riskBandOf } from "./merge-risk.mjs";
+import { effectiveMergeRisk, riskBandOf } from "./merge-risk.mjs";
+import { externalVerificationClears, externalVerificationDecision } from "./external-verification.mjs";
 
 // The dashboard's central question is "which of these needs me?". That answer is
 // derived at read time, not stored, so moving the risk threshold immediately
@@ -57,7 +58,7 @@ function blockersOf(pullRequest, thresholds) {
   }
   for (const reason of reasons) blockers.push(reason);
   if (pullRequest.humanQuestion) blockers.push(pullRequest.humanQuestion);
-  const risk = pullRequest.mergeRisk;
+  const risk = effectiveMergeRisk(pullRequest);
   if (risk && typeof risk.score === "number" && risk.score > thresholds.riskThreshold) {
     blockers.push(
       `マージリスク ${risk.score} が閾値 ${thresholds.riskThreshold} を超えています`,
@@ -66,6 +67,7 @@ function blockersOf(pullRequest, thresholds) {
   if (
     thresholds.requireRuntimeVerificationClear
     && pullRequest.runtimeVerification?.required
+    && !externalVerificationClears(pullRequest)
   ) {
     blockers.push("人間による動作確認が必要です");
   }
@@ -91,13 +93,15 @@ export function decidePullRequest(pullRequest, {
     && pullRequest.checkStatus !== "running";
   const blockers = settled ? blockersOf(pullRequest, thresholds) : [];
   const state = classifyDecision(pullRequest, blockers);
-  const score = pullRequest.mergeRisk?.score ?? null;
+  const mergeRisk = effectiveMergeRisk(pullRequest);
+  const score = mergeRisk?.score ?? null;
   const band = typeof score === "number" ? riskBandOf(score) : null;
   const humanOverrideMergeable = isHumanOverrideableReviewHold(pullRequest);
   const mergeable = pullRequest.status === "open"
     && (pullRequest.checkStatus === "test_ok" || humanOverrideMergeable);
   return {
     ...pullRequest,
+    ...(mergeRisk ? { mergeRisk } : {}),
     decision: {
       state,
       label: DECISION_STATES[state].label,
@@ -109,6 +113,7 @@ export function decidePullRequest(pullRequest, {
       riskBandLabel: band?.label ?? null,
       riskThreshold: autoMergeRiskThreshold,
       runtimeVerificationRequired: pullRequest.runtimeVerification?.required === true,
+      externalVerification: externalVerificationDecision(pullRequest),
       autoMergeEnabled,
       // Eligibility is the same predicate the automatic merge uses, so the badge
       // never claims something the merge path would refuse.

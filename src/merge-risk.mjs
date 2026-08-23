@@ -6,6 +6,7 @@
 // number by reading the factors instead of guessing at a black box.
 
 import { hasAnalyzableChangedAnchors } from "./review-gate.mjs";
+import { externalVerificationClears } from "./external-verification.mjs";
 
 // The reviewer is asked to emit this marker when the registered tests cannot
 // establish that the change works.
@@ -193,6 +194,9 @@ export function assessMergeRisk({
     `変更種別 ${classification.kinds.join("/") || "(なし)"}`,
   );
 
+  // An external verification is never priced here. It arrives after the review
+  // and is applied at read time by `effectiveMergeRisk`, so the stored factors
+  // stay a faithful record of what the review itself found.
   if (runtimeVerification?.required) {
     add("runtime_verification", 20, "人間による動作確認が必要な変更です");
   } else if (runtimeVerification?.score > 0) {
@@ -218,4 +222,27 @@ export function assessMergeRisk({
   const score = clamp(factors.reduce((total, factor) => total + factor.points, 0));
   const { band, label } = riskBandOf(score);
   return { score, band, bandLabel: label, factors };
+}
+
+// The stored risk is what the review found. A later external verification does
+// not rewrite it; it is replayed over the stored factors on every read, so the
+// number expires by itself the moment the head moves.
+export function effectiveMergeRisk(pullRequest) {
+  const risk = pullRequest.mergeRisk;
+  if (!risk || !externalVerificationClears(pullRequest)) return risk;
+  const factors = (risk.factors ?? []).filter((factor) =>
+    factor.code !== "runtime_verification");
+  // Nothing was priced for a runtime check, so there is nothing to clear.
+  if (factors.length === (risk.factors ?? []).length) return risk;
+  const { source, by, runId } = pullRequest.externalVerification;
+  factors.push({
+    code: "external_verification_cleared",
+    points: 0,
+    detail: `外部保証 ${source} / ${by} / ${runId} により動作確認を解除`,
+  });
+  // Re-sum rather than subtracting from the stored score: the stored score is
+  // clamped, so subtracting would leak the saturated remainder of other factors.
+  const score = clamp(factors.reduce((total, factor) => total + factor.points, 0));
+  const { band, label } = riskBandOf(score);
+  return { ...risk, score, band, bandLabel: label, factors };
 }

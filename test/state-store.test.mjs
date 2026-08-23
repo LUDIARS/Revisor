@@ -42,6 +42,7 @@ test("projects an open PR for early QA while review is queued", () => {
       qaMode: "early",
       headSha: "a".repeat(40),
       reviewedHeadSha: null,
+      externalVerification: null,
       updatedAt: "2026-07-28T00:00:00.000Z",
     }]);
     store.updatePullRequest(pullRequest.id, { checkStatus: "running" });
@@ -60,8 +61,22 @@ test("projects an open PR for early QA while review is queued", () => {
       qaMode: "approved",
       headSha: "a".repeat(40),
       reviewedHeadSha: "a".repeat(40),
+      externalVerification: null,
       updatedAt: "2026-07-28T00:00:00.000Z",
     }]);
+    const externalVerification = {
+      source: "augur",
+      headSha: "a".repeat(40),
+      runId: "run-1",
+      decision: "accept",
+      by: "neco",
+      at: "2026-08-23T00:00:00.000Z",
+    };
+    store.updatePullRequest(pullRequest.id, { externalVerification });
+    assert.deepEqual(
+      store.testWorkflowProducts()[0].externalVerification,
+      externalVerification,
+    );
     const reloaded = new LocalPrStore({ path });
     assert.equal(reloaded.getPullRequest(pullRequest.id).checkStatus, "test_ok");
   } finally {
@@ -288,6 +303,8 @@ test("migrates a v1 per-repository numbered state to the global sequence", () =>
     const numbered = Object.fromEntries(
       store.listPullRequests().map((pullRequest) => [pullRequest.id, pullRequest.number]),
     );
+    assert.equal(store.listPullRequests().every((pullRequest) =>
+      pullRequest.externalVerification === null), true);
     // createdAt 昇順で 1 から振り直す。
     assert.deepEqual(numbered, {
       "LUDIARS/Revisor-1": 1,

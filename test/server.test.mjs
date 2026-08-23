@@ -500,6 +500,7 @@ test("filters and summarizes local PR lists without changing the default respons
   const pullRequests = [{
     id: "pr-open", number: 1, repository: "LUDIARS/Revisor", title: "Open PR",
     status: "open", checkStatus: "queued", reviewLane: "standard",
+    headSha: "a".repeat(40), externalVerification: null,
     createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:01:00.000Z",
     decision: { state: "needs_human" }, body: "full record",
   }, {
@@ -522,6 +523,7 @@ test("filters and summarizes local PR lists without changing the default respons
   assert.deepEqual(JSON.parse(summary.body).pullRequests, [{
     id: "pr-open", number: 1, repository: "LUDIARS/Revisor", title: "Open PR",
     status: "open", checkStatus: "queued", reviewLane: "standard",
+    headSha: "a".repeat(40), externalVerification: null,
     createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:01:00.000Z",
     decision: { state: "needs_human" },
   }]);

@@ -602,6 +602,43 @@ export class LocalPrService {
     return pullRequest ? decidePullRequest(pullRequest, this.loadSettings()) : null;
   }
 
+  recordExternalVerification(id, verification) {
+    const pullRequest = this.store.getPullRequest(id);
+    if (!pullRequest) {
+      const error = new Error("Local PR was not found.");
+      error.status = 404;
+      error.body = {
+        error: {
+          code: "not_found",
+          message: error.message,
+        },
+      };
+      throw error;
+    }
+    const record = (current) => {
+      if (current.status !== "open") {
+        const error = new Error("External verification can only be recorded for an open local PR.");
+        error.status = 409;
+        error.body = { error: error.message, status: current.status };
+        throw error;
+      }
+      if (verification.headSha !== current.headSha) {
+        const error = new Error("External verification head SHA does not match the local PR.");
+        error.status = 409;
+        error.body = { error: error.message, headSha: current.headSha };
+        throw error;
+      }
+      return {
+        externalVerification: { ...verification, recordedAt: new Date().toISOString() },
+      };
+    };
+    // Status and head are checked inside the write transaction, not against the
+    // record read above: a daemon-less retry or close can move either from
+    // another process between the lookup and the write.
+    const recorded = this.store.updatePullRequestWith(id, record);
+    return decidePullRequest(recorded, this.loadSettings());
+  }
+
   // Board order is derived from current mergeability and creation time. Keeping
   // it at read time makes a just-approved PR move immediately without rewriting
   // stored records.

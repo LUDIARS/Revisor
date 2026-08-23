@@ -37,6 +37,8 @@ export function summaryProjection(pullRequest) {
     status: pullRequest.status,
     checkStatus: pullRequest.checkStatus,
     reviewLane: pullRequest.reviewLane ?? null,
+    headSha: pullRequest.headSha,
+    externalVerification: pullRequest.externalVerification ?? null,
     createdAt: pullRequest.createdAt,
     updatedAt: pullRequest.updatedAt,
     decision: pullRequest.decision,

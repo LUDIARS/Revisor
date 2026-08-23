@@ -12,9 +12,10 @@ import {
 } from "./config.mjs";
 import { resolveAnatomiaCli } from "./anatomia.mjs";
 import {
-  validateReviewRetry,
+  validateExternalVerification,
   validatePullRequestSubmission,
   validateRepositoryRegistration,
+  validateReviewRetry,
 } from "./local-contracts.mjs";
 import {
   validateManualRelease,
@@ -257,6 +258,16 @@ export function createUiRequestHandler({
         });
         return;
       }
+      const verification = /^\/api\/local-prs\/([^/]+)\/verification$/.exec(url.pathname);
+      if (request.method === "POST" && verification) {
+        sendJson(response, 200, {
+          pullRequest: localPrService.recordExternalVerification(
+            decodeURIComponent(verification[1]),
+            validateExternalVerification(await readJsonBody(request)),
+          ),
+        });
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/api/test-workflow") {
         sendJson(response, 200, {
           products: localPrService.testWorkflowProducts(),
@@ -331,6 +342,10 @@ export function createUiRequestHandler({
       }
       sendJson(response, 404, { error: "Not found." });
     } catch (error) {
+      if ((error?.status === 404 || error?.status === 409) && error?.body) {
+        sendJson(response, error.status, error.body);
+        return;
+      }
       sendJson(response, 400, {
         error: error instanceof Error ? error.message : "Request failed.",
       });

@@ -78,6 +78,17 @@ function parseRecords(rows) {
   return rows.map((row) => JSON.parse(row.record));
 }
 
+// Legacy JSON and databases predate external verification. Normalize that
+// absence at the persistence boundary so every current full PR shape includes
+// the field without rewriting imported evidence.
+function parsePullRequestRecord(record) {
+  const pullRequest = JSON.parse(record);
+  return {
+    ...pullRequest,
+    externalVerification: pullRequest.externalVerification ?? null,
+  };
+}
+
 export class LocalPrStore {
   #database = null;
   #writes = 0;
@@ -173,12 +184,13 @@ export class LocalPrStore {
   }
 
   #allPullRequests(database) {
-    return parseRecords(database.prepare("SELECT record FROM pull_requests").all());
+    return database.prepare("SELECT record FROM pull_requests").all()
+      .map((row) => parsePullRequestRecord(row.record));
   }
 
   #getPullRequestRecord(database, id) {
     const row = database.prepare("SELECT record FROM pull_requests WHERE id = ?").get(id);
-    return row ? JSON.parse(row.record) : null;
+    return row ? parsePullRequestRecord(row.record) : null;
   }
 
   #savePullRequest(database, record) {
@@ -295,6 +307,7 @@ export class LocalPrStore {
         publication: null,
         deferredPublishReason: null,
         publishedAt: null,
+        externalVerification: null,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -418,6 +431,7 @@ export class LocalPrStore {
         // 審査中は reviewed head を出さない。 出すと先行QAの記録が審査済みの証拠に
         // 化ける。
         reviewedHeadSha: approved ? (latest.reviewedHeadSha ?? null) : null,
+        externalVerification: latest.externalVerification ?? null,
         updatedAt: latest.updatedAt,
       }];
     });

@@ -162,7 +162,8 @@ the submitting Concordia session (optional), a sequential number drawn from one
 sequence shared by every registered repository, base/head refs, exact original
 SHAs, workflow status, CI outcomes, projected Anatomia data, leakage locations,
 the security scan outcome and its finding locations, the review plan, the
-merge-risk and runtime-verification assessments, the automatic merge outcome,
+merge-risk and runtime-verification assessments, the external verification
+record, the automatic merge outcome,
 the final reviewed SHA, and the latest narrative-reconciliation head checkpoint.
 The checkpoint only suppresses repeated presentation work and is not review
 evidence. The test workflow is a derived view containing the latest Open PR per
@@ -180,7 +181,10 @@ stored state always yields the same numbers.
 Whether a pull request needs a human is not stored. It is derived on every read
 from the stored assessments and the current settings, so moving the accepted
 risk threshold re-colours, re-orders, and re-qualifies the board immediately
-without re-reviewing anything.
+without re-reviewing anything. The external verification record is evidence from
+a separate test workflow; its effect is also derived on every read, so it expires
+naturally when the PR head moves. See
+[external-verification](feature/external-verification.md).
 
 Re-reviewing an open local PR re-resolves both refs, discards the previous
 run's outcome, and admits a new run even when neither ref moved.

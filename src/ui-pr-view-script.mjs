@@ -68,6 +68,20 @@ export const PR_VIEW_SOURCE = `
     return element('span', 'badge ' + (tone || 'idle'), label);
   }
 
+  // The compact PR list and Test Workflow render the same serialized evidence.
+  // Keep their label/tone projection pure and share the current-head predicate
+  // with server-side disposition and merge-risk.
+  function externalVerificationBadgeOf(pr) {
+    if (pr.checkStatus !== 'test_ok' || !pr.externalVerification) return null;
+    const current = externalVerificationClears(pr);
+    return {
+      label: current
+        ? 'Augur 保証 (by ' + text(pr.externalVerification.by) + ')'
+        : 'Augur 保証 (古い head)',
+      tone: current ? 'ok' : 'idle',
+    };
+  }
+
   function menuDecisionLabel(pr) {
     if (pr.checkStatus === 'test_ok') return 'Test OK';
     return pr.decision.state === 'needs_human' ? 'レビュー項目があります' : pr.decision.label;
@@ -85,6 +99,8 @@ export const PR_VIEW_SOURCE = `
       badge(menuDecisionLabel(pr), menuTone),
     );
     card.append(head);
+    const verificationBadge = externalVerificationBadgeOf(pr);
+    if (verificationBadge) card.append(badge(verificationBadge.label, verificationBadge.tone));
     card.append(element('div', 'card-repository', pr.repository));
     card.append(element('div', 'card-title', pr.title));
     const activate = () => select(pr.id);

@@ -9,6 +9,7 @@ import {
 import { renderSettingsPage } from "../src/ui-settings-page.mjs";
 import { renderReleasePage } from "../src/ui-release-page.mjs";
 import { PR_VIEW_SOURCE } from "../src/ui-pr-view-script.mjs";
+import { externalVerificationClears } from "../src/external-verification.mjs";
 import {
   isAllowedHost,
   isAuthorizedSession,
@@ -83,6 +84,8 @@ test("the PR page explains early QA above the board", () => {
   assert.match(page, /審査中は先行QA/);
   assert.match(page, /審査通過後は確定QA/);
   assert.match(page, /request\('\/api\/test-workflow'\)/);
+  assert.match(page, /Augur 保証 \(by /);
+  assert.match(page, /Augur 保証 \(古い head\)/);
 });
 
 test("the PR board fetches only open summaries for its list", () => {
@@ -424,7 +427,10 @@ test("the PR detail renders the Anatomia front-gate outcome", () => {
 });
 
 function renderCard(pr) {
-  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn prCard;`);
+  const view = new Function(
+    "document",
+    `${externalVerificationClears.toString()}\n${PR_VIEW_SOURCE}\nreturn prCard;`,
+  );
   return view(fakeDocument())(pr, null, () => {});
 }
 
@@ -594,6 +600,37 @@ test("a Test OK PR overrides a human-decision label with a green Test OK badge",
   });
   assert.deepEqual(flatten(card), ["#8", "Test OK", "Revisor", "approved"]);
   assert.equal(card.dataset.tone, "ok");
+});
+
+test("a Test OK card shows current and stale Augur verification badges", () => {
+  const record = {
+    source: "augur",
+    headSha: "a".repeat(40),
+    runId: "run-1",
+    decision: "accept",
+    by: "neco",
+    at: "2026-08-23T00:00:00.000Z",
+  };
+  const base = {
+    id: "pr-ok",
+    number: 8,
+    repository: "Revisor",
+    title: "approved",
+    status: "open",
+    checkStatus: "test_ok",
+    decision: { state: "auto_ok", label: "自動マージ可", tone: "ok" },
+    externalVerification: record,
+  };
+  assert.equal(
+    flatten(renderCard({ ...base, headSha: record.headSha }))
+      .includes("Augur 保証 (by neco)"),
+    true,
+  );
+  assert.equal(
+    flatten(renderCard({ ...base, headSha: "b".repeat(40) }))
+      .includes("Augur 保証 (古い head)"),
+    true,
+  );
 });
 
 test("the PR detail renders structured source links safely", () => {
