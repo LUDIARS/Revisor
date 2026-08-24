@@ -1,5 +1,6 @@
 import { analyzePr, ensureInitialAnalysis } from "./anatomia.mjs";
 import { runPlannedTests } from "./ci.mjs";
+import { configuredForcedReviewEffort } from "./forced-review-effort.mjs";
 import { configuredForcedReviewModel } from "./forced-review-model.mjs";
 import { runReviewer } from "./reviewer.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
@@ -27,6 +28,7 @@ export async function runReviewWork(work, {
   review = runReviewer,
   security = runSecurityScan,
   forcedReviewModel = configuredForcedReviewModel,
+  forcedReviewEffort = configuredForcedReviewEffort,
 } = {}) {
   if (!work || typeof work !== "object") {
     throw new TypeError("Review work must be an object.");
@@ -46,7 +48,11 @@ export async function runReviewWork(work, {
       // 審査ステージはすべてここを通るので、強制モデルの解決はこの 1 箇所で
       // 済む。judge / investigator / test autofix / narrative / plan advisor の
       // どの経路も個別に設定を読まない。
-      return review({ forcedModel: forcedReviewModel(), ...options });
+      return review({
+        forcedModel: forcedReviewModel(),
+        forcedEffort: forcedReviewEffort(),
+        ...options,
+      });
     case REVIEW_WORK_STAGES.SECURITY:
       return security(options);
     default:

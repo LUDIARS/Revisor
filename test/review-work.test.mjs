@@ -11,6 +11,7 @@ test("runs exactly the requested review stage", async () => {
     review: async (options) => { invoked.push(["review", options]); return "review"; },
     security: async (options) => { invoked.push(["security", options]); return "security"; },
     forcedReviewModel: () => "",
+    forcedReviewEffort: () => "",
   };
   const cases = [
     [REVIEW_WORK_STAGES.ANALYZE, "analysis", "anatomia"],

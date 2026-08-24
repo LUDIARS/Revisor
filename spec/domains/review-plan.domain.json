@@ -1,6 +1,6 @@
 {
   "name": "review-plan",
-  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, an operator-selectable opposite-model review policy, bounded test autofix, capacity fallback, model-free deterministic re-verification, and best-effort PR narrative reconciliation, and an operator-set forced review model that overrides reviewer selection, tier-derived model choice and the capacity family switch.",
+  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, an operator-selectable opposite-model review policy, bounded test autofix, capacity fallback, model-free deterministic re-verification, best-effort PR narrative reconciliation, and operator-set forced review model and effort overrides.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -23,13 +23,13 @@
       "pathPattern": "(^|/)test/(?:anatomia|intent-review-checkpoint|retry-review-content-match|runner-verification-cleanup)\\.test\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)src/forced-review-model\\.mjs$"
+      "pathPattern": "(^|/)src/forced-review-(?:model|effort)\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/forced-review-model\\.test\\.mjs$"
     },
     {
-      "namePattern": "isForcedReviewModel|forcedReviewerFor|configuredForcedReviewModel"
+      "namePattern": "isForcedReviewModel|forcedReviewerFor|configuredForcedReviewModel|isForcedReviewEffort|configuredForcedReviewEffort"
     }
   ],
   "cardTemplate": "Summarise the review-plan domain: stage selection, reviewer model/effort strategy, bounded autofix, capacity fallback, validation mode, partial verification evidence reuse, and PR narrative reconciliation.",
@@ -42,7 +42,7 @@
     "deterministic-re-verification",
     "cost-validation-mode",
     "pr-narrative-reconciliation",
-    "forced-review-model"
+    "forced-review-profile"
   ],
   "specRefs": [
     "review-plan — 変更種別と規模ごとの審査ステージ設計",

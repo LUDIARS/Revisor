@@ -242,8 +242,10 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 
 通常、レビューモデルは差分規模と Anatomia の編集ドメイン数から tier (economy / strong) が
 選ばれ、tier がモデルを決める。運用側で「しばらく全部このモデルで見たい」ときに、その自動
-選択ごと踏み潰す設定が `forcedReviewModel` である。空文字が既定で、そのときの挙動は従来と
-1 バイトも変わらない。
+選択ごと踏み潰す設定が `forcedReviewModel` である。`forcedReviewEffort` は同様に各 review
+stage が選んだ effort を上書きする。モデルは空文字が既定で、そのときは従来のモデル選択を
+維持する。effort は 2026-08-23 の運用指示により `medium` を既定とし、空文字へ明示変更した
+場合だけ差分ごとの戦略へ戻す。
 
 1. 値は自由入力にせず、登録済みモデル id だけを受け付ける。値は `--model` として argv に
    載るうえ、「そのモデルがどちらのレビュアー系列か」が分からないと `codex` に `--model opus`
@@ -284,3 +286,6 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
    SPEC-FORCED-REVIEW-MODEL 3 のとおり切り替えない。
 5. モデルの強制指定はこの設定より強い。`forcedReviewModel` があるときは反対モデル
    レビューの有効・無効に関わらず指定モデルの系列が使われる。
+6. `forcedReviewEffort` は `low` / `medium` / `high` または空文字だけを受け付ける。
+   設定中は investigator、judge、test autofix、narrative、plan advisor の指定 effort より
+   優先する。Codex Security は reviewer stage ではないため、専用の `securityScanEffort` を使う。

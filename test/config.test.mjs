@@ -201,6 +201,8 @@ test("stores settings and encrypts local workflow secrets", () => {
       oppositeModelReviewEnabled: true,
       // 空文字は「モデルを強制しない」。
       forcedReviewModel: "",
+      // 運用既定ですべての reviewer stage を Mid に固定する。
+      forcedReviewEffort: "medium",
       concordiaContextEnabled: true,
       workerCount: 1,
       fastLaneSlots: 0,
@@ -306,6 +308,33 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.equal(readSettings(state.env).costValidationSkipReview, true);
     assert.equal(readSettings(state.env).costValidationSkipGenius, true);
     assert.equal(readSettings(state.env).costValidationSkipAnatomiaDomain, true);
+  } finally {
+    rmSync(state.directory, { recursive: true, force: true });
+  }
+});
+
+test("defaults a missing forced review effort but disables a corrupt stored override", () => {
+  const state = fixture();
+  try {
+    writeFileSync(state.path, `${JSON.stringify({
+      version: 1,
+      settings: {},
+      secrets: {},
+    })}\n`, "utf8");
+    assert.equal(readSettings(state.env).forcedReviewEffort, "medium");
+
+    writeFileSync(state.path, `${JSON.stringify({
+      version: 1,
+      settings: { forcedReviewEffort: "ultra" },
+      secrets: {},
+    })}\n`, "utf8");
+    assert.equal(readSettings(state.env).forcedReviewEffort, "");
+    assert.throws(() => writeSettings({
+      anatomiaFolder: "/abs/Anatomia",
+      fallbackReviewer: "codex-sol",
+      forcedReviewEffort: "ultra",
+      workerCount: 1,
+    }, state.env), /Forced review effort is invalid/);
   } finally {
     rmSync(state.directory, { recursive: true, force: true });
   }

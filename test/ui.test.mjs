@@ -336,6 +336,16 @@ test("the settings page owns the security scan effort and model", () => {
   assert.match(page, /<option value="xhigh">xhigh<\/option>/);
 });
 
+test("the settings page owns the forced review effort", () => {
+  const page = renderSettingsPage("session-nonce");
+  assert.match(page, /id="forced-review-effort"/);
+  assert.match(page, /state\.settings\.forcedReviewEffort \?\? ''/);
+  assert.match(
+    page,
+    /forcedReviewEffort: document\.querySelector\('#forced-review-effort'\)\.value/,
+  );
+});
+
 // 作業領域の入力欄が落ちると、読み込み時の `.value` 代入で設定ページ全体が死ぬ。
 // 欄と送信の両方をここで固定する。
 test("the settings page owns the review scratch root", () => {

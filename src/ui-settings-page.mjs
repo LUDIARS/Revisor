@@ -40,6 +40,16 @@ const BODY = `
         <span class="note">指定するとレビュアー選定・tier によるモデル選択・容量不足時の系列切替をすべて上書きし、全レビューがこのモデルで走ります。容量不足になっても別系列へは切り替わらず、審査が失敗として表面化します。</span>
       </div>
       <div class="field">
+        <label for="forced-review-effort">レビュー effort の強制指定</label>
+        <select id="forced-review-effort">
+          <option value="">強制しない（レビュー戦略から自動選択）</option>
+          <option value="low">Low に固定</option>
+          <option value="medium">Medium に固定</option>
+          <option value="high">High に固定</option>
+        </select>
+        <span class="note">指定すると investigator、judge、test autofix、narrative、plan advisor を含む全レビューの effort を上書きします。Codex Security スキャンは独立した設定です。</span>
+      </div>
+      <div class="field">
         <label class="check">
           <input id="anatomia-review-gate" type="checkbox">
           LLM レビュー前に Anatomia の機械ゲートを実行する
@@ -232,6 +242,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
     document.querySelector('#opposite-model-review').checked =
       state.settings.oppositeModelReviewEnabled === true;
     document.querySelector('#forced-review-model').value = state.settings.forcedReviewModel ?? '';
+    document.querySelector('#forced-review-effort').value = state.settings.forcedReviewEffort ?? '';
     document.querySelector('#anatomia-review-gate').checked = state.settings.anatomiaReviewGateEnabled;
     document.querySelector('#worker-count').value = String(state.settings.workerCount);
     document.querySelector('#fast-lane-slots').value = String(state.settings.fastLaneSlots);
@@ -302,6 +313,7 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           fallbackReviewer: document.querySelector('#fallback-reviewer').value,
           oppositeModelReviewEnabled: document.querySelector('#opposite-model-review').checked,
           forcedReviewModel: document.querySelector('#forced-review-model').value,
+          forcedReviewEffort: document.querySelector('#forced-review-effort').value,
           anatomiaReviewGateEnabled: document.querySelector('#anatomia-review-gate').checked,
           workerCount: Number(document.querySelector('#worker-count').value),
           fastLaneSlots: Number(document.querySelector('#fast-lane-slots').value),

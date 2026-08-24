@@ -13,6 +13,7 @@ import { isDiscordWebhookUrl } from "./discord-webhook.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { defaultFastLaneSlots, fastLaneReservation } from "./review-lane.mjs";
 import { isForcedReviewModel } from "./forced-review-model.mjs";
+import { isForcedReviewEffort } from "./forced-review-effort.mjs";
 
 const LOCAL_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CONFIG_PATH_ENV = "REVISOR_CONFIG_PATH";
@@ -64,6 +65,9 @@ function defaults() {
     // 空文字は「強制しない」。差分規模から選ばれる tier ごとモデルを
     // 踏み潰して全審査を1モデルに固定したいときだけ設定する。
     forcedReviewModel: "",
+    // neco の運用指示 (2026-08-23) により全審査を Mid に固定する。空文字へ
+    // 明示変更すれば、差分ごとの review strategy に effort 選択を戻せる。
+    forcedReviewEffort: "medium",
     concordiaContextEnabled: true,
     workerCount: 1,
     fastLaneSlots: 0,
@@ -244,6 +248,12 @@ export function readSettings(env = process.env) {
     forcedReviewModel: isForcedReviewModel(value.forcedReviewModel)
       ? value.forcedReviewModel
       : base.forcedReviewModel,
+    // A missing key is a legacy config and adopts the operational default.
+    // An explicitly persisted unknown value is different: do not silently turn
+    // a corrupt override into a valid forced effort.
+    forcedReviewEffort: value.forcedReviewEffort === undefined
+      ? base.forcedReviewEffort
+      : isForcedReviewEffort(value.forcedReviewEffort) ? value.forcedReviewEffort : "",
     concordiaContextEnabled: value.concordiaContextEnabled !== false,
     workerCount,
     fastLaneSlots,
@@ -322,6 +332,12 @@ export function writeSettings(settings, env = process.env) {
     : settings.forcedReviewModel;
   if (!isForcedReviewModel(forcedReviewModel)) {
     throw new RevisorError("Forced review model is invalid.");
+  }
+  const forcedReviewEffort = settings.forcedReviewEffort === undefined
+    ? current.forcedReviewEffort
+    : settings.forcedReviewEffort;
+  if (!isForcedReviewEffort(forcedReviewEffort)) {
+    throw new RevisorError("Forced review effort is invalid.");
   }
   const skipCostValidation = (key) => {
     if (settings[key] !== undefined) return settings[key] === true;
@@ -440,6 +456,7 @@ export function writeSettings(settings, env = process.env) {
       ? current.oppositeModelReviewEnabled
       : settings.oppositeModelReviewEnabled === true,
     forcedReviewModel,
+    forcedReviewEffort,
     concordiaContextEnabled: settings.concordiaContextEnabled !== false,
     workerCount,
     fastLaneSlots,

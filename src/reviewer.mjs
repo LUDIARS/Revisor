@@ -93,6 +93,7 @@ export async function runReviewer({
   // レビューを呼ぶだけのテストがマシンの設定に左右される。注入点は
   // review-work.mjs の REVIEW ステージ 1 箇所に集約する。
   forcedModel = "",
+  forcedEffort = "",
 }, {
   runCli = runCodexAwareCli,
   sessionIdFactory = randomUUID,
@@ -107,7 +108,7 @@ export async function runReviewer({
   const invocation = reviewerInvocation(activeReviewer, {
     readOnly,
     tier,
-    effort,
+    effort: forcedEffort || effort,
     sessionId,
     forcedModel,
   });

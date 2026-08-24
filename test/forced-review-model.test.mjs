@@ -6,6 +6,10 @@ import {
   forcedReviewerFor,
   isForcedReviewModel,
 } from "../src/forced-review-model.mjs";
+import {
+  configuredForcedReviewEffort,
+  isForcedReviewEffort,
+} from "../src/forced-review-effort.mjs";
 import { reviewerInvocation, runReviewer } from "../src/reviewer.mjs";
 import { runReviewWithCapacityFallback } from "../src/runner.mjs";
 
@@ -46,6 +50,34 @@ test("replaces the tier-derived model on both reviewer families", () => {
     "exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium",
     "--sandbox", "workspace-write", "-",
   ]);
+});
+
+test("accepts only supported forced review efforts", () => {
+  assert.equal(isForcedReviewEffort(""), true);
+  assert.equal(isForcedReviewEffort("medium"), true);
+  assert.equal(isForcedReviewEffort("xhigh"), false);
+  assert.equal(configuredForcedReviewEffort({}, () => ({ forcedReviewEffort: "medium" })), "medium");
+  assert.equal(configuredForcedReviewEffort({}, () => ({ forcedReviewEffort: "bogus" })), "");
+});
+
+test("forces medium effort even when the review strategy requested high", async () => {
+  let invocation = null;
+  await runReviewer({
+    reviewer: "codex-sol",
+    cwd: "C:/work/head",
+    prompt: "review",
+    timeoutMs: 1000,
+    effort: "high",
+    forcedModel: "gpt-5.6-sol",
+    forcedEffort: "medium",
+  }, {
+    runCli: async (options) => {
+      invocation = options;
+      return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+    },
+  });
+  assert.ok(invocation.args.includes("model_reasoning_effort=medium"));
+  assert.equal(invocation.args.includes("model_reasoning_effort=high"), false);
 });
 
 test("refuses a forced model that belongs to the other reviewer family", () => {
@@ -159,12 +191,14 @@ test("resolves the configured override once, at the review stage entry point", a
     options: { reviewer: "codex-sol", cwd: "C:/work/head", prompt: "review" },
   }, {
     forcedReviewModel: () => "opus",
+    forcedReviewEffort: () => "medium",
     review: async (options) => {
       seen = options;
       return { ok: true };
     },
   });
   assert.equal(seen.forcedModel, "opus");
+  assert.equal(seen.forcedEffort, "medium");
   assert.equal(seen.reviewer, "codex-sol");
 });
 
@@ -176,10 +210,12 @@ test("lets an explicit option win over the configured override", async () => {
     options: { reviewer: "codex-sol", cwd: "C:/work/head", prompt: "r", forcedModel: "" },
   }, {
     forcedReviewModel: () => "opus",
+    forcedReviewEffort: () => "high",
     review: async (options) => {
       seen = options;
       return { ok: true };
     },
   });
   assert.equal(seen.forcedModel, "");
+  assert.equal(seen.forcedEffort, "high");
 });
