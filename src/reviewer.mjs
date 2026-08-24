@@ -1,18 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { claudeSessionCapacityUnavailable } from "./claude-capacity.mjs";
 import { forcedReviewerFor } from "./forced-review-model.mjs";
-import { runCodexAwareCli } from "./codex-runtime.mjs";
+import { codexSandboxArgs, runCodexAwareCli } from "./codex-runtime.mjs";
 
 // Persisted reviewer ids identify a provider family for config compatibility.
 // The review strategy chooses its concrete economy/strong model and effort;
 // keeping that choice explicit prevents every stored Claude id from silently
 // becoming Opus again.
+/** @implements SPEC-CODEX-SANDBOX-MODE */
 export function reviewerInvocation(reviewer, {
   readOnly = false,
   tier = "economy",
   effort = "medium",
   sessionId = null,
   forcedModel = "",
+  env = process.env,
+  platform = process.platform,
 } = {}) {
   // A forced model replaces the tier-derived one but must belong to the
   // reviewer being invoked; the callers resolve the reviewer from the same
@@ -46,8 +49,7 @@ export function reviewerInvocation(reviewer, {
         forcedModel || (tier === "strong" ? "gpt-5.6-sol" : "gpt-5.6-terra"),
         "-c",
         `model_reasoning_effort=${effort}`,
-        "--sandbox",
-        readOnly ? "read-only" : "workspace-write",
+        ...codexSandboxArgs(readOnly, env, platform),
         "-",
       ],
     };

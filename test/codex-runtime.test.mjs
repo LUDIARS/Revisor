@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   buildWslCodexArgs,
   codexRuntimeConfig,
+  codexSandboxArgs,
+  codexSandboxMode,
   posixShellQuote,
   quoteWslBinary,
   runCodexAwareCli,
@@ -217,6 +219,35 @@ test("routes only codex through WSL, leaving other CLIs on the native path", asy
   // Only the launcher variables reach wsl.exe, and WSLENV is neutralised so the
   // host's own WSLENV cannot smuggle GITHUB_TOKEN across the boundary.
   assert.deepEqual(spawned.env, { PATH: "C:\\Windows\\System32", WSLENV: "" });
+});
+
+// sandbox 切替は綴り間違いを黙って sandboxed へ落とすと「設定したつもりで
+// リーク続行」になるため、runtime と同じく fail-fast を検証する。
+test("codexSandboxArgs picks the sandbox flags from REVISOR_CODEX_SANDBOX", () => {
+  assert.deepEqual(codexSandboxArgs(false, {}), ["--sandbox", "workspace-write"]);
+  assert.deepEqual(codexSandboxArgs(true, {}), ["--sandbox", "read-only"]);
+  const env = { REVISOR_CODEX_SANDBOX: "danger-full-access" };
+  assert.deepEqual(codexSandboxArgs(false, env, "win32"), ["--sandbox", "danger-full-access"]);
+  assert.deepEqual(codexSandboxArgs(true, env, "win32"), ["--sandbox", "danger-full-access"]);
+});
+
+test("codexSandboxMode rejects unknown values instead of silently sandboxing", () => {
+  assert.throws(
+    () => codexSandboxMode({ REVISOR_CODEX_SANDBOX: "full" }),
+    /invalid REVISOR_CODEX_SANDBOX/,
+  );
+});
+
+test("danger-full-access is limited to the affected native Windows runtime", () => {
+  const danger = { REVISOR_CODEX_SANDBOX: "danger-full-access" };
+  assert.throws(
+    () => codexSandboxArgs(false, danger, "linux"),
+    /only supported on Windows hosts/,
+  );
+  assert.throws(
+    () => codexSandboxArgs(false, { ...danger, REVISOR_CODEX_RUNTIME: "wsl" }, "win32"),
+    /requires REVISOR_CODEX_RUNTIME=native/,
+  );
 });
 
 // wsl.exe only exists on Windows. Silently falling back to native would recreate

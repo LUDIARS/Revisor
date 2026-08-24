@@ -52,6 +52,48 @@ export function codexRuntimeConfig(env = process.env) {
   };
 }
 
+// Windows 版 codex は sandbox 起動 (read-only / workspace-write) のたびに
+// `CreateProcessWithLogonW` で lsass ログオンセッションを作って解放しない
+// (冒頭コメントの upstream #33356 / #35940)。runtime=native のままリーク源を
+// 断つには sandbox 起動そのものを外すしかないので、審査 CLI の sandbox 引数を
+// 環境変数で sandbox mode を `danger-full-access` へ差し替えられるように
+// する。信頼済みローカルリポの審査専用。綴り間違いは runtime と同じ理由で
+// fail-fast にする (黙って sandboxed へ落とすと「設定したつもりでリーク続行」になる)。
+const SANDBOX_ENV = "REVISOR_CODEX_SANDBOX";
+const SANDBOX_MODES = new Set(["sandboxed", "danger-full-access"]);
+
+/** @implements SPEC-CODEX-SANDBOX-MODE */
+export function codexSandboxMode(env = process.env) {
+  const mode = trimmed(env, SANDBOX_ENV) || "sandboxed";
+  if (!SANDBOX_MODES.has(mode)) {
+    throw new RevisorError(
+      `invalid ${SANDBOX_ENV}: '${mode}' (must be sandboxed or danger-full-access).`,
+    );
+  }
+  return mode;
+}
+
+/** `codex exec` の sandbox 関連 argv。danger-full-access では sandbox 起動を外す。 */
+/** @implements SPEC-CODEX-SANDBOX-MODE */
+export function codexSandboxArgs(readOnly, env = process.env, platform = process.platform) {
+  if (codexSandboxMode(env) === "danger-full-access") {
+    if (platform !== "win32") {
+      throw new RevisorError(
+        `${SANDBOX_ENV}=danger-full-access is only supported on Windows hosts affected by the native sandbox leak.`,
+      );
+    }
+    if (codexRuntimeConfig(env).runtime !== "native") {
+      throw new RevisorError(
+        `${SANDBOX_ENV}=danger-full-access requires ${RUNTIME_ENV}=native.`,
+      );
+    }
+    // Keep the normal approval policy intact; only the sandbox mode needs to
+    // change to avoid the Windows sandbox launcher's leaking logon sessions.
+    return ["--sandbox", "danger-full-access"];
+  }
+  return ["--sandbox", readOnly ? "read-only" : "workspace-write"];
+}
+
 /** @implements SPEC-CODEX-WSL-RUNTIME */
 export function windowsPathToWslPath(windowsPath) {
   const match = DRIVE_ABSOLUTE_PATTERN.exec(windowsPath);

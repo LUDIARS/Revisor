@@ -19,6 +19,18 @@ test("uses the lower-cost model tier for both reviewer providers", () => {
   });
 });
 
+test("REVISOR_CODEX_SANDBOX=danger-full-access drops the codex sandbox launch", () => {
+  const env = { REVISOR_CODEX_SANDBOX: "danger-full-access" };
+  assert.deepEqual(reviewerInvocation("codex-sol", { env, platform: "win32" }), {
+    name: "codex",
+    args: ["exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
+  });
+  assert.deepEqual(reviewerInvocation("codex-sol", { readOnly: true, env, platform: "win32" }), {
+    name: "codex",
+    args: ["exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
+  });
+});
+
 test("falls back only for provider capacity failures", () => {
   assert.equal(alternateReviewer("claude-opus"), "codex-sol");
   assert.equal(alternateReviewer("codex-sol"), "claude-opus");

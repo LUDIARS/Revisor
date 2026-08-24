@@ -20,6 +20,14 @@ services:
       type: http
       url: http://127.0.0.1:4240/health
       interval_sec: 30
+    env:
+      # 審査の codex を Windows native のまま sandbox 起動なしで走らせる。
+      # Windows 版 codex の sandbox launcher (`CreateProcessWithLogonW`) は
+      # 審査 1 本あたり約 260 個の lsass ログオンセッションをリークし
+      # (upstream openai/codex #33356 / #35940)、2026-08-24 の lsass クラッシュ
+      # (RPCRT4 0xc0000005 → 強制再起動 2 回) の有力原因。信頼済みローカル
+      # リポの審査専用の迂回で、codex 認証は Windows 側の codex login を使う。
+      REVISOR_CODEX_SANDBOX: danger-full-access
     provides:
       # `startRevisor` binds 127.0.0.1 only, so ${host} would hand consumers an
       # address nothing is listening on. The literal IPv4 loopback also matches

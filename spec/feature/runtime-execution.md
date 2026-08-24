@@ -14,7 +14,7 @@ related:
   - ./security-scan.md
   - ./review-plan.md
   - ../architecture.md
-updated: 2026-08-21
+updated: 2026-08-24
 ---
 
 # runtime-execution — policy-neutral child-process boundary
@@ -75,6 +75,19 @@ logon sessionを作り、それを解放しない (upstream openai/codex #33356 
    必ず起動に失敗する。展開するのはprefixのみで、残りのpathは引用したままにする。
 8. runtime=wsl が非Windows hostで設定されていたら **失敗させる**。`wsl.exe` はWindows
    にしか無く、nativeへ落とすのは規則4と同じ「設定したつもりで効いていない」状態。
+## SPEC-CODEX-SANDBOX-MODE: Windows native Codex sandbox launcher の回避
+
+Windows native Codex の sandbox launcher に限定した logon session leak 回避であり、
+WSL runtime の選択と独立した明示 opt-in とする。規則は次のとおり。
+
+1. `REVISOR_CODEX_SANDBOX` の既定は `sandboxed` とし、従来どおり書き込み審査は
+   `workspace-write`、読み取り専用審査は `read-only` で起動する。
+2. Windows native Codex の sandbox launcher による logon session leak を回避する場合だけ
+    `REVISOR_CODEX_SANDBOX=danger-full-access` を明示する。この場合は Codex の approval policy は
+    変更せず、`--sandbox danger-full-access` だけを渡す。非Windows host または
+    `REVISOR_CODEX_RUNTIME=wsl` との併用は、回避が不要な環境で権限を広げないよう失敗させる。
+3. `REVISOR_CODEX_SANDBOX` が `sandboxed` / `danger-full-access` 以外なら、runtime の
+    綴り間違いと同じ理由で **失敗させる**。
 
 Concordiaは委託経路に対して同じ切替を持つ (`CONCORDIA_SATELLES_CODEX_RUNTIME`)。この
 domainが持つのはRevisorの審査経路側で、両者は独立に設定する。

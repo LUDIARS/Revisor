@@ -1,6 +1,6 @@
 {
   "name": "runtime-execution",
-  "description": "Policy-neutral child-process execution primitives used by Revisor adapters, including captured output, timeout termination, platform launch shims (the Windows cmd.exe shim for npm CLIs and the opt-in WSL launch for the codex CLI), and per-call environment forwarding.",
+  "description": "Policy-neutral child-process execution primitives used by Revisor adapters, including captured output, timeout termination, platform launch shims (the Windows cmd.exe shim for npm CLIs and the opt-in WSL launch for the codex CLI), the Windows-native Codex sandbox-launch workaround, and per-call environment forwarding.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -20,7 +20,7 @@
       "pathPattern": "(^|/)test/codex-runtime\\.test\\.mjs$"
     },
     {
-      "namePattern": "runCodexAwareCli|buildWslCodexArgs|codexRuntimeConfig|windowsPathToWslPath|posixShellQuote|quoteWslBinary|wslLauncherEnv"
+      "namePattern": "runCodexAwareCli|buildWslCodexArgs|codexRuntimeConfig|codexSandboxMode|codexSandboxArgs|windowsPathToWslPath|posixShellQuote|quoteWslBinary|wslLauncherEnv"
     }
   ],
   "cardTemplate": "Summarise the runtime-execution domain: policy-neutral child-process invocation, timeout ownership, captured output, and environment forwarding.",
@@ -28,10 +28,12 @@
     "child-process-invocation",
     "timeout-termination",
     "environment-forwarding",
-    "wsl-launch-selection"
+    "wsl-launch-selection",
+    "windows-codex-sandbox-selection"
   ],
   "specRefs": [
-    "runtime-execution — policy-neutral child-process boundary"
+    "runtime-execution — policy-neutral child-process boundary",
+    "SPEC-CODEX-SANDBOX-MODE: Windows native Codex sandbox launcher の回避"
   ],
-  "rationale": "Security-scan policy owns the meaning and lifecycle of CODEX_SECURITY_STATE_DIR. The generic process runner only forwards an optional environment and owns the spawned process lifecycle, so it remains reusable by CI and other adapters without importing review-gate policy. The WSL launch selection lives here for the same reason as the cmd.exe shim: it answers \"how is a CLI started on this host\", not \"what should be reviewed\". It is opt-in through REVISOR_CODEX_RUNTIME and defaults to native, so review policy never has to know which runtime a reviewer ran on."
+  "rationale": "Security-scan policy owns the meaning and lifecycle of CODEX_SECURITY_STATE_DIR. The generic process runner only forwards an optional environment and owns the spawned process lifecycle, so it remains reusable by CI and other adapters without importing review-gate policy. The WSL launch and Windows-native sandbox selections live here for the same reason as the cmd.exe shim: they answer \"how is a CLI started on this host\", not \"what should be reviewed\". Runtime defaults to native and sandboxing defaults to enabled; danger-full-access is restricted to the affected native Windows runtime."
 }
