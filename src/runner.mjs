@@ -319,7 +319,7 @@ function buildGateResult({
     advisories: [
       ...advisories,
       ...additionalAdvisories,
-      ...(anatomiaGate?.status === "unavailable" ? [anatomiaGate.message] : []),
+      ...(anatomiaGate?.unavailable === true ? [anatomiaGate.message] : []),
     ],
     runtimeVerification,
     mergeRisk,
@@ -798,7 +798,9 @@ export function createPrReviewRunner({
       codeDomainRequired = submitted.classification.codeDomainRequired
         && stageEnabled(plan, "anatomia_domain_review");
       const codeAnalysis = stageEnabled(plan, "anatomia_code_analysis");
-      const anatomiaUnavailable = anatomiaGate.status === "unavailable";
+      // An unavailable analysis is already a blocked gate (fail closed) and
+      // returned above; this flag only guards the analysis stages that follow.
+      const anatomiaUnavailable = anatomiaGate.unavailable === true;
       const anatomiaCliPath = anatomiaUnavailable
         ? null
         : (anatomiaGate.cliPath ?? await resolveAnatomiaCli(settings.anatomiaFolder));

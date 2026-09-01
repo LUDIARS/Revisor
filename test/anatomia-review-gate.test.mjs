@@ -72,14 +72,16 @@ test("honors a review plan that skips the target-domain gate", async () => {
   assert.equal(result.status, "passed");
 });
 
-test("records an unavailable Anatomia gate and permits LLM review", async () => {
+test("blocks (fails closed) when the Anatomia analysis is unavailable", async () => {
   const result = await gate({
     analyze: async () => {
       throw new Error("RAW_DIAGNOSTIC_SHOULD_NOT_PERSIST");
     },
   });
-  assert.equal(result.status, "unavailable");
-  assert.match(result.message, /passed through/);
+  assert.equal(result.status, "blocked");
+  assert.equal(result.unavailable, true);
+  assert.match(result.message, /blocked because analysis was unavailable/);
+  assert.deepEqual(result.reasons, ["Anatomia analysis unavailable: Anatomia PR analysis failed"]);
   assert.match(result.reason, /PR analysis failed/);
   assert.doesNotMatch(JSON.stringify(result), /RAW_DIAGNOSTIC_SHOULD_NOT_PERSIST/);
   assert.deepEqual(result.analysis.availability, {
@@ -87,6 +89,17 @@ test("records an unavailable Anatomia gate and permits LLM review", async () => 
     reason: "Anatomia PR analysis failed",
   });
   assert.equal(result.analysis.architecture.verify.pass, true);
+});
+
+test("blocks (fails closed) when the Anatomia CLI cannot be resolved", async () => {
+  const result = await gate({
+    resolveCli: async () => {
+      throw new Error("RAW_PATH_SHOULD_NOT_PERSIST");
+    },
+  });
+  assert.equal(result.status, "blocked");
+  assert.deepEqual(result.reasons, ["Anatomia analysis unavailable: Anatomia CLI could not be resolved"]);
+  assert.doesNotMatch(JSON.stringify(result), /RAW_PATH_SHOULD_NOT_PERSIST/);
 });
 
 test("carries an advisory dual-layer finding through the front gate without blocking", async () => {

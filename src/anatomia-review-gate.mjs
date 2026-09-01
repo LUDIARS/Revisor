@@ -90,9 +90,17 @@ export async function runAnatomiaReviewGate({
     // Resolver and subprocess errors can contain local paths, command output,
     // private endpoints, or credentials. The gate result is persisted on the
     // PR, so record the failed phase without copying the raw exception.
+    //
+    // Fail closed (neco 2026-09-01, RULE_CODE I-0): an analysis that could not
+    // run has verified nothing, so it blocks like a violation would. Passing it
+    // through let five consecutive PRs merge with their domain fit unverified
+    // while the gate still reported "passed".
     return {
-      status: "unavailable",
-      message: `Anatomia review gate passed through because analysis was unavailable: ${unavailableReason}.`,
+      status: "blocked",
+      unavailable: true,
+      message: `Anatomia review gate blocked because analysis was unavailable: ${unavailableReason}.`,
+      reasons: [`Anatomia analysis unavailable: ${unavailableReason}`],
+      advisories: [],
       analysis: unavailableAnalysis(unavailableReason),
       cliPath: null,
       reason: unavailableReason,

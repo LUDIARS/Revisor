@@ -49,10 +49,11 @@ function defaults() {
     // 登録リポジトリの worktree とそのビルド成果物を別ドライブへ逃がすための口。
     reviewScratchRoot: "",
     anatomiaReviewGateEnabled: true,
-    // Anatomia's dual-layer domain gate (program / business) starts advisory:
-    // its findings are surfaced next to the legacy target-domain verdict so the
-    // two can be compared during migration, and only "enforced" lets it block.
-    anatomiaDualLayerGateMode: "advisory",
+    // Anatomia's dual-layer domain gate (program / business). It started
+    // advisory during the migration; since 2026-09-01 (neco: "define the domain
+    // before writing code") it blocks by default. "advisory" remains available
+    // for a repo whose domain catalog is still being bootstrapped.
+    anatomiaDualLayerGateMode: "enforced",
     // 反対モデルレビューが既定なので、fallbackReviewer は作成者の provider が
     // 判別できないときだけ使われる。Codex 系列を既定にして、Claude 主体の
     // 実装が Claude 自身の審査に倒れないようにする。

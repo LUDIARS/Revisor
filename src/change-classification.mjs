@@ -34,6 +34,12 @@ const DEPENDENCY_MANIFEST =
 const EXECUTABLE_CONFIG =
   /(?:^|\/)(?:\.github\/workflows|\.circleci|\.gitlab)\/|(?:^|\/)(?:\.gitlab-ci|docker-compose[^/]*|azure-pipelines[^/]*|cloudbuild)\.ya?ml$/i;
 
+// Declarative files under `spec/` and `.anatomia/` (domain definitions,
+// ontology, layers, spec indexes). Only data formats: an `.mjs` domain def or
+// a script under `spec/` still runs code and stays `code`.
+const SPEC_DECLARATION_FILE =
+  /(?:^|\/)(?:spec|\.anatomia)\/.*\.(?:json|jsonl|jsonc|json5|ya?ml|toml)$/i;
+
 // Evaluated in order: the first match wins. Order matters more than the
 // individual patterns — a lock file is generated before it is config, a
 // workflow file is infrastructure before it is config, and a test file is a
@@ -50,6 +56,12 @@ const KIND_RULES = [
       /(?:^|\/)(?:test|tests|__tests__|__mocks__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:py|go|rb)$/i,
   },
   { kind: "docs", pattern: DOC_FILE },
+  // Declarative spec files (domain definitions, ontology, spec indexes) are
+  // documentation of the product, not settings that change what runs. Before
+  // this rule their `.json`/`.yaml` extension put them under `config`, which
+  // counts as executable change — a domain-declaration-only PR then paid for
+  // the repository's full cold build and timed out (Memoria #1221).
+  { kind: "docs", pattern: SPEC_DECLARATION_FILE },
   {
     kind: "infra",
     pattern:
@@ -128,7 +140,8 @@ export function diffLineStats(unifiedDiff) {
 }
 
 export function isDocsOnlyChange(changedPaths) {
-  return changedPaths.length > 0 && changedPaths.every((path) => DOC_FILE.test(path));
+  return changedPaths.length > 0 && changedPaths.every((path) =>
+    DOC_FILE.test(path) || classifyPath(path) === "docs");
 }
 
 // Documentation and settings files have no code target domain to point at, so a

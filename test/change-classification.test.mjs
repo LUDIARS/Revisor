@@ -23,6 +23,27 @@ test("classifies a path by the cost decision it drives, not by extension alone",
   assert.equal(classifyPath("src/runner.mjs"), "code");
 });
 
+test("declarative spec and Anatomia files are docs, not executable config (Memoria #1221)", () => {
+  assert.equal(classifyPath("spec/domains/review-gate.domain.json"), "docs");
+  assert.equal(classifyPath("spec/data/ontology/core.json"), "docs");
+  assert.equal(classifyPath("spec/index.jsonl"), "docs");
+  assert.equal(classifyPath(".anatomia/layers.json"), "docs");
+  assert.equal(classifyPath(".anatomia/domains/core.domain.json"), "docs");
+  assert.equal(classifyPath("packages/api/spec/test-plan.yaml"), "docs");
+  // Executable defs and scripts under spec/ still run code.
+  assert.equal(classifyPath(".anatomia/domains/core.domain.mjs"), "code");
+  assert.equal(classifyPath("spec/scripts/check.mjs"), "code");
+  // A domain-declaration-only change carries no executable kind.
+  const profile = classifyChange({
+    changedPaths: ["packages/ui/spec/a.domain.yaml", ".anatomia/layers.json"],
+  });
+  assert.deepEqual(profile.kinds, ["docs"]);
+  assert.equal(profile.docsOnly, true);
+  assert.equal(profile.docsOrConfigOnly, true);
+  assert.equal(profile.codeDomainRequired, false);
+  assert.deepEqual(profile.runtimeSurfaces, []);
+});
+
 test("counts only diff body lines", () => {
   const diff = [
     "diff --git a/src/a.mjs b/src/a.mjs",
