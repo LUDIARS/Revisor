@@ -59,8 +59,18 @@ function request(fixture, overrides = {}) {
   };
 }
 
-test("the shared git boundary preserves a working LFS clean filter", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "revisor-workspace-lfs-filter-"));
+// フィルタ名に `lfs` を使わないのは意図的。 ホストに `git lfs install` 済みだと
+// `filter.lfs.process = git-lfs filter-process` が system や global に載りうる。
+// 上位スコープに `process` があると、 下位で空文字にしてもその値を unset して
+// clean/smudge へフォールバックさせることはできない — git は「空の process コマンドが
+// 設定されている」と解釈して `clean filter 'lfs' failed` で落ちる
+// (`-c filter.lfs.process=` でも同じ)。つまり `lfs` という名前では、 git-lfs が入った
+// ホストで clean 経路を検証できない。
+//
+// 検証したいのは「共有 git 境界がリポジトリ設定の clean filter を素通しするか」であって
+// LFS 固有の挙動ではないので、 衝突しない名前で同じ境界を確かめる。
+test("the shared git boundary preserves a working clean filter", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-workspace-clean-filter-"));
   const repoPath = join(directory, "Product");
   const filterPath = join(directory, "clean-filter.mjs");
   const init = spawnSync("git", ["init", repoPath], { encoding: "utf8", windowsHide: true });
@@ -71,12 +81,11 @@ test("the shared git boundary preserves a working LFS clean filter", async () =>
       "let value = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (chunk) => { value += chunk; }); process.stdin.on('end', () => process.stdout.write(`filtered:${value}`));\n",
       "utf8",
     );
-    writeFileSync(join(repoPath, ".gitattributes"), "*.bin filter=lfs -text\n", "utf8");
+    writeFileSync(join(repoPath, ".gitattributes"), "*.bin filter=revisorprobe -text\n", "utf8");
     writeFileSync(join(repoPath, "asset.bin"), "asset content\n", "utf8");
     const commandPath = filterPath.replaceAll("\\", "/");
-    git(repoPath, "config", "filter.lfs.process", "");
-    git(repoPath, "config", "filter.lfs.clean", `node \"${commandPath}\"`);
-    git(repoPath, "config", "filter.lfs.required", "true");
+    git(repoPath, "config", "filter.revisorprobe.clean", `node \"${commandPath}\"`);
+    git(repoPath, "config", "filter.revisorprobe.required", "true");
 
     await revisorGit(repoPath, ["add", "asset.bin"]);
 

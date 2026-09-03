@@ -16,7 +16,7 @@ related:
   - ./merge-risk.md
   - ../architecture.md
   - ../plan/problem_logs/2026-08-09-merge-repository-source-ownership.md
-updated: 2026-08-10
+updated: 2026-09-04
 ---
 
 # local-workspace — 使い捨て worktree とローカル ref の境界
@@ -96,6 +96,21 @@ filter 実行ファイルが無いことを示す失敗に限り、filter を外
 既に実 blob が materialize された checkout では、filter 無しの status がそれを
 tracked change と検出するので前進を拒否する。pointer file のみを持つ LFS 未導入環境では、
 pointer のまま安全に fast-forward できる。
+
+#### 検証できない組み合わせ: `lfs` という名前の clean/smudge
+
+「共通境界がリポジトリ設定の clean filter を素通しするか」を検証するとき、
+**フィルタ名に `lfs` は使えない**。
+
+`git lfs install` 済みのホストでは `filter.lfs.process = git-lfs filter-process` が
+system や global に載りうる。`filter.<name>.process` が上位スコープに存在すると、
+下位スコープで空文字にしてもその値を unset して clean/smudge へフォールバックさせられない —
+git は「空の process コマンドが設定されている」と解釈して
+`clean filter 'lfs' failed` で落ちる。コマンドラインの `-c filter.lfs.process=` でも同じである。
+
+境界が確かめたいのは「設定された clean filter を落とさずに渡すか」であって LFS 固有の
+挙動ではないので、テストは衝突しない名前 (`filter.revisorprobe.*`) で同じ境界を確認する。
+LFS 実行ファイルの不在に対する耐性は別テストが受け持つ。
 
 ## cleanup の best-effort 範囲
 
