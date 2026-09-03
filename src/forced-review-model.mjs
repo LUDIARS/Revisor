@@ -1,18 +1,19 @@
 import { readSettings } from "./config.mjs";
 
-// 審査モデルの強制上書き。通常は差分規模と Anatomia のドメイン数から
-// tier (economy / strong) が選ばれ、tier がモデルを決める。運用側で
-// 「しばらく全部このモデルで見たい」ときに、その自動選択ごと踏み潰す。
+// 審査モデルの強制上書き。通常は呼び出しの用途 (purpose) がモデルを決め、
+// 審査判断は必ず strong 側になる (reviewer.mjs)。運用側で
+// 「しばらく全部このモデルで見たい」ときに、その選択ごと踏み潰す。
 //
 // 値は argv の `--model` に載るので、自由入力ではなく既知のモデルだけを
 // 受け付ける。同時に「そのモデルはどちらのレビュアー系列か」を持つ必要が
 // あるため、単なる文字列検証ではなく登録表にしている。系列が分からないと
 // `codex` に `--model opus` を渡すような取り合わせが作れてしまう。
+// 強制できるのは**審査に使えるモデル**だけ。 sonnet / gpt-5.6-terra はレビュー向きでは
+// ないと判断されており (neco 2026-08-21)、補助タスク専用に降りた。 ここへ残すと
+// 「全レビューをこのモデルで見る」という指定でそれらを審査に戻せてしまう。
 const FORCEABLE_REVIEW_MODELS = new Map([
   ["opus", "claude-opus"],
-  ["sonnet", "claude-opus"],
   ["gpt-5.6-sol", "codex-sol"],
-  ["gpt-5.6-terra", "codex-sol"],
 ]);
 
 export const FORCEABLE_REVIEW_MODEL_IDS = Object.freeze([...FORCEABLE_REVIEW_MODELS.keys()]);

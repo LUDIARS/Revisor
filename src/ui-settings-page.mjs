@@ -17,8 +17,8 @@ const BODY = `
       <div class="field">
         <label for="fallback-reviewer">Cc文脈がない場合のレビュアー</label>
         <select id="fallback-reviewer">
-          <option value="codex-sol">Codex（Terra / Sol 自動選択）</option>
-          <option value="claude-opus">Claude（Sonnet / Opus 自動選択）</option>
+          <option value="codex-sol">Codex（審査: Sol / 補助: Terra）</option>
+          <option value="claude-opus">Claude（審査: Opus / 補助: Sonnet）</option>
         </select>
       </div>
       <div class="field">
@@ -31,13 +31,11 @@ const BODY = `
       <div class="field">
         <label for="forced-review-model">レビューモデルの強制指定</label>
         <select id="forced-review-model">
-          <option value="">強制しない（差分規模から自動選択）</option>
+          <option value="">強制しない（審査は opus / gpt-5.6-sol）</option>
           <option value="opus">Claude Opus に固定</option>
-          <option value="sonnet">Claude Sonnet に固定</option>
           <option value="gpt-5.6-sol">Codex Sol に固定</option>
-          <option value="gpt-5.6-terra">Codex Terra に固定</option>
         </select>
-        <span class="note">指定するとレビュアー選定・tier によるモデル選択・容量不足時の系列切替をすべて上書きし、全レビューがこのモデルで走ります。容量不足になっても別系列へは切り替わらず、審査が失敗として表面化します。</span>
+        <span class="note">指定するとレビュアー選定と容量不足時の系列切替を上書きし、全レビューがこのモデルで走ります。容量不足になっても別系列へは切り替わらず、審査が失敗として表面化します。</span>
       </div>
       <div class="field">
         <label for="forced-review-effort">レビュー effort の強制指定</label>
@@ -57,12 +55,12 @@ const BODY = `
         <span class="note">違反があれば LLM を起動せず判断待ちにします。解析不能時は理由を記録して LLM レビューを続行します。</span>
       </div>
       <div class="field">
-        <label for="large-review-line-threshold">大規模レビューに切り替えるコード変更行数 X</label>
+        <label for="large-review-line-threshold">調査・判断の2エージェント構成に切り替えるコード変更行数 X</label>
         <input id="large-review-line-threshold" type="number" min="1" step="1" required>
-        <span class="note">X行を超えると、Sonnet→Opus または Terra→Sol の調査・判断2エージェント構成にします。既定は1000です。</span>
+        <span class="note">X行を超えると、Opus または Sol の read-only 調査と high effort 判断の2エージェント構成にします。既定は1000です。</span>
       </div>
       <div class="field">
-        <label for="multi-domain-review-threshold">強いレビューに切り替えるAnatomiaドメイン数 Y</label>
+        <label for="multi-domain-review-threshold">high effort に切り替えるAnatomiaドメイン数 Y</label>
         <input id="multi-domain-review-threshold" type="number" min="1" step="1" required>
         <span class="note">Yドメイン以上なら Opus / Sol を high effort で使います。既定は3です。</span>
       </div>

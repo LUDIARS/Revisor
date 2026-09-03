@@ -133,7 +133,8 @@ export async function reconcileNarrative({
       cwd,
       prompt: narrativePrompt({ pullRequest, commitSubjects, diffText }),
       readOnly: true,
-      tier: "economy",
+      // 要約生成は機械作業。 審査判断ではないので補助モデルで回す。
+      purpose: "auxiliary",
       effort: "low",
       timeoutMs: NARRATIVE_TIMEOUT_MS,
     });

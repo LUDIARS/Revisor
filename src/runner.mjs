@@ -136,7 +136,8 @@ async function autofixFailingTests({
         cwd: worktreePath,
         prompt: buildTestAutofixPrompt({ request, ci, attempt, maxAttempts }),
         timeoutMs: reviewerTimeoutMs,
-        tier: "economy",
+        // レビュー判断ではなく機械作業なので補助モデルで回す。
+        purpose: "auxiliary",
         effort: "low",
       }, runReview, { forcedModel: forcedReviewModel });
       activeReviewer = result.reviewer;

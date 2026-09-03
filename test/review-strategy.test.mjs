@@ -38,11 +38,11 @@ test("selects two agents for a large code diff", () => {
     settings: { largeReviewLineThreshold: 3, multiDomainReviewThreshold: 3 },
   });
   assert.equal(strategy.mode, "multi-agent");
-  assert.deepEqual(strategy.investigator, { tier: "economy", effort: "medium" });
-  assert.deepEqual(strategy.judge, { tier: "strong", effort: "high" });
+  assert.deepEqual(strategy.investigator, { effort: "medium" });
+  assert.deepEqual(strategy.judge, { effort: "high" });
 });
 
-test("selects a strong single agent for Y edited Anatomia domains", () => {
+test("selects high effort for Y edited Anatomia domains", () => {
   const analysis = { domain: { targetDomains: [
     { name: "one", changedAnchors: ["a"] },
     { name: "two", changedAnchors: ["b"] },
@@ -56,10 +56,10 @@ test("selects a strong single agent for Y edited Anatomia domains", () => {
     settings: { largeReviewLineThreshold: 1_000, multiDomainReviewThreshold: 2 },
   });
   assert.equal(strategy.reason, "multi-domain");
-  assert.deepEqual(strategy.judge, { tier: "strong", effort: "high" });
+  assert.deepEqual(strategy.judge, { effort: "high" });
 });
 
-test("keeps non-code changes on one economy agent and rejects empty review diffs", () => {
+test("keeps non-code changes on one medium-effort agent and rejects empty review diffs", () => {
   const strategy = selectReviewStrategy({
     classification: { counts: { docs: 1 }, codeDomainRequired: false },
     unifiedDiff: "diff --git a/README.md b/README.md\n+x",
@@ -67,6 +67,6 @@ test("keeps non-code changes on one economy agent and rejects empty review diffs
     settings: {},
   });
   assert.equal(strategy.reason, "non-code");
-  assert.deepEqual(strategy.judge, { tier: "economy", effort: "medium" });
+  assert.deepEqual(strategy.judge, { effort: "medium" });
   assert.throws(() => assertMeaningfulReviewDiff({ changedPaths: [], unifiedDiff: "" }), /base branch/);
 });

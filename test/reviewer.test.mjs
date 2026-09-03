@@ -2,32 +2,50 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   alternateReviewer,
+  modelForPurpose,
   reviewerCapacityUnavailable,
   reviewerForProvider,
   reviewerInvocation,
   runReviewer,
 } from "../src/reviewer.mjs";
 
-test("uses the lower-cost model tier for both reviewer providers", () => {
+test("reviews with the strong model on both reviewer providers", () => {
   assert.deepEqual(reviewerInvocation("claude-opus"), {
     name: "claude",
-    args: ["--model", "sonnet", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
+    args: ["--model", "opus", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
   });
   assert.deepEqual(reviewerInvocation("codex-sol"), {
     name: "codex",
-    args: ["exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium", "--sandbox", "workspace-write", "-"],
+    args: ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "workspace-write", "-"],
   });
+});
+
+// 審査判断ではない機械作業 (test autofix / narrative) だけが安いモデルへ降りる。
+// 既定を auxiliary 側にすると、purpose を渡し忘れた新しい審査経路が黙って
+// 弱いモデルで走る — 既定は必ず review でなければならない。
+test("uses the auxiliary model only for machine work", () => {
+  assert.equal(reviewerInvocation("claude-opus", { purpose: "auxiliary" }).args[1], "sonnet");
+  assert.equal(reviewerInvocation("codex-sol", { purpose: "auxiliary" }).args[2], "gpt-5.6-terra");
+  assert.equal(modelForPurpose("claude-opus"), "opus");
+  assert.equal(modelForPurpose("codex-sol"), "gpt-5.6-sol");
+  assert.throws(() => modelForPurpose("gemini"), /Unsupported reviewer 'gemini'/);
+  assert.throws(() => modelForPurpose("gemini", "auxiliary"), /Unsupported reviewer 'gemini'/);
+  assert.throws(() => modelForPurpose("codex-sol", "auxilary"), /Unsupported reviewer purpose/);
+  assert.throws(
+    () => reviewerInvocation("codex-sol", { purpose: "auxilary", forcedModel: "gpt-5.6-sol" }),
+    /Unsupported reviewer purpose/,
+  );
 });
 
 test("REVISOR_CODEX_SANDBOX=danger-full-access drops the codex sandbox launch", () => {
   const env = { REVISOR_CODEX_SANDBOX: "danger-full-access" };
   assert.deepEqual(reviewerInvocation("codex-sol", { env, platform: "win32" }), {
     name: "codex",
-    args: ["exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
+    args: ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
   });
   assert.deepEqual(reviewerInvocation("codex-sol", { readOnly: true, env, platform: "win32" }), {
     name: "codex",
-    args: ["exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
+    args: ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
   });
 });
 
@@ -53,22 +71,22 @@ test("falls back only for provider capacity failures", () => {
   }), false);
 });
 
-test("keeps plan-only calls read-only on the lower-cost tier", () => {
+test("keeps plan-only calls read-only without downgrading the model", () => {
   assert.deepEqual(reviewerInvocation("claude-opus", { readOnly: true }).args, [
-    "--model", "sonnet", "--effort", "medium", "--permission-mode", "plan", "--print",
+    "--model", "opus", "--effort", "medium", "--permission-mode", "plan", "--print",
   ]);
   assert.deepEqual(reviewerInvocation("codex-sol", { readOnly: true }).args, [
-    "exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium", "--sandbox", "read-only", "-",
+    "exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "read-only", "-",
   ]);
 });
 
-test("uses Opus or Sol with high effort for the strong tier", () => {
+test("carries the requested effort through to both reviewer providers", () => {
   assert.deepEqual(
-    reviewerInvocation("claude-opus", { tier: "strong", effort: "high" }).args,
+    reviewerInvocation("claude-opus", { effort: "high" }).args,
     ["--model", "opus", "--effort", "high", "--permission-mode", "acceptEdits", "--print"],
   );
   assert.deepEqual(
-    reviewerInvocation("codex-sol", { tier: "strong", effort: "high" }).args,
+    reviewerInvocation("codex-sol", { effort: "high" }).args,
     ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high", "--sandbox", "workspace-write", "-"],
   );
 });

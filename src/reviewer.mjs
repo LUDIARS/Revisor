@@ -4,20 +4,44 @@ import { forcedReviewerFor } from "./forced-review-model.mjs";
 import { codexSandboxArgs, runCodexAwareCli } from "./codex-runtime.mjs";
 
 // Persisted reviewer ids identify a provider family for config compatibility.
-// The review strategy chooses its concrete economy/strong model and effort;
-// keeping that choice explicit prevents every stored Claude id from silently
-// becoming Opus again.
+// The concrete model comes from what the call is *for*, not from the diff size.
+//
+// **審査そのものは常に strong モデルで行う** (neco 判断 2026-08-21: sonnet と
+// gpt-5.6-terra はレビュー向きではない)。 差分が小さいことは「弱いモデルで見てよい」の
+// 理由にならない — 小さい差分ほど誤りが見逃されると気づかれない。
+//
+// 一方 test autofix と narrative 生成は**レビュー判断ではなく機械作業**なので、
+// 別枠の安いモデルを使う (neco 判断 2026-09-04:「レビュー本体のみ opus/sol に、
+// 補助タスクは別モデル」)。 分けないと機械作業に strong の推論コストを払い続ける。
+const MODELS_BY_PURPOSE = new Map([
+  ["review", new Map([["claude-opus", "opus"], ["codex-sol", "gpt-5.6-sol"]])],
+  ["auxiliary", new Map([["claude-opus", "sonnet"], ["codex-sol", "gpt-5.6-terra"]])],
+]);
+
+/**
+ * 呼び出しの用途。 `review` = 審査判断そのもの / `auxiliary` = 機械作業。
+ *
+ * @implements SPEC-REVIEW-MODEL-BY-PURPOSE
+ */
+export function modelForPurpose(reviewer, purpose = "review") {
+  const table = MODELS_BY_PURPOSE.get(purpose);
+  if (!table) throw new Error(`Unsupported reviewer purpose '${purpose}'.`);
+  const model = table.get(reviewer);
+  if (!model) throw new Error(`Unsupported reviewer '${reviewer}'.`);
+  return model;
+}
+
 /** @implements SPEC-CODEX-SANDBOX-MODE */
 export function reviewerInvocation(reviewer, {
   readOnly = false,
-  tier = "economy",
+  purpose = "review",
   effort = "medium",
   sessionId = null,
   forcedModel = "",
   env = process.env,
   platform = process.platform,
 } = {}) {
-  // A forced model replaces the tier-derived one but must belong to the
+  // A forced model replaces the purpose-derived one but must belong to the
   // reviewer being invoked; the callers resolve the reviewer from the same
   // registry, so a mismatch here is a wiring bug rather than bad config.
   if (forcedModel && forcedReviewerFor(forcedModel) !== reviewer) {
@@ -25,12 +49,13 @@ export function reviewerInvocation(reviewer, {
       `Forced review model '${forcedModel}' does not belong to reviewer '${reviewer}'.`,
     );
   }
+  const selectedModel = modelForPurpose(reviewer, purpose);
   if (reviewer === "claude-opus") {
     return {
       name: "claude",
       args: [
         "--model",
-        forcedModel || (tier === "strong" ? "opus" : "sonnet"),
+        forcedModel || selectedModel,
         "--effort",
         effort,
         "--permission-mode",
@@ -46,7 +71,7 @@ export function reviewerInvocation(reviewer, {
       args: [
         "exec",
         "--model",
-        forcedModel || (tier === "strong" ? "gpt-5.6-sol" : "gpt-5.6-terra"),
+        forcedModel || selectedModel,
         "-c",
         `model_reasoning_effort=${effort}`,
         ...codexSandboxArgs(readOnly, env, platform),
@@ -89,7 +114,7 @@ export async function runReviewer({
   prompt,
   timeoutMs,
   readOnly = false,
-  tier = "economy",
+  purpose = "review",
   effort = "medium",
   // 呼び出し側が明示的に渡す。既定を「設定ファイルを読む」にすると、
   // レビューを呼ぶだけのテストがマシンの設定に左右される。注入点は
@@ -109,7 +134,7 @@ export async function runReviewer({
   const sessionId = activeReviewer === "claude-opus" ? sessionIdFactory() : null;
   const invocation = reviewerInvocation(activeReviewer, {
     readOnly,
-    tier,
+    purpose,
     effort: forcedEffort || effort,
     sessionId,
     forcedModel,

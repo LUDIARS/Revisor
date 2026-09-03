@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "review-plan — 変更種別と規模ごとの審査ステージ設計"
-description: "レビュー開始時に変更種別からステージと登録テストを選び、差分規模とAnatomiaドメイン数からレビューモデル・effort・分業方式を決める。"
+description: "レビュー開始時に変更種別からステージと登録テストを選び、用途からモデルを、差分規模とAnatomiaドメイン数からeffort・分業方式を決める。"
 service: revisor
 domain: review-plan
 tags:
@@ -14,14 +14,14 @@ related:
   - ./review-gate.md
   - ./merge-risk.md
   - ./review-cost-control.md
-updated: 2026-08-21
+updated: 2026-09-04
 ---
 
 # review-plan — 変更種別と規模ごとの審査ステージ設計
 
 `src/review-plan.mjs` が正本。審査の最初に**変更プロファイル**を作り、
-どのステージと登録テストを使うかを決める。Anatomia の初回結果が得られた後、差分規模と
-編集ドメイン数からレビューモデル、effort、大規模差分での調査・判断分業を決める。
+どのステージと登録テストを使うかを決める。モデルは呼び出しの用途から選び、Anatomia の
+初回結果が得られた後、差分規模と編集ドメイン数から effort と大規模差分での調査・判断分業を決める。
 ドキュメント修正では脆弱性診断とコード解析を省略するが、通常モードのモデルレビューは
 維持する。
 
@@ -70,7 +70,7 @@ best-effort で無視し、`checkStatus` / `reasons` / その他のゲート結�
 - タイトルとコミット件名も外部モデルへ渡す直前に metadata leakage scan を行い、モデル応答も
   保存直前に再検査する。検出値は保存せず、検出時は整合だけを省略する。
 - モデル呼び出しは review-stage executor を通し、他のモデルレビューと同じ容量制御に従う。
-  実行権限は read-only、tier は economy、effort は low とする。
+  実行権限は read-only、用途は auxiliary (補助モデル)、effort は low とする。
 - タイトル・コミット件名・diff はすべて未信頼データとして JSON 化し、入力中の命令に従わず、
   ツールや追加ファイルを使わないようプロンプトで明示する。
 
@@ -89,16 +89,27 @@ runner やモデルは state store を直接操作しない。
 section 置換、leakage / verification / checkpoint / cost skip、head 一致時だけの reporter 更新、
 および review request への title/body/checkpoint 引き渡しを検証する。
 
-## レビューコスト段階
+## SPEC-REVIEW-MODEL-BY-PURPOSE: 用途ごとのモデル選択
+
+モデルは差分規模ではなく呼び出しの用途から選ぶ。`purpose` は `review` または `auxiliary`
+だけを受け付け、不明な値は strong 側へ黙って倒さずエラーにする。
+
+- `review` は審査判断を行う用途で、既定値でもある。Claude 系列は `opus`、Codex 系列は
+  `gpt-5.6-sol` を使う。investigator、judge、plan advisor はいずれも審査判断なのでこちらに含む。
+- `auxiliary` は審査判断を行わない機械作業専用である。Claude 系列は `sonnet`、Codex 系列は
+  `gpt-5.6-terra` を使う。現時点では test autofix と PR narrative 整合だけが明示指定する。
+- `forcedReviewModel` がある場合は用途より優先し、補助タスクも指定された strong モデルを使う。
+
+## レビュー effort・分業段階
 
 計画は必須ステージ `reviewer_autofix` を省略しない。ただしその実行方式を変更
 プロファイルから決め、PR のレビュー計画に記録する。
 
 | 条件 | 実行 |
 |---|---|
-| コード変更行数が設定 X を超える | Sonnet + Opus または Terra + Sol。低コスト側が read-only 調査、強い側が high effort で判断・修正。 |
+| コード変更行数が設定 X を超える | Opus または Sol の2エージェント構成。investigator が medium effort / read-only で調査し、judge が high effort で判断・修正。 |
 | Anatomia の編集ドメイン数が設定 Y 以上 | Opus または Sol を high effort で単独実行。 |
-| 単一ドメインの機能、またはコード以外 | Sonnet または Terra を medium effort で単独実行。 |
+| 単一ドメインの機能、またはコード以外 | Opus または Sol を medium effort で単独実行。 |
 
 既定値は X=1000、Y=3。設定画面から変更できる。コード変更行数は unified diff の
 うち `code` 分類ファイルの追加・削除本文だけを数え、ドキュメントや diff header を
@@ -240,14 +251,16 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 
 ## SPEC-FORCED-REVIEW-MODEL: 運用者がレビューモデルを固定する
 
-通常、レビューモデルは差分規模と Anatomia の編集ドメイン数から tier (economy / strong) が
-選ばれ、tier がモデルを決める。運用側で「しばらく全部このモデルで見たい」ときに、その自動
-選択ごと踏み潰す設定が `forcedReviewModel` である。`forcedReviewEffort` は同様に各 review
-stage が選んだ effort を上書きする。モデルは空文字が既定で、そのときは従来のモデル選択を
+通常、レビューモデルは呼び出しの用途 (`purpose`) が決める — 審査判断は必ず strong 側
+(`opus` / `gpt-5.6-sol`)、補助タスクだけが auxiliary 側へ降りる (SPEC-REVIEW-MODEL-BY-PURPOSE)。
+運用側で「しばらく全部このモデルで見たい」ときに、その選択ごと踏み潰す設定が
+`forcedReviewModel` である。`forcedReviewEffort` は同様に各 review
+stage が選んだ effort を上書きする。モデルは空文字が既定で、そのときは用途ごとのモデル選択を
 維持する。effort は 2026-08-23 の運用指示により `medium` を既定とし、空文字へ明示変更した
 場合だけ差分ごとの戦略へ戻す。
 
-1. 値は自由入力にせず、登録済みモデル id だけを受け付ける。値は `--model` として argv に
+1. 値は自由入力にせず、審査に使える strong モデル (`opus` / `gpt-5.6-sol`) だけを受け付ける。
+   補助専用の `sonnet` / `gpt-5.6-terra` は強制指定できない。値は `--model` として argv に
    載るうえ、「そのモデルがどちらのレビュアー系列か」が分からないと `codex` に `--model opus`
    を渡すような取り合わせが作れてしまうため、登録表 (`src/forced-review-model.mjs`) で
    モデルと系列を対にして持つ。

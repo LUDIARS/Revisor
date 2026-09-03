@@ -25,11 +25,19 @@ test("accepts only the registered models, plus the empty opt-out", () => {
 
 test("resolves the reviewer family a forced model belongs to", () => {
   assert.equal(forcedReviewerFor("opus"), "claude-opus");
-  assert.equal(forcedReviewerFor("sonnet"), "claude-opus");
   assert.equal(forcedReviewerFor("gpt-5.6-sol"), "codex-sol");
-  assert.equal(forcedReviewerFor("gpt-5.6-terra"), "codex-sol");
   assert.equal(forcedReviewerFor(""), null);
   assert.equal(forcedReviewerFor("opus-4"), null);
+});
+
+// 補助モデルは審査に使わないと決めた以上、強制上書きの候補からも消えて
+// いなければならない。 残っていると「しばらく全部このモデルで見る」の
+// 一択でそれらを審査へ戻せてしまう。
+test("refuses to force an auxiliary-only model", () => {
+  assert.equal(isForcedReviewModel("sonnet"), false);
+  assert.equal(isForcedReviewModel("gpt-5.6-terra"), false);
+  assert.equal(forcedReviewerFor("sonnet"), null);
+  assert.equal(forcedReviewerFor("gpt-5.6-terra"), null);
 });
 
 // Review stages run in child workers. An unreadable config there must leave
@@ -41,15 +49,20 @@ test("falls back to no override when the settings cannot be read", () => {
   assert.equal(configuredForcedReviewModel({}, () => ({ forcedReviewModel: "opus" })), "opus");
 });
 
-test("replaces the tier-derived model on both reviewer families", () => {
-  assert.deepEqual(reviewerInvocation("claude-opus", { forcedModel: "opus" }).args, [
-    "--model", "opus", "--effort", "medium", "--permission-mode", "acceptEdits", "--print",
-  ]);
-  // Economy tier would have chosen terra; the force wins without touching effort.
-  assert.deepEqual(reviewerInvocation("codex-sol", { forcedModel: "gpt-5.6-sol" }).args, [
-    "exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium",
-    "--sandbox", "workspace-write", "-",
-  ]);
+test("replaces the purpose-derived model on both reviewer families", () => {
+  // 補助用途なら sonnet / terra が選ばれる呼び出しに強制をかける。 用途に
+  // かかわらず強制が勝つことは、既定と違う側でしか確かめられない。
+  assert.deepEqual(
+    reviewerInvocation("claude-opus", { purpose: "auxiliary", forcedModel: "opus" }).args,
+    ["--model", "opus", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
+  );
+  assert.deepEqual(
+    reviewerInvocation("codex-sol", { purpose: "auxiliary", forcedModel: "gpt-5.6-sol" }).args,
+    [
+      "exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium",
+      "--sandbox", "workspace-write", "-",
+    ],
+  );
 });
 
 test("accepts only supported forced review efforts", () => {
@@ -87,9 +100,12 @@ test("refuses a forced model that belongs to the other reviewer family", () => {
   );
 });
 
-test("leaves the tier-derived model alone when nothing is forced", () => {
-  assert.equal(reviewerInvocation("claude-opus", { forcedModel: "" }).args[1], "sonnet");
-  assert.equal(reviewerInvocation("claude-opus", { tier: "strong" }).args[1], "opus");
+test("leaves the purpose-derived model alone when nothing is forced", () => {
+  assert.equal(reviewerInvocation("claude-opus", { forcedModel: "" }).args[1], "opus");
+  assert.equal(
+    reviewerInvocation("claude-opus", { purpose: "auxiliary", forcedModel: "" }).args[1],
+    "sonnet",
+  );
 });
 
 // runReviewer is the single choke point every review path funnels into, so the
@@ -131,7 +147,7 @@ test("keeps the caller's reviewer when nothing is forced", async () => {
     },
   });
   assert.equal(invocation.name, "codex");
-  assert.equal(invocation.args[2], "gpt-5.6-terra");
+  assert.equal(invocation.args[2], "gpt-5.6-sol");
 });
 
 test("reports the forced reviewer instead of the one selection asked for", async () => {

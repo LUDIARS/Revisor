@@ -183,6 +183,7 @@ test("rechecks the front gate after registered-test autofix changes the diff", a
   const fixture = repositoryFixture();
   let headAnalyses = 0;
   let reviewCalls = 0;
+  let reviewPurpose = null;
   let testRuns = 0;
   try {
     const env = reviewEnvironment(fixture);
@@ -206,8 +207,9 @@ test("rechecks the front gate after registered-test autofix changes the diff", a
           ? [{ name: "unit", status: "failed", exitCode: 1, output: "expected fix" }]
           : [{ name: "unit", status: "passed", exitCode: 0 }];
       },
-      runReview: async ({ cwd }) => {
+      runReview: async ({ cwd, purpose }) => {
         reviewCalls += 1;
+        reviewPurpose = purpose;
         writeFileSync(join(cwd, "product.mjs"), "export const version = \"autofixed\";\n", "utf8");
         return { ok: true, stdout: "fixed registered test", stderr: "" };
       },
@@ -233,6 +235,7 @@ test("rechecks the front gate after registered-test autofix changes the diff", a
     });
 
     assert.equal(reviewCalls, 1, "only the narrow test autofix model may run");
+    assert.equal(reviewPurpose, "auxiliary");
     assert.equal(result.conclusion, "action_required");
     assert.ok(result.reasons.some((reason) => reason.includes("autofix dependency violation")));
     assert.equal(result.contextSource, "anatomia-review-gate-after-test-autofix");

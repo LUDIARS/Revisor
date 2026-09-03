@@ -1,6 +1,6 @@
 {
   "name": "review-plan",
-  "description": "Local PR review orchestration and cost policy: deterministic stage selection, diff/domain-based reviewer strategy, an operator-selectable opposite-model review policy, bounded test autofix, capacity fallback, model-free deterministic re-verification, best-effort PR narrative reconciliation, and operator-set forced review model and effort overrides.",
+  "description": "Local PR review orchestration and cost policy: deterministic stage selection, purpose-based model selection, diff/domain-based effort and reviewer topology, an operator-selectable opposite-model review policy, bounded test autofix, capacity fallback, model-free deterministic re-verification, best-effort PR narrative reconciliation, and operator-set forced review model and effort overrides.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -36,6 +36,7 @@
   "mechanics": [
     "review-stage-planning",
     "reviewer-strategy",
+    "purpose-based-reviewer-model",
     "opposite-model-review-policy",
     "bounded-test-autofix",
     "provider-capacity-fallback",
@@ -46,6 +47,7 @@
   ],
   "specRefs": [
     "review-plan — 変更種別と規模ごとの審査ステージ設計",
+    "review-plan — SPEC-REVIEW-MODEL-BY-PURPOSE",
     "review-cost-control — review model cost and retry control",
     "review-plan — SPEC-PR-NARRATIVE-RECONCILIATION"
   ],

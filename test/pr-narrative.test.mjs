@@ -71,7 +71,7 @@ test("applyNarrativeToBody appends or replaces only the explanation section", ()
   );
 });
 
-test("reconcileNarrative returns a body-only update, parses failures softly, and uses read-only economy review", async () => {
+test("reconcileNarrative returns a body-only update, parses failures softly, and uses the read-only auxiliary model", async () => {
   const calls = [];
   const reconcile = (stdout) => reconcileNarrative({
     pullRequest: { title: "現在", body: "本文" },
@@ -95,7 +95,7 @@ test("reconcileNarrative returns a body-only update, parses failures softly, and
   });
   assert.equal(await reconcile("not json"), null);
   assert.equal(calls[0].readOnly, true);
-  assert.equal(calls[0].tier, "economy");
+  assert.equal(calls[0].purpose, "auxiliary");
   assert.equal(calls[0].effort, "low");
 
   const failed = await reconcileNarrative({

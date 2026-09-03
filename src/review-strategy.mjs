@@ -54,8 +54,8 @@ export function selectReviewStrategy({ classification, unifiedDiff, analysis, se
       reason: "large-code-diff",
       codeChangedLines: codeLines,
       editedDomains: domains,
-      investigator: { tier: "economy", effort: "medium" },
-      judge: { tier: "strong", effort: "high" },
+      investigator: { effort: "medium" },
+      judge: { effort: "high" },
     };
   }
   if ((classification?.counts?.code ?? 0) > 0 && domains >= domainThreshold) {
@@ -64,7 +64,7 @@ export function selectReviewStrategy({ classification, unifiedDiff, analysis, se
       reason: "multi-domain",
       codeChangedLines: codeLines,
       editedDomains: domains,
-      judge: { tier: "strong", effort: "high" },
+      judge: { effort: "high" },
     };
   }
   return {
@@ -72,7 +72,7 @@ export function selectReviewStrategy({ classification, unifiedDiff, analysis, se
     reason: classification?.codeDomainRequired ? "focused-code" : "non-code",
     codeChangedLines: codeLines,
     editedDomains: domains,
-    judge: { tier: "economy", effort: "medium" },
+    judge: { effort: "medium" },
   };
 }
 
