@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -16,6 +16,7 @@ import {
 import { runLocalPrCommand } from "../src/local-pr-commands.mjs";
 import { resolveRepositoryWorkflow } from "../src/repository-workflow.mjs";
 import { NO_LFS_FILTER_ARGS } from "../src/workspace.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 // リポジトリ別の公開ワークフロー選択 (`spec/plan/workflow-selection-design.md`)。
 // GitHub Workflow は App を使わず通常 push で送り、 Revisor Workflow (既定) は不変。
@@ -151,7 +152,7 @@ test("a github-workflow merge publishes with a plain push and never builds a Git
     // 送出できたので保留は残らない。
     assert.equal(refSha(fixture.repoPath, pendingRefName("pr-1")), null);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -220,7 +221,7 @@ test("a failed plain push completes the local merge and holds the publish", asyn
     assert.equal(refSha(fixture.repoPath, pendingRefName("pr-1")), null);
     assert.equal(updates[0].patch.publication, "published");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -238,7 +239,7 @@ test("an org default selects the github workflow for a repository that does not 
     assert.equal(publication.publication, "published");
     assert.equal(pushes.length, 1);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 

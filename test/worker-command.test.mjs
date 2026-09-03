@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { runReviewWorker } from "../src/worker-command.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 test("a job submitted during the final sweep is drained without another wake", async () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-worker-exit-"));
@@ -83,7 +84,7 @@ test("a job submitted during the final sweep is drained without another wake", a
       body: "本文\n\n## 解説\n説明",
     }]);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -118,6 +119,6 @@ test("recovers interrupted local PR reviews when the worker starts", async () =>
     assert.equal(recoveries, 1);
     assert.ok(messages.includes("Revisor worker recovered interrupted reviews: recovered=1 failed=1"));
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });

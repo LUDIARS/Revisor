@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -15,6 +15,7 @@ import {
   UNINITIALIZED_VERSION,
   writeLocalVersion,
 } from "../src/local-version.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
@@ -47,7 +48,7 @@ test("prepares a tracked local version as skip-worktree state", async () => {
       UNINITIALIZED_VERSION,
     );
   } finally {
-    rmSync(repoPath, { recursive: true, force: true });
+    removeFixture(repoPath);
   }
 });
 
@@ -58,7 +59,7 @@ test("writes the explicitly selected version and retains local management", asyn
     assert.equal(await readLocalVersion(repoPath), "2.4.0");
     assert.match(git(repoPath, "ls-files", "-t", "--", LOCAL_VERSION_FILE), /^S /);
   } finally {
-    rmSync(repoPath, { recursive: true, force: true });
+    removeFixture(repoPath);
   }
 });
 
@@ -83,20 +84,24 @@ test("bootstraps a missing registered version on the checked-out base only", asy
     assert.match(git(repoPath, "ls-files", "-t", "--", LOCAL_VERSION_FILE), /^S /);
     assert.equal(git(repoPath, "log", "-1", "--format=%s"), "chore: bootstrap Revisor version state");
   } finally {
-    rmSync(repoPath, { recursive: true, force: true });
+    removeFixture(repoPath);
   }
 });
 
 test("reports an unreachable registration instead of rejecting the projection", async () => {
-  const missingPath = join(tmpdir(), "revisor-version-absent-root");
-  rmSync(missingPath, { recursive: true, force: true });
-  // The Releases, dashboard, and settings tables project every registration at
-  // once, so a root path that moved away has to stay one bad row.
-  const state = await inspectLocalVersionState(missingPath);
-  assert.equal(state.status, "invalid");
-  assert.equal(state.version, null);
-  assert.equal(state.managed, false);
-  assert.equal(typeof state.error, "string");
+  const directory = mkdtempSync(join(tmpdir(), "revisor-version-absent-"));
+  const missingPath = join(directory, "moved-root");
+  try {
+    // The Releases, dashboard, and settings tables project every registration at
+    // once, so a root path that moved away has to stay one bad row.
+    const state = await inspectLocalVersionState(missingPath);
+    assert.equal(state.status, "invalid");
+    assert.equal(state.version, null);
+    assert.equal(state.managed, false);
+    assert.equal(typeof state.error, "string");
+  } finally {
+    removeFixture(directory);
+  }
 });
 
 test("rejects a version-file change from a feature branch", async () => {
@@ -116,7 +121,7 @@ test("rejects a version-file change from a feature branch", async () => {
       /Revisor-owned local state/,
     );
   } finally {
-    rmSync(repoPath, { recursive: true, force: true });
+    removeFixture(repoPath);
   }
 });
 
@@ -133,7 +138,7 @@ test("compares the version file against the registered base, not the frozen merg
     git(registeredPath, "commit", "-m", "base");
     // The isolated merge repository is cloned once and its base is never
     // refreshed afterwards, so it freezes a main that predates the version file.
-    rmSync(mergePath, { recursive: true, force: true });
+    removeFixture(mergePath);
     git(registeredPath, "clone", "--no-checkout", "--", registeredPath, mergePath);
     git(mergePath, "config", "user.name", "Test");
     git(mergePath, "config", "user.email", "test@example.invalid");
@@ -160,8 +165,8 @@ test("compares the version file against the registered base, not the frozen merg
       { baseRef: "main", headRef: "feat/product" },
     );
   } finally {
-    rmSync(registeredPath, { recursive: true, force: true });
-    rmSync(mergePath, { recursive: true, force: true });
+    removeFixture(registeredPath);
+    removeFixture(mergePath);
   }
 });
 
@@ -184,6 +189,6 @@ test("still rejects a branch that changes the version file on the registered bas
       /Revisor-owned local state/,
     );
   } finally {
-    rmSync(repoPath, { recursive: true, force: true });
+    removeFixture(repoPath);
   }
 });

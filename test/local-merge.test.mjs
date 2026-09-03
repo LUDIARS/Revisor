@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,6 +8,7 @@ import test from "node:test";
 import { MergeConflictError, StaleReviewError } from "../src/errors.mjs";
 import { squashMergeLocalPullRequest } from "../src/local-merge.mjs";
 import { NO_LFS_FILTER_ARGS } from "../src/workspace.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 // フィクスチャ構築は、 この機に git-lfs が入っているかどうかに左右されてはいけない。
 // `.gitattributes` が `filter=lfs` を宣言した時点で、 素の `git add` / `checkout` は
@@ -137,7 +138,7 @@ test("merges even after the base advanced, as long as the squash applies cleanly
     ]);
     assert.equal(Object.hasOwn(events[0][1], "mergeRootPath"), false);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -169,7 +170,7 @@ test("treats a rebased branch with no remaining diff as a logical merge", async 
     assert.equal(scanned, false);
     assert.equal(published, false);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -188,7 +189,7 @@ test("refuses an empty re-landing when the reviewed patch was discarded", async 
       input.pullRequest.baseSha,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -202,7 +203,7 @@ test("squash merges LFS-tracked changes without a local git-lfs binary", async (
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
     assert.equal(git(fixture.repoPath, "show", "main:asset.bin"), "feature asset");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -223,7 +224,7 @@ test("a refused merge names the observed state and the recorded reasons", async 
       },
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -239,7 +240,7 @@ test("a refused merge without recorded reasons still names the observed state", 
       },
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -261,7 +262,7 @@ test("a refused merge redacts and flattens recorded reasons before returning the
       },
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -273,7 +274,7 @@ test("legacy draft metadata does not block a Test OK merge", async () => {
     );
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -287,7 +288,7 @@ test("an explicit human override bypasses an unavailable pre-merge scanner", asy
     });
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -311,7 +312,7 @@ test("a human override never bypasses actual security findings", async () => {
     );
     assert.deepEqual(events, ["merge_attempt_started", "merge_squash_committed"]);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -364,7 +365,7 @@ test("reuses a tagged prepared merge when publication is retried", async () => {
       "merge_completed",
     ]);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -407,7 +408,7 @@ test("reuses an untagged prepared merge when ordinary publication is retried", a
       publication.mergeCommitSha,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -443,7 +444,7 @@ test("recovers idempotently when GitHub already points at the prepared merge", a
     assert.equal(refSha(fixture.repoPath, preparedRefName(input.pullRequest.id)), null);
     assert.match(notices.join("\n"), /already contains it/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -482,7 +483,7 @@ test("recovers idempotently when GitHub carried the base beyond the prepared mer
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), publishedBaseSha);
     assert.equal(refSha(fixture.repoPath, preparedRefName(input.pullRequest.id)), null);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -522,7 +523,7 @@ test("discards an unpublished prepared merge left behind by a moved base", async
       publication.mergeCommitSha,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -555,7 +556,7 @@ test("reports why a stale prepared merge was discarded", async () => {
     assert.match(reported, new RegExp(input.pullRequest.baseSha));
     assert.match(reported, new RegExp(movedBaseSha));
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -586,7 +587,7 @@ test("fails loudly instead of falling back when the rebuilt squash conflicts", a
     assert.equal(refSha(fixture.repoPath, preparedRefName(input.pullRequest.id)), null);
     assert.ok(preparedSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -609,7 +610,7 @@ test("keeps the review when the head was only rebased (same patch content)", asy
 
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), mergeCommitSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -632,7 +633,7 @@ test("requires a new review when the head content changed after the review", asy
       input.pullRequest.baseSha,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -652,6 +653,6 @@ test("reports a conflict with the advanced base as a merge conflict", async () =
     );
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), movedBase);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

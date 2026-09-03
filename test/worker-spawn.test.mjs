@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { closeSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ensureReviewWorker, workerLogPath } from "../src/worker-spawn.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "revisor-worker-spawn-"));
@@ -44,7 +45,7 @@ test("sends worker output to a log file instead of discarding it", async () => {
     // 既に閉じている fd をもう一度閉じると EBADF になることで確かめる。
     assert.throws(() => closeSync(options.stdio[1]), { code: "EBADF" });
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -60,7 +61,7 @@ test("keeps the log across restarts and truncates it only when oversized", async
     await ensureReviewWorker({ jobsPath, forkWorker: readyChild([]) });
     assert.equal(statSync(logPath).size, 0, "an oversized log is truncated when reopened");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -76,6 +77,6 @@ test("still starts the worker when the log cannot be opened", async () => {
     assert.equal(result.logPath, null);
     assert.equal(seen[0].stdio[1], "ignore");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });

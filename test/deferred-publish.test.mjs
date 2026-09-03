@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,6 +10,7 @@ import { publishMergedPullRequest } from "../src/release-publisher.mjs";
 import { publishPendingPublications } from "../src/publish-pending.mjs";
 import { RevisorError } from "../src/errors.mjs";
 import { NO_LFS_FILTER_ARGS } from "../src/workspace.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 // 保留付きローカルマージ (`spec/plan/deferred-publish-design.md`)。
 // GitHub App が入っていない org でも、 ローカルのマージだけは通常どおり終局し、
@@ -139,7 +140,7 @@ test("an uninstalled GitHub App defers the publish and still completes the local
       publication.mergeCommitSha,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -164,7 +165,7 @@ test("--defer-push holds the publish without touching the GitHub client at all",
       publication.mergeCommitSha,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -195,7 +196,7 @@ test("a GitHub failure other than an uninstalled App still fails the merge", asy
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), baseSha);
     assert.equal(refSha(fixture.repoPath, pendingRefName("pr-1")), null);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -268,7 +269,7 @@ test("publish-pending sends a held merge and drops its pending ref", async () =>
     assert.equal(refSha(fixture.repoPath, pendingRefName("pr-1")), null);
     assert.equal(updates[0].patch.publication, "published");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -305,7 +306,7 @@ test("publish-pending sends dependent deferred merges in local merge order", asy
       [2, 2, 0, 0],
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -336,6 +337,6 @@ test("publish-pending keeps the pending ref while GitHub stays unreachable", asy
     assert.equal(refSha(fixture.repoPath, pendingRefName("pr-1")), merge.mergeCommitSha);
     assert.equal(updates.length, 0);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

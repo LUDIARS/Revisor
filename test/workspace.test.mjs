@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -11,6 +11,7 @@ import {
   NO_LFS_FILTER_ARGS,
   prepareLocalWorktrees,
 } from "../src/workspace.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", [...NO_LFS_FILTER_ARGS, "-C", repoPath, ...args], {
@@ -81,7 +82,7 @@ test("the shared git boundary preserves a working LFS clean filter", async () =>
 
     assert.equal(git(repoPath, "show", ":asset.bin"), "filtered:asset content");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -100,7 +101,7 @@ test("cleanup removes both disposable worktrees and the temp root", async () => 
       .filter(Boolean);
     assert.equal(remaining.length, 1);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -121,7 +122,7 @@ test("places the disposable worktrees under the configured scratch root", async 
     assert.equal(existsSync(worktrees.base), true);
   } finally {
     if (worktrees) await cleanupWorktrees(fixture.repoPath, worktrees);
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -140,7 +141,7 @@ test("prepares the review after the base advances", async () => {
     assert.equal(existsSync(worktrees.base), true);
   } finally {
     if (worktrees) await cleanupWorktrees(fixture.repoPath, worktrees);
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -204,7 +205,7 @@ test("the review diff starts at the merge repository's base, not the stale regis
     assert.deepEqual(changed, ["product.txt"]);
   } finally {
     if (worktrees) await cleanupWorktrees(repoPath, worktrees);
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -256,7 +257,7 @@ test("worktree add succeeds when a repo's LFS filter binary is unavailable", asy
     assert.equal(existsSync(worktrees.base), true);
   } finally {
     if (worktrees) await cleanupWorktrees(repoPath, worktrees);
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -285,8 +286,8 @@ test("cleanup survives a temp root that cannot be removed", async () => {
     assert.equal(remaining.length, 1);
   } finally {
     // The stub kept the real deletion from running, so drop the root here.
-    if (worktrees) rmSync(worktrees.root, { recursive: true, force: true });
-    rmSync(fixture.directory, { recursive: true, force: true });
+    if (worktrees) removeFixture(worktrees.root);
+    removeFixture(fixture.directory);
   }
 });
 
@@ -319,7 +320,7 @@ test("the diff fingerprint survives a rebase and changes with the content", asyn
 
     assert.notEqual(await diffPatchId(fixture.repoPath, changedSha, movedBase), before);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -338,6 +339,6 @@ test("the diff fingerprint refuses an argument that is not an object name", asyn
       /not a Git object name/,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

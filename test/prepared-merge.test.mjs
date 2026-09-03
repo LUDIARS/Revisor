@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,6 +8,7 @@ import {
   classifyPreparedMerge,
   readPublishedBaseSha,
 } from "../src/prepared-merge.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 const ABSENT_SHA = "9999999999999999999999999999999999999999";
 
@@ -89,7 +90,7 @@ test("reuses a prepared merge that still sits on the current base without asking
     assert.equal(decision.reason, "current_base");
     assert.equal(decision.notice, null);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -105,7 +106,7 @@ test("reuses a prepared merge that GitHub already points at", async () => {
     assert.equal(decision.reason, "published");
     assert.match(decision.notice, /already contains it/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -121,7 +122,7 @@ test("reuses a prepared merge that GitHub carried further as an ancestor", async
     assert.equal(decision.reason, "published");
     assert.equal(decision.publishedBaseSha, fixture.descendantSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -140,7 +141,7 @@ test("discards an unpublished prepared merge once the base moved past it", async
     assert.match(decision.notice, new RegExp(fixture.preparedBaseSha));
     assert.match(decision.notice, new RegExp(fixture.movedBaseSha));
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -155,7 +156,7 @@ test("discards the prepared merge when the base branch is gone from GitHub", asy
     assert.equal(decision.action, "rebuild");
     assert.match(decision.notice, /missing/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -171,7 +172,7 @@ test("keeps the prepared merge when the GitHub head is not present locally", asy
     assert.equal(decision.reason, "unverified");
     assert.match(decision.notice, /not present locally/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -190,7 +191,7 @@ test("keeps the prepared merge without logging a GitHub read error", async () =>
     assert.match(decision.notice, /GitHub could not be read/);
     assert.doesNotMatch(decision.notice, /installation-token/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 

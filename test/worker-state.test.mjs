@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +11,7 @@ import {
   workerStatePath,
   writeWorkerState,
 } from "../src/worker-state.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "revisor-worker-state-"));
@@ -31,7 +32,7 @@ test("the server reads the state the worker published", () => {
     assert.deepEqual(readWorkerState(jobsPath), STATE);
   } finally {
     release?.();
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -46,7 +47,7 @@ test("a state file left behind by a dead worker is not reported as live", () => 
     release?.();
     assert.deepEqual(readWorkerState(jobsPath), { queues: [] });
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -58,7 +59,7 @@ test("a partially written state file reports empty instead of throwing", () => {
     assert.deepEqual(readWorkerState(jobsPath), { queues: [] });
   } finally {
     release?.();
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -71,7 +72,7 @@ test("clearing removes the published state", () => {
     assert.deepEqual(readWorkerState(jobsPath), { queues: [] });
   } finally {
     release?.();
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -88,6 +89,6 @@ test("an exiting worker does not clear a successor's state", () => {
     assert.deepEqual(readWorkerState(jobsPath), STATE);
   } finally {
     release?.();
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });

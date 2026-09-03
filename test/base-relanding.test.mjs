@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -7,6 +7,7 @@ import test from "node:test";
 import { conflictMessage, relandHeadOnBase } from "../src/base-relanding.mjs";
 import { MergeConflictError } from "../src/errors.mjs";
 import { cleanupWorktrees } from "../src/workspace.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
@@ -93,7 +94,7 @@ test("re-lands the head on the advanced base without touching the repository sta
     assert.equal(git(fixture.repoPath, "stash", "list"), before.stash);
   } finally {
     await cleanupWorktrees(fixture.repoPath, worktrees);
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -120,7 +121,7 @@ test("a conflicting re-landing reports the conflicting files and resolves nothin
     assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), fixture.baseSha);
   } finally {
     await cleanupWorktrees(fixture.repoPath, worktrees);
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -175,6 +176,6 @@ test("does not report a missing head object as a merge conflict", async () => {
     assert.equal(error instanceof MergeConflictError, false);
   } finally {
     await cleanupWorktrees(fixture.repoPath, worktrees);
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,7 @@ import { decidePullRequest } from "../src/pr-disposition.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
 import { createUiRequestHandler } from "../src/ui-server.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 const HEAD = "a".repeat(40);
 const verification = (overrides = {}) => ({
@@ -282,7 +283,7 @@ test("persists the latest verification with recordedAt and returns it in the ful
     assert.ok(moved.decision.blockers.includes("人間による動作確認が必要です"));
   } finally {
     try {
-      rmSync(directory, { recursive: true, force: true });
+      removeFixture(directory);
     } catch (error) {
       // Windows keeps the SQLite file handle open until the store is garbage
       // collected; the temp directory is then removed by the OS. The assertions

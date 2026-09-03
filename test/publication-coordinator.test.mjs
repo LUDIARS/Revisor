@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { PublicationCoordinator } from "../src/publication-coordinator.mjs";
 import { runBarrierChildren } from "./helpers/barrier-children.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 const HOLDER_PATH = fileURLToPath(
   new URL("./fixtures/publication-lock-holder.mjs", import.meta.url),
@@ -45,6 +46,6 @@ test("serializes publication operations across separate CLI processes", async ()
       [lockPath, markerPath],
     ]);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });

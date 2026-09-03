@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import {
   mkdirSync,
   mkdtempSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +13,7 @@ import {
   prepareMergeRepository,
   resolveMergeRepositoryPath,
 } from "../src/merge-repository.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
@@ -117,7 +117,7 @@ test("isolates merge, reconciliation, and publication state from a dirty source 
       stashes: git(fixture.sourceRoot, "stash", "list"),
     }, sourceBefore);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -150,7 +150,7 @@ test("reuses its persistent base while refreshing only the source head", async (
     assert.equal(git(second.rootPath, "rev-parse", "refs/heads/feat/local"), nextHead);
     assert.equal(git(fixture.sourceRoot, "rev-parse", "refs/heads/main"), fixture.baseSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -188,7 +188,7 @@ test("serializes concurrent preparation of the same merge repository", async () 
     assert.equal(git(first.rootPath, "rev-parse", "refs/heads/main"), fixture.baseSha);
     assert.equal(git(first.rootPath, "rev-parse", "refs/heads/feat/local"), fixture.headSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -250,6 +250,6 @@ test("trusts only the registered source for local clone and fetch transport", as
       assert.equal(args.includes("safe.directory=*"), false);
     }
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

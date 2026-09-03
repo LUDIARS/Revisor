@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -20,6 +20,7 @@ import {
   writeDiscordWebhookUrl,
   writeSettings,
 } from "../src/config.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "revisor-config-"));
@@ -51,7 +52,7 @@ test("encrypts, reads, and removes the Discord webhook URL", () => {
     assert.equal(optionalDiscordWebhookUrl(state.env), null);
     assert.equal(hasDiscordWebhookUrl(state.env), false);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -72,7 +73,7 @@ test("resolves a relative anatomiaFolder to an absolute path on read, basis = co
     assert.equal(resolved.endsWith("Anatomia"), true);
     assert.equal(resolved, resolve(state.directory, "..", "Anatomia"));
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -91,7 +92,7 @@ test("resolved anatomiaFolder is independent of process cwd", () => {
     assert.equal(fromDifferentCwd, fromOriginalCwd);
   } finally {
     process.chdir(originalCwd);
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -107,7 +108,7 @@ test("writeSettings persists an absolute anatomiaFolder even when given a relati
     assert.notEqual(stored.settings.anatomiaFolder, "../Anatomia");
     assert.equal(stored.settings.anatomiaFolder, resolve(state.directory, "..", "Anatomia"));
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -129,7 +130,7 @@ test("writeSettings keeps an absolute reviewScratchRoot and defaults to empty", 
     }, state.env);
     assert.equal(readSettings(state.env).reviewScratchRoot, "/scratch/revisor");
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -145,7 +146,7 @@ test("writeSettings refuses a relative reviewScratchRoot", () => {
       reviewScratchRoot: "scratch",
     }, state.env), /absolute path/);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -164,7 +165,7 @@ test("readSettings falls back to the OS temporary directory for an invalid store
     writeFileSync(state.path, JSON.stringify(stored));
     assert.equal(readSettings(state.env).reviewScratchRoot, "");
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -182,7 +183,7 @@ test("writeSettings persists an absolute augurFolder even when given a relative 
     assert.notEqual(stored.settings.augurFolder, "../Augur");
     assert.equal(stored.settings.augurFolder, resolve(state.directory, "..", "Augur"));
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -310,7 +311,7 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.equal(readSettings(state.env).costValidationSkipGenius, true);
     assert.equal(readSettings(state.env).costValidationSkipAnatomiaDomain, true);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -337,7 +338,7 @@ test("defaults a missing forced review effort but disables a corrupt stored over
       workerCount: 1,
     }, state.env), /Forced review effort is invalid/);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -358,7 +359,7 @@ test("persists each cost validation skip independently", () => {
     assert.equal(settings.costValidationSkipGenius, false);
     assert.equal(settings.costValidationSkipAnatomiaDomain, false);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -380,7 +381,7 @@ test("encrypts and removes GitHub App credentials", () => {
     removeGitHubAppCredentials(state.env);
     assert.equal(hasGitHubAppCredentials(state.env), false);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -395,7 +396,7 @@ test("validates configured allowed hosts and permits clearing them", () => {
     assert.deepEqual(writeAllowedHosts([], state.env), []);
     assert.deepEqual(readAllowedHosts(state.env), []);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -409,7 +410,7 @@ test("rejects invalid worker settings", () => {
       workerCount: 0,
     }, state.env), /Worker count/);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -430,7 +431,7 @@ test("rejects invalid review scale thresholds", () => {
       /Multi-domain review threshold/,
     );
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -468,7 +469,7 @@ test("rejects invalid security scan settings and defaults omitted ones", () => {
     assert.equal(readSettings(state.env).securityScanEffort, "medium");
     assert.equal(readSettings(state.env).securityScanModel, "");
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -480,7 +481,7 @@ test("fails without replacing a missing encryption key", () => {
     assert.throws(() => readWorkflowToken(state.env), /could not be decrypted/);
     assert.equal(hasWorkflowToken(state.env), false);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -515,7 +516,7 @@ test("persists the human's auto-merge threshold and the plan advisor", () => {
     assert.equal(readSettings(state.env).autoMergeRiskThreshold, 30);
     assert.equal(readSettings(state.env).planAdvisor, "augur");
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -541,7 +542,7 @@ test("rejects an out-of-range threshold, an unknown advisor and Augur without a 
       /Augur folder is required/,
     );
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -569,7 +570,7 @@ test("the Anatomia dual-layer gate mode defaults to enforced and only accepts ad
     writeFileSync(state.path, JSON.stringify(stored));
     assert.equal(readSettings(state.env).anatomiaDualLayerGateMode, "enforced");
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -620,6 +621,6 @@ test("keeps a stored fallback reviewer and persists the opposite-model toggle", 
       /Fallback reviewer is invalid/,
     );
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });

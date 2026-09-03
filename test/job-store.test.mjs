@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { JobStore } from "../src/job-store.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function storeFixture() {
   const directory = mkdtempSync(join(tmpdir(), "revisor-jobs-"));
@@ -39,7 +40,7 @@ test("an unsettled job for the same head is the run the caller asked for", async
     assert.equal(second.job.id, first.job.id);
     assert.equal(fixture.store.state().queued, 1);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -60,7 +61,7 @@ test("a forced re-review preserves settled history and creates a new same-head j
     assert.equal(fixture.store.get(first.job.id).status, "completed");
     assert.equal(fixture.store.list().length, 2);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -76,7 +77,7 @@ test("a forced re-review never doubles a job that is still running", async () =>
     assert.equal(fixture.store.state().running, 1);
     assert.equal(fixture.store.state().queued, 0);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -89,7 +90,7 @@ test("claiming is exclusive and records the holding process", async () => {
     assert.equal(claimed.claimedPid, process.pid);
     assert.equal(await fixture.store.claimNext(), null, "a claimed job is not handed out twice");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -107,7 +108,7 @@ test("a promoted queued job persists in the fast lane and is claimed before norm
     assert.equal(claimed.localPrId, "pr-fast");
     assert.equal(claimed.reviewLane, "fast");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -122,7 +123,7 @@ test("promotion joins the tail of the fast FIFO and is idempotent", async () => 
     assert.equal((await fixture.store.claimNext({ reviewLane: "fast" })).localPrId, "pr-fast-first");
     assert.equal((await fixture.store.claimNext({ reviewLane: "fast" })).localPrId, "pr-promoted");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -146,7 +147,7 @@ test("promotion stays at the fast FIFO tail when every timestamp is identical", 
     assert.equal((await store.claimNext({ reviewLane: "fast" })).localPrId, "pr-fast-first");
     assert.equal((await store.claimNext({ reviewLane: "fast" })).localPrId, "pr-promoted");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -172,7 +173,7 @@ test("legacy v1 jobs migrate to the canonical standard lane on restart", () => {
     assert.equal(job.reviewLane, "standard");
     assert.equal(job.request.reviewLane, "standard");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -191,7 +192,7 @@ test("imports a separately stored legacy queue without replacing its prior archi
     assert.equal(existsSync(`${legacyPath}.migrated.1`), true);
     assert.deepEqual(JSON.parse(readFileSync(`${legacyPath}.migrated.1`, "utf8")), legacy);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -233,7 +234,7 @@ test("a job whose worker died is requeued until the attempt limit, then failed",
     assert.equal(second.exhausted[0].error.includes(fixture.directory), false);
     assert.equal(fixture.store.state().queued, 0);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -255,7 +256,7 @@ test("a stalled review job can be abandoned for its local PR", async () => {
     assert.equal(fixture.store.state().running, 0);
     assert.equal(fixture.store.state().queued, 0);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -273,7 +274,7 @@ test("a late worker cannot overwrite a manually abandoned job", async () => {
     assert.equal(settled.error, "stalled by hand");
     assert.equal(fixture.store.get(claimed.id).status, "failed");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -290,7 +291,7 @@ test("abandoning leaves other local PRs and settled jobs untouched", async () =>
     assert.equal(fixture.store.get(settled.id).status, "completed");
     assert.equal(fixture.store.state().queued, 1);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -300,6 +301,6 @@ test("abandoning requires a local PR id and a reason", async () => {
     await assert.rejects(() => fixture.store.abandonForLocalPr("", "why"), /local PR id/);
     await assert.rejects(() => fixture.store.abandonForLocalPr("pr-1", " "), /reason/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

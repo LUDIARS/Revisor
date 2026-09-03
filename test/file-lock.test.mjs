@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { isLockHeld, tryAcquireLock } from "../src/file-lock.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 test("a live lock does not expire solely because a review runs for more than two minutes", () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-lock-"));
@@ -15,7 +16,7 @@ test("a live lock does not expire solely because a review runs for more than two
     assert.equal(tryAcquireLock(path), null);
     release();
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -31,6 +32,6 @@ test("an old release callback cannot remove a replacement owner's lock", () => {
     release();
     assert.equal(existsSync(lockDirectory), true);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });

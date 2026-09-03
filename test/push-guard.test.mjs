@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { guardMainPush, installPushGuard } from "../src/push-guard.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
@@ -80,7 +80,7 @@ test("scans a detached commit refspec, blocks leakage, then accepts the amended 
     assert.equal(safe.allowed, true);
     assert.equal(store.getRepository("LUDIARS/Product").pushGuard.status, "safe");
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -110,7 +110,7 @@ test("blocks every non-main branch update before it reaches a remote", async () 
       "branch_push_blocked",
     );
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -133,7 +133,7 @@ test("blocks a direct release-tag push outside Revisor publication", async () =>
     assert.equal(result.allowed, false);
     assert.equal(result.publicationRequired, true);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -160,7 +160,7 @@ test("installs a managed pre-push hook without overwriting an existing hook", as
       statePath: "state.json",
     }), /was not overwritten/);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -201,7 +201,7 @@ test("認可されたブランチ送出は通し、base の認可までは広げ
     assert.equal(base.allowed, false);
     assert.equal(base.publicationRequired, true);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -240,7 +240,7 @@ test("新規ブランチは tip だけでなく分岐点まで遡って漏洩を
     assert.equal(result.amendRequired, true);
     assert.ok(result.findings.length > 0);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -278,6 +278,6 @@ test("途中で削除された秘密も送出履歴に残るため拒む", async
     assert.equal(result.amendRequired, true);
     assert.ok(result.findings.length > 0);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });

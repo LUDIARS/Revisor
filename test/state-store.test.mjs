@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { LocalPrStore } from "../src/state-store.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 test("projects an open PR for early QA while review is queued", () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-state-"));
@@ -80,7 +81,7 @@ test("projects an open PR for early QA while review is queued", () => {
     const reloaded = new LocalPrStore({ path });
     assert.equal(reloaded.getPullRequest(pullRequest.id).checkStatus, "test_ok");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -107,7 +108,7 @@ test("changes the list version for local and other-connection writes", () => {
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -163,7 +164,7 @@ test("opens an existing database while another process holds it", async () => {
   } finally {
     if (holder.exitCode === null) holder.kill();
     await holderExited;
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -198,7 +199,7 @@ test("keeps the newest 50 lifecycle events on each pull request", () => {
     assert.equal(events[49].event, "review_passed");
     assert.equal(events[49].tone, "ok");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -228,7 +229,7 @@ test("early QA ignores legacy draft metadata but excludes settled reviews that n
     store.updatePullRequest(draft.id, { checkStatus: "action_required" });
     assert.deepEqual(store.testWorkflowProducts(), []);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -271,7 +272,7 @@ test("numbers pull requests from one global sequence across repositories", () =>
     // 別リポでも番号は共有 — Rv#n だけで PR が一意に特定できる。
     assert.deepEqual([first.number, second.number, third.number], [1, 2, 3]);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -320,7 +321,7 @@ test("migrates a v1 per-repository numbered state to the global sequence", () =>
     });
     assert.equal(next.number, 4);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -344,7 +345,7 @@ test("imports a separately stored legacy state without replacing its prior archi
     assert.equal(existsSync(`${legacyPath}.migrated.1`), true);
     assert.deepEqual(JSON.parse(readFileSync(`${legacyPath}.migrated.1`, "utf8")), legacy);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -382,6 +383,6 @@ test("emits identifier-only events after persisted PR changes", () => {
     assert.equal("body" in events.at(-1), false);
     assert.equal("error" in events.at(-1), false);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });

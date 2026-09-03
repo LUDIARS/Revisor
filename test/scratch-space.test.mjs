@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { makeScratchDir, resolveScratchRoot } from "../src/scratch-space.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 test("設定が空なら OS の一時領域に落ちる", () => {
   assert.equal(resolveScratchRoot({}), tmpdir());
@@ -39,7 +40,7 @@ test("作業領域は設定した親の下に作られる", async () => {
     assert.equal(dirname(made), root);
     assert.ok(statSync(made).isDirectory());
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeFixture(root);
   }
 });
 
@@ -53,6 +54,6 @@ test("親ディレクトリが無ければ作る", async () => {
     const made = await makeScratchDir("revisor-test-", { reviewScratchRoot: root });
     assert.equal(dirname(made), root);
   } finally {
-    rmSync(base, { recursive: true, force: true });
+    removeFixture(base);
   }
 });

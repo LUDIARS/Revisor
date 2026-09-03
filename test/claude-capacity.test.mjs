@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -7,6 +7,7 @@ import {
   claudeSessionCapacityUnavailable,
   claudeSessionLogPath,
 } from "../src/claude-capacity.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 const SESSION_ID = "4750bf36-ad78-48b3-9299-dbab7717bf9d";
 
@@ -30,7 +31,7 @@ test("detects a structured Claude rate-limit event for the owned session", async
       home,
     }), true);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeFixture(home);
   }
 });
 
@@ -43,6 +44,6 @@ test("does not infer capacity exhaustion when the owned session log is absent", 
       home,
     }), false);
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    removeFixture(home);
   }
 });

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +16,7 @@ import { resolveMergeRepositoryPath } from "../src/merge-repository.mjs";
 import { createReviewQueueHarness } from "./helpers/review-queue-harness.mjs";
 import { LocalPrStore } from "../src/state-store.mjs";
 import { GENIUS_HUMAN_DECISION_REASON } from "../src/human-decision.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 async function waitForCheckStatus(store, id, checkStatus) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -200,7 +200,7 @@ test("registers tests, queues a local-only PR, and squash merges it", async () =
       ["merged", "merged"],
     ]);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -230,7 +230,7 @@ test("an explicit merge acknowledges the sole Genius human-decision hold", async
     assert.equal(merged.checkStatus, "test_ok");
     assert.deepEqual(merged.reasons, []);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -260,7 +260,7 @@ test("an automatic merge never acknowledges the Genius human-decision hold", asy
     );
     assert.equal(store.getPullRequest(pullRequest.id).status, "open");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -290,7 +290,7 @@ test("a Genius decision cannot acknowledge an additional merge blocker", async (
     );
     assert.equal(store.getPullRequest(pullRequest.id).status, "open");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -354,7 +354,7 @@ test("re-queues a reviewed local PR against a moved head with a full intent revi
     assert.equal(retried.checkStatus, "queued");
     assert.equal(retried.error, null);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -427,7 +427,7 @@ test("hands a resolved merge conflict to the runner as changed content", async (
     // 記録は使い捨て。 次の head を無条件に免除しないよう再投入で消えている。
     assert.equal(store.getPullRequest(pullRequest.id).mergeConflictAfterReview, null);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -496,7 +496,7 @@ test("re-reviews an unchanged head and drops the previous outcome", async () => 
     assert.equal(runs[1].previousReview.reviewedHeadSha, submitted.headSha);
   } finally {
     await queue.idle();
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -581,7 +581,7 @@ test("a superseded job neither overwrites nor announces the current review", asy
     assert.deepEqual(announced, ["test_ok"]);
   } finally {
     await queue.idle();
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -618,7 +618,7 @@ test("refuses to re-queue a merged local PR", async () => {
       /Only an open local PR can be reviewed again/,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -678,7 +678,7 @@ test("submits while untracked files sit in the head worktree", async () => {
       git(fixture.repoPath, "rev-parse", "feat/local"),
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -718,7 +718,7 @@ test("adopts the session of a resubmission that joins an in-flight review", asyn
     assert.equal(third.sourceLinks.length, 2);
     assert.match(third.body, /workspace\.slack\.com\/archives\/C1\/p123/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -743,7 +743,7 @@ test("stores source links and adds them to the PR description", async () => {
     }]);
     assert.match(pullRequest.body, /関連メッセージ:[\s\S]*discord\.com\/channels\/1\/2\/3/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -759,7 +759,7 @@ test("refuses to submit a head worktree carrying tracked modifications", async (
       /head branch worktree has uncommitted changes/,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -774,7 +774,7 @@ test("merges while untracked files sit in the base worktree", async () => {
     assert.equal(git(fixture.repoPath, "rev-list", "--count", "main"), "2");
     assert.equal(readFileSync(join(fixture.repoPath, "local-notes.txt"), "utf8"), "scratch\n");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -802,7 +802,7 @@ test("blocks the squash merge on pre-merge security findings", async () => {
     assert.equal(git(fixture.repoPath, "rev-parse", "main"), fixture.baseSha);
     assert.equal(store.getPullRequest(pullRequest.id).status, "open");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -823,7 +823,7 @@ test("blocks the squash merge when the pre-merge security scan is incomplete", a
     );
     assert.equal(git(fixture.repoPath, "rev-parse", "main"), fixture.baseSha);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -839,7 +839,7 @@ test("blocks the squash merge when the pre-merge scan returns no usable result",
     assert.equal(git(fixture.repoPath, "rev-parse", "main"), fixture.baseSha);
     assert.equal(store.getPullRequest(pullRequest.id).status, "open");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -855,7 +855,7 @@ test("merges without touching tracked modifications in the source base checkout"
     assert.equal(git(fixture.repoPath, "status", "--porcelain"), before);
     assert.equal(readFileSync(join(fixture.repoPath, "product.txt"), "utf8"), "base\nlocal edit\n");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -902,7 +902,7 @@ test("merges while a submodule carries its own uncommitted content", async () =>
     const merged = await service.mergePullRequest(pullRequest.id);
     assert.equal(merged.status, "merged");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -925,7 +925,7 @@ test("merges without touching an uncommitted submodule pointer in the source che
       before,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -935,14 +935,18 @@ test("merges without touching an uncommitted submodule pointer in the source che
 // どのワーカーにも属していない = 中断された job。 これを拾い直さないと
 // queue.submit の再投入ガードに弾かれ続けて永久に動かない。
 
-/** state.json を直接書き換えて「前回のプロセスが落ちた」状態を作る。 */
+/**
+ * 「前回のプロセスが落ちた」状態、 つまり job が無いのに checkStatus だけ
+ * queued / running で残った PR を作る。
+ *
+ * 以前は state ファイルを JSON として直接書き換えていたが、 保存先が SQLite に
+ * 変わってからは `store.path` を JSON.parse できず、 この 2 本のテストは
+ * `Unexpected token 'S', "SQLite for"...` で落ち続けていた (テスト対象ではなく
+ * ヘルパが古かった)。 store の API で書けば保存形式に依存しない。
+ */
 function forceCheckStatus(store, id, checkStatus) {
-  const statePath = store.path;
-  const state = JSON.parse(readFileSync(statePath, "utf8"));
-  const record = state.pullRequests.find((candidate) => candidate.id === id);
-  assert.ok(record, `Local PR '${id}' is missing from the state file.`);
-  record.checkStatus = checkStatus;
-  writeFileSync(statePath, JSON.stringify(state, null, 2), "utf8");
+  const updated = store.updatePullRequest(id, { checkStatus });
+  assert.equal(updated.checkStatus, checkStatus);
 }
 
 async function submittedPullRequest(fixture, store, submissions, options = {}) {
@@ -994,7 +998,7 @@ test("re-queues reviews left running by a crashed process", async () => {
     // 再投入は force 必須 (同一 head の settled job にフォールバックさせない)。
     assert.equal(submissions.at(-1).options?.force, true);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1011,7 +1015,7 @@ test("re-queues reviews still marked queued after a restart", async () => {
     assert.equal(recovery.recovered.length, 1);
     assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1030,7 +1034,7 @@ test("leaves settled reviews untouched during recovery", async () => {
     assert.equal(submissions.length, before);
     assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "test_ok");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1056,7 +1060,7 @@ test("announces an unresumable review once, with the restart reason", async () =
     assert.deepEqual(lifecycle.map(([event]) => event), ["created", "review_failed"]);
     assert.match(lifecycle.at(-1)[1], /Revisor restarted while this review was in flight/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1079,7 +1083,7 @@ test("fails an interrupted review that can no longer be resumed", async () => {
     assert.equal(settled.checkStatus, "failed");
     assert.match(settled.error, /Revisor restarted while this review was in flight/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1120,7 +1124,7 @@ test("a merge conflict drops the PR to action_required instead of leaving it Tes
     // Test OK から外れたので Test Forum の候補にも載らない。
     assert.deepEqual(store.testWorkflowProducts(), []);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1173,7 +1177,7 @@ test("a stale review is re-queued automatically on merge", async () => {
     assert.equal(submissions.length, 2);
     assert.deepEqual(submissions[1].options, { force: true });
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1229,7 +1233,7 @@ test("stops re-queueing a head that keeps coming back stale", async () => {
     assert.equal(submissions.length, requeued, "the bounded PR must not be re-queued again");
     assert.match(held.reasons.join(" "), /自動再審査を停止/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1278,7 +1282,7 @@ test("a bypass merge lands without a review and is marked for follow-up", async 
     assert.equal(merged.bypassMerge.actor, "cli");
     assert.match(merged.bypassMerge.reason, /審査を回せない/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1310,7 +1314,7 @@ test("an ordinary merge carries no bypass mark", async () => {
     const merged = await service.mergePullRequest(pullRequest.id);
     assert.equal(merged.bypassMerge, undefined);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1356,7 +1360,7 @@ test("durable job cleanup failure does not turn a completed merge into a failure
     assert.equal(logs.at(-1).event, "review_job_settlement_failed");
     assert.equal(logs.at(-1).options.level, "warn");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1425,7 +1429,7 @@ test("the auto-merge sweep ignores legacy draft metadata", async () => {
     assert.equal(after.autoMerge.merged, true);
     assert.equal(store.getPullRequest(draft.id).status, "merged");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1538,7 +1542,7 @@ test("a sweep and a review-completion auto-merge never squash the same PR at onc
     assert.deepEqual(mergedIds, [eligible.id]);
     assert.equal(store.getPullRequest(eligible.id).status, "merged");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1605,7 +1609,7 @@ test("the sweep re-reads each candidate and skips one merged mid-sweep", async (
     assert.equal(mergedIds.length, 1);
     assert.ok(ids.includes(mergedIds[0]));
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1651,7 +1655,7 @@ test("closes an open local PR and keeps it out of the test workflow", async () =
     // 通知が無いと、 PR を待っている人と Discord スレッドが開いたまま取り残される。
     assert.deepEqual(announced, [{ event: "created", status: "open" }, { event: "closed", status: "closed" }]);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1698,7 +1702,7 @@ test("a closed local PR can be neither merged, re-queued, nor closed twice", asy
       /Only an open local PR can be closed/,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1737,7 +1741,7 @@ test("refuses to close a local PR while its review is in flight", async () => {
       /A local PR under review cannot be closed/,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1803,7 +1807,7 @@ test("refuses to close a local PR while its squash merge is in flight", async ()
       /Only an open local PR can be closed/,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1844,7 +1848,7 @@ test("refuses to close a local PR without a reason", async () => {
     assert.equal(store.getPullRequest(pullRequest.id).status, "open");
     assert.deepEqual(announced, ["created"]);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1918,7 +1922,7 @@ test("retries a queued local PR when no durable review job remains", async () =>
     assert.equal(submissions.length, 2);
     assert.equal(retried.checkStatus, "queued");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -1963,7 +1967,7 @@ test("does not recover a local PR that still has a durable review job", async ()
     assert.deepEqual(recovery, { scanned: 0, recovered: [], failed: [] });
     assert.equal(submissions, 1);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -2012,7 +2016,7 @@ test("refuses a manual retry while the durable review job is still active", asyn
     }
     assert.equal(submissions, 1);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -2073,7 +2077,7 @@ test("a forced manual retry settles the stalled review job and re-queues it", as
     assert.equal(ownershipRevokedBeforeRetry, true, "the stalled worker loses reporter ownership first");
     assert.equal(jobs.get(claimed.id).status, "failed", "the abandonment reason remains in history");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -2107,7 +2111,7 @@ test("a forced retry fails closed when durable job settlement is unavailable", a
     assert.equal(submissions, 1, "no duplicate review is submitted without job settlement");
     assert.equal(store.getPullRequest(pullRequest.id).checkStatus, "queued");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -2138,7 +2142,7 @@ test("force must be a boolean", async () => {
       /force must be a boolean/,
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -2234,7 +2238,7 @@ test("re-lands the next PR itself after another merge advanced the base", async 
       "登録 checkout の main が前進していない (publication が働いていない)",
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -2296,6 +2300,6 @@ test("returns the conflicting file list when the re-landing conflicts", async ()
     assert.match(held.reasons[0], /product\.txt/);
     assert.equal(held.status, "open");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

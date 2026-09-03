@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { hasWorkflowToken, readAllowedHosts, readSettings } from "../src/config.mjs";
 import { createUiRequestHandler } from "../src/ui-server.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function request({ method = "GET", url = "/", headers = {}, body = "" } = {}) {
   return {
@@ -78,7 +79,7 @@ test("saves allowed hosts before initial setup and applies them immediately", as
     }), probe);
     assert.equal(probe.status, 200);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -113,7 +114,7 @@ test("rejects an invalid host without dropping the hosts already in effect", asy
     }), probe);
     assert.equal(probe.status, 200);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -151,7 +152,7 @@ test("an empty list withdraws every registered host in the same process", async 
     }), probe);
     assert.equal(probe.status, 403);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -168,7 +169,7 @@ test("requires an authorized UI session for the independent endpoint", async () 
     assert.equal(rejected.status, 403);
     assert.deepEqual(readAllowedHosts(state.env), []);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -186,7 +187,7 @@ test("the general settings endpoint cannot update allowed hosts", async () => {
     assert.match(JSON.parse(rejected.body).error, /\/api\/settings\/allowed-hosts/);
     assert.deepEqual(readAllowedHosts(state.env), []);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -225,6 +226,6 @@ test("filters and summarizes session-authorized local PR lists", async () => {
     }), invalid);
     assert.equal(invalid.status, 400);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });

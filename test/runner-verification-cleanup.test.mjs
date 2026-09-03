@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { createPrReviewRunner } from "../src/runner.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
@@ -135,7 +136,7 @@ test("verification keeps disposable worktrees until registered tests settle", as
     assert.equal(result.ci[0].status, "passed");
     assert.equal(result.ci[0].exitCode, 0);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -174,7 +175,7 @@ test("the Anatomia front gate blocks before review and exposes violation details
     assert.equal(result.reviewer, "skipped");
     assert.ok(result.reasons.some((reason) => reason.includes("forbidden dependency")));
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -236,6 +237,6 @@ test("rechecks the front gate after registered-test autofix changes the diff", a
     assert.ok(result.reasons.some((reason) => reason.includes("autofix dependency violation")));
     assert.equal(result.contextSource, "anatomia-review-gate-after-test-autofix");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

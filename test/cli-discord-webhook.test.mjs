@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { main } from "../src/cli.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "revisor-cli-discord-webhook-"));
@@ -43,7 +44,7 @@ test("configures, reports, and removes a Discord webhook from stdin", async () =
   } finally {
     process.stdout.write = originalWrite;
     process.env = originalEnv;
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 

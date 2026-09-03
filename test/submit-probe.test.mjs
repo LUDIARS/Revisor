@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { NO_LFS_FILTER_ARGS } from "../src/workspace.mjs";
 import { probeBaseMergeability } from "../src/submit-probe.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
   const result = spawnSync("git", [...NO_LFS_FILTER_ARGS, "-C", repoPath, ...args], {
@@ -54,7 +55,7 @@ test("a head that still lands on the advanced base is clean", async () => {
     assert.equal(probe.status, "clean");
     assert.deepEqual(probe.conflictedPaths, []);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -72,7 +73,7 @@ test("a head that conflicts with the advanced base is reported with its paths", 
     assert.deepEqual(probe.conflictedPaths, ["shared.txt"]);
     assert.match(probe.reason, /shared\.txt/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -88,7 +89,7 @@ test("an unreadable base is reported as unknown rather than as a conflict", asyn
     assert.equal(probe.status, "unknown");
     assert.deepEqual(probe.conflictedPaths, []);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });
 
@@ -111,6 +112,6 @@ test("probing leaves the merge repository refs and worktree untouched", async ()
     assert.equal(git(repoPath, "rev-parse", "HEAD"), before.head);
     assert.equal(git(repoPath, "status", "--porcelain"), before.status);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    removeFixture(fixture.directory);
   }
 });

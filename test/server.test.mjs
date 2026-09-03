@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { writeAllowedHosts, writeWorkflowToken } from "../src/config.mjs";
 import { createRequestHandler } from "../src/server.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function request({ method = "GET", url = "/", headers = {}, body = "" } = {}) {
   return {
@@ -82,7 +83,7 @@ test("authenticates and creates a local PR without a GitHub head", async () => {
       checkStatus: "queued",
     });
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -147,7 +148,7 @@ test("accepts an explicit fast-lane submission and authenticated queued promotio
       ["promote", "pr-1", "lictor-owner"],
     ]);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -212,7 +213,7 @@ test("manual retry uses the fast lane only for a strict fresh opt-in", async () 
     assert.equal(malformedUi.status, 400);
     assert.deepEqual(calls, [["pr-1", false], ["pr-1", true]]);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -249,7 +250,7 @@ test("rejects incomplete PR content before the review service can enqueue tests"
     assert.match(JSON.parse(output.body).error, /受け入れ条件/);
     assert.equal(submitted, false);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -272,7 +273,7 @@ test("rejects unauthenticated local workflow requests", async () => {
     }), output);
     assert.equal(output.status, 401);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -320,7 +321,7 @@ test("serves read-only local API requests to loopback without a token", async ()
       assertBody(JSON.parse(output.body));
     }
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -388,7 +389,7 @@ test("still requires the token for every mutating local API request", async () =
       assert.equal(output.status, 401);
     }
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -443,7 +444,7 @@ test("closes a local PR from both APIs only when a reason is present", async () 
     assert.match(JSON.parse(withoutBody.body).error, /requires a reason/);
     assert.equal(closed.length, 2);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -474,7 +475,7 @@ test("requires the token for reads sent through a non-loopback host", async () =
     }), allowed);
     assert.equal(allowed.status, 200);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -492,7 +493,7 @@ test("reads without a configured workflow token", async () => {
     await handler(request({ method: "GET", url: "/v1/local-prs" }), output);
     assert.equal(output.status, 200);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });
 
@@ -637,6 +638,6 @@ test("serves the UI through an encrypted configured host", async () => {
     assert.equal(rejected.status, 403);
     assert.match(JSON.parse(rejected.body).error, /Host is not allowed/);
   } finally {
-    rmSync(state.directory, { recursive: true, force: true });
+    removeFixture(state.directory);
   }
 });

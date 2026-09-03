@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyChange } from "../src/change-classification.mjs";
 import { advisePlan, parseAdvisorResponse } from "../src/plan-advisor.mjs";
 import { planReview, stageEnabled } from "../src/review-plan.mjs";
+import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 const REQUEST = {
   repository: "LUDIARS/Revisor",
@@ -99,7 +100,7 @@ test("an Augur answer narrows an inert change through the safety floor", async (
     assert.equal(payload.repository, "LUDIARS/Revisor");
     assert.deepEqual(payload.changeProfile.kinds, ["docs"]);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
@@ -118,7 +119,7 @@ test("a failing Augur CLI leaves the deterministic plan in force", async () => {
     assert.equal(plan.source, "deterministic");
     assert.match(plan.advisorError, /boom/);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFixture(directory);
   }
 });
 
