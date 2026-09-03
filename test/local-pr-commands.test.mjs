@@ -66,6 +66,37 @@ test("closing from the CLI requires a non-empty reason", async () => {
   assert.equal(closeCalled, false);
 });
 
+test("forwards --force only through the CLI retry command", async () => {
+  const pullRequest = {
+    id: "pr-1",
+    number: 1,
+    repository: "LUDIARS/Revisor",
+    status: "open",
+    checkStatus: "running",
+    title: "recover stalled review",
+  };
+  let request;
+  const code = await runLocalPrCommand(
+    ["pr", "retry", "1", "--force", "--json"],
+    {
+      stdout: { write() {} },
+      createContext: () => ({
+        store: { listPullRequests: () => [pullRequest] },
+        jobs: {},
+        localPrService: {
+          async retryPullRequest(id, options) {
+            request = { id, ...options };
+            return { ...pullRequest, checkStatus: "queued" };
+          },
+        },
+      }),
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.deepEqual(request, { id: "pr-1", fastLane: false, force: true });
+});
+
 test("forwards --defer-push only through the CLI merge command", async () => {
   const pullRequest = {
     id: "pr-8",

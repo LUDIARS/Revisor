@@ -172,17 +172,18 @@ export class JobStore {
 
   /**
    * 投入する。 同じ (repo, number, head) の job が未終了なら、それが既に求められている
-   * 実行なのでそのまま返す。 `force` は終了済み job を捨てて必ず新しい実行を作る
-   * (同一ヘッドの再審査がここで握り潰されないようにするため)。
+   * 実行なのでそのまま返す。 `force` は終了済み job の履歴を残したまま新しい実行を作る
+   * (同一ヘッドの再審査がここで握り潰されず、停滞 job の終局理由も失わないため)。
    */
   async enqueue(request, { force = false } = {}) {
     const key = jobKey(request);
     return this.#mutate((database) => {
-      const existing = this.#allJobs(database).find((job) => job.key === key);
-      if (existing && (!force || existing.status === "queued" || existing.status === "running")) {
-        return { job: existing, created: false };
-      }
-      if (existing) this.#deleteJob(database, existing.id);
+      const matching = this.#allJobs(database)
+        .filter((job) => job.key === key)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      const active = matching.find((job) => job.status === "queued" || job.status === "running");
+      if (active) return { job: active, created: false };
+      if (matching[0] && !force) return { job: matching[0], created: false };
       const timestamp = this.now();
       const reviewLane = normalizeReviewLane(request.reviewLane);
       const job = {
@@ -280,6 +281,10 @@ export class JobStore {
       const row = database.prepare("SELECT record FROM jobs WHERE id = ?").get(id);
       if (!row) throw new RevisorError(`Review job '${id}' was not found.`);
       const job = JSON.parse(row.record);
+      // A worker may finish after an operator has abandoned its job. Terminal
+      // state is monotonic: that late completion must not erase the recorded
+      // intervention (or resurrect a job reclaimed after worker death).
+      if (job.status === "completed" || job.status === "failed") return job;
       job.status = status;
       job.error = error;
       job.claimedPid = null;
@@ -321,6 +326,43 @@ export class JobStore {
         requeued.push(job);
       }
       return { requeued, exhausted };
+    });
+  }
+
+  /**
+   * 進まなくなった job を人手の指示で終局させる。
+   *
+   * `reclaimAbandoned` は「保持プロセスが死んでいる」ことを中断の証拠にする。 保持者が
+   * 短命ワーカーだった頃はそれで足りたが、 いまの保持者はキューを空にするまで生き続ける
+   * コーディネータなので、 審査が途中で止まっても保持者は生存し続け、 job は running の
+   * まま誰にも拾われない。 その状態では retry も close もガードに弾かれ、 Revisor を
+   * 落とす以外の回復手段が無くなる (実例: LUDIARS/Concordia#1269 が 1 時間 running)。
+   *
+   * 時間しきい値で自動判定はしない — 長い審査を勝手に殺さないという既存方針は保つ。
+   * 「止まっている」と判断するのは人間で、 ここはその判断を実行するだけの口。
+   *
+   * @implements SPEC-MANUAL-STALLED-REVIEW-RECOVERY
+   */
+  async abandonForLocalPr(localPrId, reason) {
+    if (typeof localPrId !== "string" || !localPrId.trim()) {
+      throw new RevisorError("Abandoning review jobs requires a local PR id.");
+    }
+    if (typeof reason !== "string" || !reason.trim()) {
+      throw new RevisorError("Abandoning review jobs requires a reason.");
+    }
+    return this.#mutate((database) => {
+      const abandoned = [];
+      for (const job of this.#allJobs(database)) {
+        if (job.localPrId !== localPrId && job.request?.localPrId !== localPrId) continue;
+        if (job.status !== "queued" && job.status !== "running") continue;
+        job.status = "failed";
+        job.error = reason;
+        job.claimedPid = null;
+        job.updatedAt = this.now();
+        this.#saveJob(database, job);
+        abandoned.push(job);
+      }
+      return abandoned;
     });
   }
 

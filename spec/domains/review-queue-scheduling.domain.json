@@ -38,14 +38,16 @@
     "fast-lane-promotion",
     "lane-fifo-order",
     "reserved-worker-partition",
-    "daemonless-queue-drain"
+    "daemonless-queue-drain",
+    "manual-stalled-review-recovery"
   ],
   "specRefs": [
     "review-fast-lane — SPEC-REVIEW-FAST-LANE-DURABILITY",
     "review-fast-lane — SPEC-REVIEW-FAST-LANE-CAPACITY",
     "review-fast-lane — SPEC-REVIEW-FAST-LANE-AUTHORITY",
     "daemonless-cli — SPEC-DAEMONLESS-PERSISTENT-QUEUE",
-    "daemonless-cli — SPEC-DAEMONLESS-WORKER-DRAIN"
+    "daemonless-cli — SPEC-DAEMONLESS-WORKER-DRAIN",
+    "crash-recovery — SPEC-MANUAL-STALLED-REVIEW-RECOVERY"
   ],
   "rationale": "Lane persistence and worker admission change together: the durable job record determines which fixed capacity partition may execute it. Keeping these mechanics in one domain prevents queue ordering, restart recovery, and stage-worker admission from interpreting the lane differently. PR lifecycle state, HTTP authorization, and UI rendering remain delegated to their existing domains."
 }

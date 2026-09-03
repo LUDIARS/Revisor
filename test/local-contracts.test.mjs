@@ -98,6 +98,9 @@ test("uses the fast lane only after an explicit boolean opt-in", () => {
 test("validates optional retry and promotion bodies at the local API boundary", () => {
   assert.deepEqual(validateReviewRetry(null), { fastLane: false });
   assert.deepEqual(validateReviewRetry({ fast_lane: true }), { fastLane: true });
+  // Force-abandonment is intentionally CLI-only; an authenticated HTTP caller
+  // still receives the ordinary retry contract even if it supplies this field.
+  assert.deepEqual(validateReviewRetry({ force: true }), { fastLane: false });
   assert.throws(() => validateReviewRetry([]), /Request body must be an object/);
   assert.throws(() => validateReviewRetry({ fast_lane: "true" }), /must be a boolean/);
 

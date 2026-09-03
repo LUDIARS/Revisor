@@ -311,16 +311,30 @@ export class LocalPrService {
     }
   }
 
-  async retryPullRequest(id, { fastLane = false } = {}) {
+  /**
+   * `force` は「審査中でも投げ直す」ための人手の escape hatch。
+   *
+   * 進行中の審査が止まっても、 保持プロセス (コーディネータ) は生きているので
+   * `reclaimAbandoned` が拾わず、 job が無いことを条件にする
+   * `recoverInterruptedReviews` も対象にしない。 通常の retry / close も
+   * 「審査中」ガードに弾かれ、 Revisor を落とす以外の回復手段が無くなる。
+   * force はその止まった job を理由付きで終局させてから投げ直す。
+   *
+   * @implements SPEC-MANUAL-STALLED-REVIEW-RECOVERY
+   */
+  async retryPullRequest(id, { fastLane = false, force = false } = {}) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
     if (pullRequest.status !== "open") {
       throw new Error("Only an open local PR can be reviewed again.");
     }
     if (typeof fastLane !== "boolean") throw new Error("fast_lane must be a boolean.");
+    if (typeof force !== "boolean") throw new Error("force must be a boolean.");
     if (fastLane) this.#assertFastLaneAvailable();
+    if (force) await this.#abandonStalledReview(pullRequest);
     const queued = await this.#requeue(pullRequest, {
       reviewLane: fastLane ? REVIEW_LANES.FAST : REVIEW_LANES.STANDARD,
+      allowActiveSameHead: force,
     });
     await this.#announceLifecycle("review_queued", queued);
     return queued;
@@ -544,6 +558,42 @@ export class LocalPrService {
     );
   }
 
+  /**
+   * 止まった審査 job を終局させる。 終局させずに再投入すると、 同じ PR に対して
+   * running のままの古い job と新しい job が並び、 `#hasActiveReviewJob` から見た
+   * 「審査中」が二度と解けなくなる。
+   *
+   * @implements SPEC-MANUAL-STALLED-REVIEW-RECOVERY
+   */
+  async #abandonStalledReview(pullRequest) {
+    if (!this.jobs || typeof this.jobs.abandonForLocalPr !== "function") {
+      throw new Error("A forced retry requires the durable review job store.");
+    }
+    const reason = "The review was force-retried while it was still marked running;"
+      + " Revisor abandoned the stalled job.";
+    // Revoke ownership before touching the durable job. A worker that wakes up
+    // during this operation must not project its late result or trigger auto-merge.
+    this.store.updatePullRequest(pullRequest.id, {
+      jobId: null,
+      checkStatus: "failed",
+      error: reason,
+    });
+    return this.jobs.abandonForLocalPr(pullRequest.id, reason);
+  }
+
+  /**
+   * その PR にもう意味の無い審査 job を理由付きで終局させる。
+   *
+   * 旧来の queue 実装は job を持たないので、 その場合は何もしない (機能は落とすが
+   * 黙って別物に化けさせない)。
+   *
+   * @implements SPEC-MANUAL-STALLED-REVIEW-RECOVERY
+   */
+  async #settleObsoleteReviewJobs(pullRequest, reason) {
+    if (!this.jobs || typeof this.jobs.abandonForLocalPr !== "function") return [];
+    return this.jobs.abandonForLocalPr(pullRequest.id, reason);
+  }
+
   #hasActiveReviewJob(pullRequestId, { unknownIsActive = true } = {}) {
     // 永続ジョブが無い queued / running は、ワーカー死亡後の古い PR 状態でしかない。
     // jobs が渡されない旧来の queue 実装では安全側に倒して従来の再投入拒否を維持する。
@@ -682,6 +732,7 @@ export class LocalPrService {
       : this.#mergeOnce(id, humanApproved, bypass, deferPush));
   }
 
+  /** @implements SPEC-MANUAL-STALLED-REVIEW-RECOVERY */
   async #mergeOnce(id, humanApproved, bypass = null, deferPush = false) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
@@ -735,6 +786,9 @@ export class LocalPrService {
       const merged = this.store.updatePullRequest(id, {
         status: "merged",
         checkStatus: "test_ok",
+        // A bypass merge can terminate the PR while its review worker is still
+        // alive. Revoke that worker's reporter ownership before settling its job.
+        jobId: null,
         reasons: [],
         mergeCommitSha,
         mergeError: null,
@@ -759,6 +813,28 @@ export class LocalPrService {
           }
           : {}),
       });
+      // マージで PR は終局したが、 走っていた審査 job は誰も終局させないので running の
+      // まま残る (実例: bypass マージ後も Concordia#1269 の job が running のままだった)。
+      // 残すと `#hasActiveReviewJob` が永久に真になり、 同じ PR の再投入経路が閉じる。
+      try {
+        await this.#settleObsoleteReviewJobs(
+          merged,
+          "The local PR was merged; Revisor settled the review job that was still in flight.",
+        );
+      } catch (error) {
+        // The merge and its terminal PR record are already committed. Queue
+        // cleanup is diagnostic maintenance and cannot turn that success into a
+        // reported merge failure; retain a redacted breadcrumb for repair.
+        try {
+          this.log("review_job_settlement_failed", {
+            localPrId: merged.id,
+            repository: merged.repository,
+            error: error instanceof Error ? error.message : String(error),
+          }, { level: "warn" });
+        } catch {
+          // The injected logger is observability only; merge state is already terminal.
+        }
+      }
       // 隔離 checkout でマージしたので、登録元フォルダの base は取り残される。
       // 次の PR が「main と競合」になる前に、安全に ff できるときだけ追随させる。
       // 同期できなくてもマージは成立しているので、理由を残して先へ進む。

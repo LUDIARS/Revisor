@@ -43,7 +43,7 @@ test("an unsettled job for the same head is the run the caller asked for", async
   }
 });
 
-test("a forced re-review replaces a settled job for the same head", async () => {
+test("a forced re-review preserves settled history and creates a new same-head job", async () => {
   const fixture = storeFixture();
   try {
     const first = await fixture.store.enqueue(request());
@@ -57,6 +57,8 @@ test("a forced re-review replaces a settled job for the same head", async () => 
     assert.equal(forced.created, true);
     assert.notEqual(forced.job.id, first.job.id);
     assert.equal(fixture.store.state().queued, 1);
+    assert.equal(fixture.store.get(first.job.id).status, "completed");
+    assert.equal(fixture.store.list().length, 2);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }
@@ -230,6 +232,73 @@ test("a job whose worker died is requeued until the attempt limit, then failed",
     assert.match(second.exhausted[0].error, /revisor\.jobs\.db\.worker\.log/);
     assert.equal(second.exhausted[0].error.includes(fixture.directory), false);
     assert.equal(fixture.store.state().queued, 0);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+// 2026-09-03: 保持プロセスが生きたまま審査が止まると reclaimAbandoned が拾えず、
+// job が running のまま残って retry / close の双方が弾かれた (Concordia#1269)。
+test("a stalled review job can be abandoned for its local PR", async () => {
+  const fixture = storeFixture();
+  try {
+    await fixture.store.enqueue(request());
+    const claimed = await fixture.store.claimNext();
+    assert.equal(claimed.status, "running");
+    assert.equal(fixture.store.state().running, 1);
+
+    const abandoned = await fixture.store.abandonForLocalPr("pr-1", "stalled by hand");
+    assert.equal(abandoned.length, 1);
+    assert.equal(abandoned[0].status, "failed");
+    assert.equal(abandoned[0].error, "stalled by hand");
+    assert.equal(abandoned[0].claimedPid, null);
+    assert.equal(fixture.store.state().running, 0);
+    assert.equal(fixture.store.state().queued, 0);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("a late worker cannot overwrite a manually abandoned job", async () => {
+  const fixture = storeFixture();
+  try {
+    await fixture.store.enqueue(request());
+    const claimed = await fixture.store.claimNext();
+    await fixture.store.abandonForLocalPr("pr-1", "stalled by hand");
+    await fixture.store.enqueue(request(), { force: true });
+
+    const settled = await fixture.store.settle(claimed.id, { status: "completed" });
+
+    assert.equal(settled.status, "failed");
+    assert.equal(settled.error, "stalled by hand");
+    assert.equal(fixture.store.get(claimed.id).status, "failed");
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("abandoning leaves other local PRs and settled jobs untouched", async () => {
+  const fixture = storeFixture();
+  try {
+    await fixture.store.enqueue(request());
+    await fixture.store.enqueue(request({ localPrId: "pr-2", number: 2, headSha: "bbb" }));
+    const settled = await fixture.store.claimNext();
+    await fixture.store.settle(settled.id, { status: "completed" });
+
+    const abandoned = await fixture.store.abandonForLocalPr(settled.localPrId, "stalled by hand");
+    assert.deepEqual(abandoned, []);
+    assert.equal(fixture.store.get(settled.id).status, "completed");
+    assert.equal(fixture.store.state().queued, 1);
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test("abandoning requires a local PR id and a reason", async () => {
+  const fixture = storeFixture();
+  try {
+    await assert.rejects(() => fixture.store.abandonForLocalPr("", "why"), /local PR id/);
+    await assert.rejects(() => fixture.store.abandonForLocalPr("pr-1", " "), /reason/);
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true });
   }

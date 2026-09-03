@@ -135,6 +135,8 @@ export async function runLocalPrCommand(args, {
     const pullRequest = findByNumber(store, rest[0]);
     const queued = await localPrService.retryPullRequest(pullRequest.id, {
       fastLane: args.includes("--fast-lane"),
+      // 止まった審査の回復は人間の判断。 自動では殺さないので CLI からしか通らない。
+      force: args.includes("--force"),
     });
     write(json ? queued : `Re-queued ${summarize(queued)}`);
     return 0;

@@ -25,13 +25,15 @@
     "sqlite-wal-concurrency",
     "database-initialization",
     "legacy-state-migration",
-    "process-transaction-serialization"
+    "process-transaction-serialization",
+    "terminal-job-state"
   ],
   "specRefs": [
     "daemonless-cli — PR 記録と審査キューは共有 SQLite database を正本とする",
     "daemonless-cli — read-modify-write は BEGIN IMMEDIATE、待ち上限は busy_timeout",
     "daemonless-cli — legacy JSON state/jobs は初回 open 時に一度だけ取り込む",
-    "daemonless-cli — WAL の database は読み手が書き手を壊さない"
+    "daemonless-cli — WAL の database は読み手が書き手を壊さない",
+    "crash-recovery — SPEC-MANUAL-STALLED-REVIEW-RECOVERY"
   ],
   "rationale": "PR record と job record は同じ SQLite transaction 境界を共有する永続状態であり、HTTP / CLI / worker のどれが呼び出したかで整合性規則を変えてはならない。database 初期化と legacy migration をこの境界へ閉じ込めることで、review execution や local PR lifecycle がファイル形式・WAL・OS 権限の詳細を持たないようにする。"
 }

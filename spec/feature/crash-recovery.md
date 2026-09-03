@@ -12,7 +12,7 @@ status: implemented
 related:
   - ../architecture.md
   - ./review-gate.md
-updated: 2026-07-30
+updated: 2026-09-03
 ---
 
 # crash-recovery — 中断されたレビューの復旧
@@ -126,3 +126,21 @@ model review を飛ばす `verification` モードを返せる。欠けていた
 - `queued` で残った PR も同様に再投入されること
 - 決着済み (`test_ok` 等) には触らないこと (`scanned === 0`)
 - head ブランチ消失時に `failed` + 理由へ落とし、ゾンビを残さないこと
+
+## SPEC-MANUAL-STALLED-REVIEW-RECOVERY: 生存ワーカーが保持する停滞 job の手動復旧
+
+保持プロセスが生存したまま durable job が `running` で停滞した場合は、
+CLI の `revisor pr retry <number> --force` だけが古い job を理由付きの
+`failed` に終局させ、同じ local PR を新しい job として再投入する。
+
+- 時間しきい値による自動中断はしない。`--force` は人間が停滞を確認した後の明示操作である。
+- HTTP / UI の retry 契約に `force` は公開しない。操作範囲は CLI に限定する。
+- 古い worker の遅延結果が PR 判定や auto-merge を上書きしないよう、再投入より先に
+  PR の `jobId` 所有権を取り消す。job の `completed` / `failed` は終局状態で、遅延した
+  worker の settle で別の終局状態へ書き換えない。
+- マージで PR が終局する際も `jobId` 所有権を取り消し、残った active job を
+  理由付きで終局させる。job の後処理失敗は記録するが、成功済みのマージを失敗扱いにしない。
+
+登録テストは `test/job-store.test.mjs` で終局状態と履歴保持、
+`test/local-pr-service.test.mjs` で所有権取り消し・durable 再投入・マージ後処理失敗、
+`test/local-pr-commands.test.mjs` と `test/local-contracts.test.mjs` で CLI / HTTP の権限境界を検証する。
