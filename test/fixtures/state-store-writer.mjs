@@ -21,8 +21,24 @@ process.once("message", (message) => {
     else store.createPullRequest(pullRequest);
     process.disconnect?.();
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+    // cause まで書く。 RevisorError は "Revisor state is unreadable" としか名乗らないので、
+    // これが無いと並行書き込みが落ちた本当の理由 (EPERM / SQLITE_BUSY 等) が親から見えない。
+    process.stderr.write(`${formatError(error)}\n`);
     process.exitCode = 1;
     process.disconnect?.();
   }
 });
+
+/** error.cause を辿って 1 本の文字列にする (Error.stack は cause を含まない)。 */
+function formatError(error) {
+  const parts = [];
+  for (let current = error, depth = 0; current && depth < 5; current = current.cause, depth += 1) {
+    if (!(current instanceof Error)) {
+      parts.push(String(current));
+      break;
+    }
+    const code = current.code ? ` [${current.code}]` : "";
+    parts.push(`${depth ? "caused by: " : ""}${current.stack ?? current.message}${code}`);
+  }
+  return parts.join("\n");
+}

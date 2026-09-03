@@ -42,14 +42,24 @@ export function resolveDbPath(env = process.env) {
 
 /**
  * `path` に旧 JSON ファイルが居るならパースして返し、ファイルを `.migrated` へ退避する。
- * SQLite file / 不在なら null。 パースできない内容は呼び出し側の「unreadable」契約へ
+ * SQLite file / 不在 / 空なら null。 パースできない内容は呼び出し側の「unreadable」契約へ
  * そのまま投げる — 退避は妥当な JSON を確認できたときだけ行い、壊れたファイルを
  * 黙って除けない。
  */
 export function displaceLegacyJson(path) {
   if (!existsSync(path)) return null;
   if (isSqliteFile(path)) return null;
-  const value = JSON.parse(readFileSync(path, "utf8"));
+  const raw = readFileSync(path, "utf8");
+  // 併走プロセスが DB を作った直後、 ファイルは存在するのにまだ SQLite ヘッダが
+  // 書かれていない一瞬がある。 その瞬間に読むと SQLite file と判定できず、 空文字を
+  // 「壊れた旧 JSON」とみなして state ごと unreadable にしていた (8 プロセス同時起動で
+  // 再現。 原因は `Unexpected end of JSON input`)。 空ファイルには退避すべき中身が無く、
+  // SQLite はそのまま新規 DB として開けるので、 移行対象なしとして扱う。
+  if (raw.length === 0) return null;
+  // 上の header 読み取り後に別プロセスが初期化を終えることがある。 同じファイルを
+  // 読み直した結果も SQLite なら、 legacy JSON として parse してはいけない。
+  if (raw.startsWith(SQLITE_MAGIC)) return null;
+  const value = JSON.parse(raw);
   archiveLegacyJson(path);
   return value;
 }
@@ -86,17 +96,61 @@ export function openRevisorDatabase(path) {
   // concurrency controls.
   const isNewDatabase = !existsSync(path);
   const database = new DatabaseSync(path);
-  database.exec("PRAGMA busy_timeout = 60000");
-  database.exec("PRAGMA journal_mode = WAL");
-  database.exec("PRAGMA synchronous = NORMAL");
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS pull_requests (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-  `);
-  if (isNewDatabase) secureDatabaseFiles(path);
-  return database;
+  try {
+    database.exec("PRAGMA busy_timeout = 60000");
+    enableWalMode(database);
+    database.exec("PRAGMA synchronous = NORMAL");
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS pull_requests (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+    `);
+    if (isNewDatabase) secureDatabaseFiles(path);
+    return database;
+  } catch (error) {
+    try {
+      database.close();
+    } catch {
+      // 初期化エラーを優先する。 close は失敗した初期化の best-effort cleanup。
+    }
+    throw error;
+  }
+}
+
+/**
+ * WAL への切り替えを、 併走プロセスが居ても短い上限内で再試行する。
+ *
+ * journal_mode の変更は一瞬だけ排他アクセスを要求し、 そこは busy_timeout の
+ * busy handler を通らないので、 別プロセスが同じ DB を開いているだけで
+ * `database is locked` が即座に返る。 DB が未作成の瞬間に複数プロセスが同時に開くと
+ * 踏む (実測: 8 プロセス × 8 回で 64 回中 9 回)。 一度 WAL になれば以後は no-op なので、
+ * 詰まるのは初回だけ。 排他窓はミリ秒なので短い待ちを繰り返せば足りる。
+ */
+const WAL_SWITCH_ATTEMPTS = 50;
+const WAL_SWITCH_DELAY_MS = 20;
+
+function enableWalMode(database) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      database.exec("PRAGMA journal_mode = WAL");
+      return;
+    } catch (error) {
+      if (attempt >= WAL_SWITCH_ATTEMPTS || !isBusyError(error)) throw error;
+      sleepSync(WAL_SWITCH_DELAY_MS);
+    }
+  }
+}
+
+function isBusyError(error) {
+  return error?.errcode === 5
+    || error?.code === "SQLITE_BUSY"
+    || /database is locked|SQLITE_BUSY/i.test(String(error?.message ?? ""));
+}
+
+/** 同期パスなので Atomics で待つ (この関数の呼び出し元は同期 API)。 */
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
 // PR の本文・作業ツリーの絶対パス・診断は DB と WAL に入る。旧 JSON と同じく、

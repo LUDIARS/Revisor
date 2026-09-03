@@ -26,6 +26,12 @@ memory_links: []
 「負荷で落ちた」と「排他が実際に破れた」は外から見て区別が付いていない。 後者なら本番の
 採番が壊れる話なので、 flaky と断定する前に切り分ける。
 
+## 原因追記 (2026-09-03)
+
+8 プロセスを同時に起動すると、 SQLite がファイルを作成してから header を書くまでの
+zero-byte 状態を別プロセスが旧 JSON と誤認していた。 WAL への初回切り替えも
+`busy_timeout` の handler を通らず、 `SQLITE_BUSY` が即時に返る場合があった。
+
 ## 完了条件
 
 - 失敗が再現する条件が分かっている (並行数 / タイムアウト / ファイルロック競合のどれか)。
@@ -36,5 +42,7 @@ memory_links: []
 ## スコープ (編集可ディレクトリ)
 
 - `test/state-store-concurrency.test.mjs`
-- `src/file-lock.mjs` — 排他が原因だった場合
-- `src/state-store.mjs` — 同上
+- `test/state-store.test.mjs`
+- `test/fixtures/state-store-writer.mjs`
+- `src/revisor-db.mjs`
+- `src/state-store.mjs`

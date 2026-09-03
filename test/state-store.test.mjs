@@ -386,3 +386,52 @@ test("emits identifier-only events after persisted PR changes", () => {
     removeFixture(directory);
   }
 });
+
+// 2026-09-03: 8 プロセスが同時に state を作ると、 ファイルは存在するのにまだ SQLite
+// ヘッダが書かれていない一瞬があり、 その空ファイルを「壊れた旧 JSON」と誤判定して
+// state ごと unreadable にしていた (並行テストがフレーキーだった原因)。
+test("treats an empty state file as a fresh database, not a corrupt legacy JSON", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-state-empty-"));
+  const path = join(directory, "state.json");
+  try {
+    writeFileSync(path, "", "utf8");
+    const store = new LocalPrStore({ path });
+    assert.deepEqual(store.listPullRequests(), []);
+    // 空ファイルには退避すべき中身が無いので、 .migrated は作らない。
+    assert.equal(existsSync(`${path}.migrated`), false);
+  } finally {
+    removeFixture(directory);
+  }
+});
+
+// 中身のある壊れたファイルは従来どおり弾く。 黙って除けると本物の state を失う。
+test("still refuses a non-empty state file that is not valid JSON", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-state-corrupt-"));
+  const path = join(directory, "state.json");
+  try {
+    writeFileSync(path, "{ this is not json", "utf8");
+    assert.throws(() => new LocalPrStore({ path }).listPullRequests(), /state is unreadable/);
+    assert.equal(existsSync(`${path}.migrated`), false);
+  } finally {
+    removeFixture(directory);
+  }
+});
+
+test("does not treat a whitespace-only legacy state as an empty database", () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-state-whitespace-"));
+  const path = join(directory, "state.json");
+  try {
+    writeFileSync(path, " \n", "utf8");
+    assert.throws(
+      () => new LocalPrStore({ path }).listPullRequests(),
+      (error) => {
+        assert.match(error.message, /state is unreadable/);
+        assert.ok(error.cause instanceof SyntaxError);
+        return true;
+      },
+    );
+    assert.equal(existsSync(`${path}.migrated`), false);
+  } finally {
+    removeFixture(directory);
+  }
+});
