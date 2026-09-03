@@ -8,7 +8,7 @@
       "pathPattern": "(^|/)src/(?:runtime-diagnostics|service-log)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:runtime-diagnostics|service-log)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:runtime-diagnostics|service-log|serve-exit-reason)\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)src/worker-pool\\.mjs$",

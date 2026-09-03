@@ -12,7 +12,7 @@ status: implemented
 related:
   - ./service-bootstrap.md
   - ../plan/problem_logs/2026-08-09-restart-storm-without-crash-evidence.md
-updated: 2026-08-11
+updated: 2026-09-04
 ---
 
 # runtime-diagnostics — how the service ended, in its own log
@@ -30,10 +30,10 @@ Revisor は 1 日に 20 回以上再起動していたが、 プロセスログ�
 | `service_started` | 起動。 node version と検証済み command と heartbeat 間隔 |
 | `service_start_failed` | heartbeat 設定または listener 起動の失敗。秘密除去済みの原因付き |
 | `heartbeat` | RSS / heap / external / event loop lag / uptime |
-| `signal_received` | 監督者や端末からの停止要求 (SIGINT / SIGTERM / SIGHUP / SIGBREAK) |
+| `signal_received` | 監督者や端末からの停止要求 (signal と明示的な終了理由付き) |
 | `uncaught_exception` | 自分で落ちた。 stack 付き。 記録後に終了する |
 | `unhandled_rejection` | 握られなかった Promise。 stack 付き。 終了はしない |
-| `process_exit` | 終了コード |
+| `process_exit` | 終了コードと、先行 signal を考慮した終了理由 |
 
 マージ経路も同じ記録に乗せる。 これまで残っていたのは失敗した 1 行だけで、 「どの段で
 止まったか」 も 「なぜマージされずに残り続けるのか」 も後から言えなかった。
@@ -72,6 +72,21 @@ field もここで潰し、object の `toJSON` hook は実行しない。
 signal の observer は記録後に自身を外す。`serve` の shutdown hook が既にあれば元の signal を
 そのまま委ね、起動途中で observer しかいなければ同じ signal を再送して Node の既定終了へ
 委ねる。診断を足したことで graceful shutdown や既定終了を抑止してはならない。
+
+## SPEC-SERVE-EXIT-REASON: serve は終わる理由を残す
+
+`revisor serve` は短い間隔で入れ替わることがある。審査から切り離した以上それ自体は
+走行中の審査を巻き込まないが、終了理由を明示しなければ監督者による再起動と自身の異常終了を
+区別できない。`signal_received` と `process_exit` の `reason` に、次の互いに異なる文言を残す。
+
+| 経路 | 文言 | 読み方 |
+|---|---|---|
+| signal あり | `stopping on <signal> (external stop request)` | 外から止められた |
+| signal 無し・code=0 | `exiting normally (code=0)` | 通常終了 |
+| signal 無し・code≠0 | `exiting on its own with code=<n> (not an external stop)` | 自分で落ちた |
+
+signal を受けた後の `process_exit` は終了コードだけで再分類せず、先に受けた signal を優先する。
+signal 後の graceful shutdown が code 0 になっても通常終了と誤記録しないためである。
 
 `uncaughtException` を握った Node は既定では走り続ける。 それは監督者から見て
 「生きているが壊れている」 状態になるため、 記録した直後に終了して再起動へ委ねる。

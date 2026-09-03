@@ -13,6 +13,14 @@ function measureEventLoopLag(clock, expectedMs, startedAt) {
   return Math.max(0, clock() - startedAt - expectedMs);
 }
 
+export function describeServeExit({ signal = null, code = 0 } = {}) {
+  if (signal) {
+    return `revisor serve: stopping on ${signal} (external stop request)`;
+  }
+  if (code === 0) return "revisor serve: exiting normally (code=0)";
+  return `revisor serve: exiting on its own with code=${code} (not an external stop)`;
+}
+
 export function resolveHeartbeatMs(value) {
   if (value === undefined || value === null || String(value).trim() === "") {
     return DEFAULT_HEARTBEAT_MS;
@@ -65,6 +73,7 @@ export function startRuntimeDiagnostics({
 
   let heartbeatStartedAt = clock();
   let stopped = false;
+  let receivedSignal = null;
   const pendingImmediates = new Set();
   const timer = schedule(() => {
     const previousHeartbeatStartedAt = heartbeatStartedAt;
@@ -95,7 +104,11 @@ export function startRuntimeDiagnostics({
   };
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]) {
     const handler = () => {
-      write("signal_received", { signal }, { level: "warn" });
+      receivedSignal = signal;
+      write("signal_received", {
+        signal,
+        reason: describeServeExit({ signal }),
+      }, { level: "warn" });
       // Installing a signal listener suppresses Node's default termination. Remove this
       // observer. The original delivery continues to an existing service shutdown hook;
       // during startup, when this is the sole listener, re-deliver for the OS default.
@@ -118,7 +131,10 @@ export function startRuntimeDiagnostics({
       stack: reason?.stack ?? null,
     }, { level: "error" });
   });
-  observe("exit", (code) => write("process_exit", { code }));
+  observe("exit", (code) => write("process_exit", {
+    code,
+    reason: describeServeExit({ signal: receivedSignal, code }),
+  }));
 
   return {
     stop: () => {

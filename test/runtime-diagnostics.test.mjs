@@ -37,7 +37,15 @@ test("separates a supervisor stop from a crash and exits on an uncaught error", 
     "process_exit",
   ]);
   assert.equal(events[1][1].signal, "SIGTERM");
+  assert.equal(
+    events[1][1].reason,
+    "revisor serve: stopping on SIGTERM (external stop request)",
+  );
   assert.match(events[2][1].stack, /boom/);
+  assert.equal(
+    events[3][1].reason,
+    "revisor serve: stopping on SIGTERM (external stop request)",
+  );
   assert.deepEqual(exits, [1]);
   assert.deepEqual(relayedSignals, ["SIGTERM"]);
 
@@ -62,6 +70,27 @@ test("lets an installed service shutdown hook own the original signal", () => {
 
   handlers.get("SIGTERM")();
   assert.deepEqual(relayedSignals, []);
+});
+
+test("classifies an exit without a preceding signal from its code", () => {
+  const events = [];
+  const handlers = new Map();
+  startRuntimeDiagnostics({
+    env: {},
+    write: (event, detail) => events.push([event, detail]),
+    setInterval: () => ({ unref() {} }),
+    clearInterval: () => {},
+    on: (event, handler) => handlers.set(event, handler),
+    off: () => {},
+  });
+
+  handlers.get("exit")(1);
+
+  assert.equal(events.at(-1)[0], "process_exit");
+  assert.equal(
+    events.at(-1)[1].reason,
+    "revisor serve: exiting on its own with code=1 (not an external stop)",
+  );
 });
 
 test("reports memory and event loop lag on every heartbeat", () => {
