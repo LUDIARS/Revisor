@@ -253,12 +253,18 @@ test("each PR exposes persistent filtered Test Workflow logs and a full-screen L
   assert.match(page, /looksLikePullRequest/);
 });
 
-test("the Releases tab exposes initialization and confirmed immediate publication", () => {
+test("the Releases tab exposes deferred, initialized, and immediate publication", () => {
   const page = renderReleasePage("session-nonce");
   assert.match(page, /href="\/releases" class="active"/);
   assert.match(page, /初期version登録/);
   assert.match(page, /major \/ minor 即時release/);
   assert.match(page, /現在のbase HEADをGitHubへ即時公開することを確認しました/);
+  assert.match(page, /id="pending-publish-section" hidden/);
+  assert.match(page, /GitHub 未送出のマージ/);
+  assert.match(page, /revisor publish-pending/);
+  assert.match(page, /cell\(entry\.reason \|\| '—', 'warn'\)/);
+  assert.match(page, /section\.hidden = pending\.length === 0/);
+  assert.match(page, /renderPendingPublishes\(state\.pendingPublishes \|\| \[\]\)/);
   assert.match(page, /\/api\/releases\/.*\/initialize/);
   assert.match(page, /\/api\/releases\/.*\/publish/);
   const script = page.match(/<script nonce="session-nonce">([\s\S]*?)<\/script>/)?.[1];

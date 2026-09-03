@@ -536,11 +536,20 @@ test("filters and summarizes local PR lists without changing the default respons
 
 test("serves version state and confirmed release actions through the UI session", async () => {
   const calls = [];
+  const deferredPullRequest = {
+    repository: "LUDIARS/Product",
+    number: 8,
+    title: "Deferred change",
+    publication: "deferred",
+    deferredPublishReason: "GitHub App is not installed",
+    mergeCommitSha: "a".repeat(40),
+    mergedAt: "2026-09-02T00:00:00.000Z",
+  };
   const handler = createRequestHandler({
     env: {},
     sessionToken: "ui-token",
     queue: { state: () => ({}) },
-    localPrService: {},
+    localPrService: { listPullRequests: () => [deferredPullRequest] },
     releaseService: {
       listProjects: async () => [{
         repository: "LUDIARS/Product",
@@ -560,7 +569,16 @@ test("serves version state and confirmed release actions through the UI session"
   const list = response();
   await handler(request({ method: "GET", url: "/api/releases", headers }), list);
   assert.equal(list.status, 200);
-  assert.equal(JSON.parse(list.body).projects[0].version.version, "1.4.8");
+  const listBody = JSON.parse(list.body);
+  assert.equal(listBody.projects[0].version.version, "1.4.8");
+  assert.deepEqual(listBody.pendingPublishes, [{
+    repository: "LUDIARS/Product",
+    number: 8,
+    title: "Deferred change",
+    mergeCommitSha: "a".repeat(40),
+    reason: "GitHub App is not installed",
+    mergedAt: "2026-09-02T00:00:00.000Z",
+  }]);
 
   const initialize = response();
   await handler(request({

@@ -14,6 +14,17 @@ const BODY = `
     <p id="release-project-empty" class="empty">登録されたプロジェクトはありません。</p>
   </section>
 
+  <section id="pending-publish-section" hidden>
+    <h2>GitHub 未送出のマージ</h2>
+    <p class="note">ローカルではマージ済みですが GitHub へ送っていません。<code>revisor publish-pending</code> で後送します。</p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>repository</th><th>PR</th><th>title</th><th>保留理由</th><th>merged</th></tr></thead>
+        <tbody id="pending-publish-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
   <div class="grid">
     <section>
       <h2>初期version登録</h2>
@@ -89,10 +100,31 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
       : (releaseKind.value === 'major' ? project.nextMajor : project.nextMinor);
   }
 
+  function renderPendingPublishes(pending) {
+    const section = document.querySelector('#pending-publish-section');
+    section.hidden = pending.length === 0;
+    if (pending.length === 0) {
+      document.querySelector('#pending-publish-rows').replaceChildren();
+      return;
+    }
+    document.querySelector('#pending-publish-rows').replaceChildren(...pending.map((entry) => {
+      const row = document.createElement('tr');
+      row.append(
+        cell(entry.repository),
+        cell(entry.number === null ? '—' : '#' + entry.number),
+        cell(entry.title || '—'),
+        cell(entry.reason || '—', 'warn'),
+        cell(entry.mergedAt || '—'),
+      );
+      return row;
+    }));
+  }
+
   async function refreshReleases() {
     const selectedInitialize = initializeSelect.value;
     const selectedRelease = releaseSelect.value;
     const state = await request('/api/releases');
+    renderPendingPublishes(state.pendingPublishes || []);
     releaseProjects = state.projects;
     empty.hidden = releaseProjects.length > 0;
     rows.replaceChildren(...releaseProjects.map((project) => {

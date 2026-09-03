@@ -11,6 +11,7 @@ import {
   writeSettings,
 } from "./config.mjs";
 import { resolveAnatomiaCli } from "./anatomia.mjs";
+import { deferredPublications } from "./publication-state.mjs";
 import {
   validateExternalVerification,
   validatePullRequestSubmission,
@@ -201,6 +202,8 @@ export function createUiRequestHandler({
       if (request.method === "GET" && url.pathname === "/api/releases") {
         sendJson(response, 200, {
           projects: await releaseService.listProjects(),
+          // GitHub へ未送出のまま残っているマージ。 0 件なら空配列で、画面側は何も出さない。
+          pendingPublishes: deferredPublications(localPrService.listPullRequests()),
         });
         return;
       }
