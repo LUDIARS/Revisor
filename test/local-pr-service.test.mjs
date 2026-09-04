@@ -1369,8 +1369,11 @@ test("durable job cleanup failure does not turn a completed merge into a failure
     assert.equal(merged.status, "merged");
     assert.equal(merged.jobId, null);
     assert.equal(store.getPullRequest(pullRequest.id).mergeError, null);
-    assert.equal(logs.at(-1).event, "review_job_settlement_failed");
-    assert.equal(logs.at(-1).options.level, "warn");
+    // 「最後の行」ではなく「その記録があること」を見る。 マージ後には他の観測
+    // (登録 checkout の同期判定など) も記録され、 順番はこのテストの関心ではない。
+    const settlement = logs.find((entry) => entry.event === "review_job_settlement_failed");
+    assert.ok(settlement, "settlement failure was not logged");
+    assert.equal(settlement.options.level, "warn");
   } finally {
     removeFixture(fixture.directory);
   }
@@ -2313,5 +2316,105 @@ test("returns the conflicting file list when the re-landing conflicts", async ()
     assert.equal(held.status, "open");
   } finally {
     removeFixture(fixture.directory);
+  }
+});
+
+test("マージ済みだが登録 checkout へ降りなかったことを PR に残す", async () => {
+  // 未反映が記録に残らないと `merged` / `mergeError: null` のまま成功に見える。
+  // この状態が見えないまま進むと、古い base で次の作業を始めてしまう。
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  let queued;
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request) {
+        queued = request;
+        return { id: "job-1" };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    securityScan: passingSecurityScan(),
+    publisher: passingPublisher(),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      body: "Two local commits become one.",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: queued.headSha,
+    });
+
+    // 追跡ファイルが 1 つでも汚れていれば、 マージが触っていなくても base は進めない。
+    writeFileSync(join(fixture.repoPath, "product.txt"), "base\nlocal edit\n", "utf8");
+
+    const merged = await service.mergePullRequest(pullRequest.id);
+
+    // マージ自体は成立している。 未反映は失敗ではない。
+    assert.equal(merged.status, "merged");
+    assert.equal(merged.mergeError, null);
+    assert.equal(merged.checkoutSync.state, "worktree_dirty");
+    assert.equal(merged.checkoutSync.baseRef, "main");
+    assert.equal(merged.checkoutSync.mergeCommitSha, merged.mergeCommitSha);
+    assert.match(merged.checkoutSync.detail, /product\.txt/);
+    // 登録 checkout の main は実際に進んでいない。
+    assert.notEqual(git(fixture.repoPath, "rev-parse", "main"), merged.mergeCommitSha);
+  } finally {
+    await removeFixture(fixture.directory);
+  }
+});
+
+test("登録 checkout へ降りたら未反映の印は残さない", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  let queued;
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request) {
+        queued = request;
+        return { id: "job-1" };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    securityScan: passingSecurityScan(),
+    publisher: passingPublisher(),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      body: "Two local commits become one.",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "test_ok",
+      reviewedHeadSha: queued.headSha,
+    });
+
+    const merged = await service.mergePullRequest(pullRequest.id);
+
+    assert.equal(merged.checkoutSync ?? null, null);
+    assert.equal(git(fixture.repoPath, "rev-parse", "main"), merged.mergeCommitSha);
+  } finally {
+    await removeFixture(fixture.directory);
   }
 });

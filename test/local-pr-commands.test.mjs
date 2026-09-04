@@ -2,6 +2,43 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runLocalPrCommand } from "../src/local-pr-commands.mjs";
 
+test("lists only recorded checkout sync failures and supports repository filtering", async () => {
+  const writes = [];
+  const pullRequests = [
+    {
+      id: "pr-1", number: 1, repository: "LUDIARS/Revisor", status: "merged",
+      checkStatus: "test_ok", title: "missing checkout update",
+      checkoutSync: { state: "worktree_dirty", detail: "tracked changes remain" },
+    },
+    {
+      id: "pr-2", number: 2, repository: "LUDIARS/Other", status: "merged",
+      checkStatus: "test_ok", title: "other repository",
+      checkoutSync: { state: "not_fast_forward", detail: "diverged" },
+    },
+    {
+      id: "pr-3", number: 3, repository: "LUDIARS/Revisor", status: "merged",
+      checkStatus: "test_ok", title: "legacy success record",
+      checkoutSync: { state: "in_sync", detail: "" },
+    },
+  ];
+
+  const code = await runLocalPrCommand(
+    ["pr", "unsynced", "--repository", "LUDIARS/Revisor"],
+    {
+      stdout: { write(value) { writes.push(value); } },
+      createContext: () => ({
+        store: { listPullRequests: () => pullRequests },
+        jobs: {},
+        localPrService: {},
+      }),
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.match(writes.join(""), /#1/);
+  assert.doesNotMatch(writes.join(""), /#2|#3/);
+});
+
 test("a following flag cannot satisfy the required bypass reason", async () => {
   let mergeCalled = false;
   const pullRequest = {

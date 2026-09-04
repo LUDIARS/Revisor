@@ -20,6 +20,7 @@ const LOCAL_COMMANDS = new Set([
   "pr:close",
   "pr:merge",
   "pr:bypassed",
+  "pr:unsynced",
   "pr:bypass-reviewed",
   "repo:register",
   "repo:list",
@@ -188,6 +189,21 @@ export async function runLocalPrCommand(args, {
   }
   // バイパスで入った変更の後追いレビュー対象一覧。 印を付けただけで追えなければ、
   // 「後で見る」は必ず流れる。
+  // マージは済んだのに登録 checkout へ入らなかった PR の一覧。 記録が無ければ
+  // 「merged なのに手元に無い」状態を誰も気づけない。
+  if (scope === "pr" && action === "unsynced") {
+    const repository = option(args, "--repository");
+    const unsynced = store.listPullRequests()
+      .filter((candidate) => candidate.checkoutSync
+        && candidate.checkoutSync.state !== "in_sync")
+      .filter((candidate) => !repository || candidate.repository === repository);
+    write(json
+      ? unsynced
+      : unsynced.map((candidate) =>
+        `${summarize(candidate)}  ${candidate.checkoutSync.state}: ${candidate.checkoutSync.detail}`,
+      ).join("\n") || "(no merged PRs missing from their checkout)");
+    return 0;
+  }
   if (scope === "pr" && action === "bypassed") {
     const pending = store.listPullRequests()
       .filter((candidate) => candidate.bypassMerge

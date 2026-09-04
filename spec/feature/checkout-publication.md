@@ -15,7 +15,7 @@ related:
   - ./remote-publication.md
   - ./pr-lifecycle.md
   - ./pr-lifecycle-notice.md
-updated: 2026-08-09
+updated: 2026-09-05
 ---
 
 # checkout-publication — レビュー済み main を登録 checkout へ降ろす
@@ -114,14 +114,15 @@ GET <cc>/v1/checkouts/lock?repo_origin=<canonicalOrigin>&repo_path=<rootPath>&br
 「マージ済み」と「手元に降りた」を**別々に見えるように**する。降ろせなかったことが
 merge の失敗に見えてはならないし、逆に握りつぶされてもならない。
 
-- 実装時に local PR へ `checkoutPublishedAt` / `checkoutPublishError` を追加する。
-  `mergeError` とは別のフィールドにする (merge は成功しているため)。
-- 実装時に PR lifecycle event を 2 件追加する。
-  - 成功: `checkout_published` — 「本体 checkout を `<sha>` へ前進させました」
-  - 見送り: `checkout_publish_skipped` — 理由 (§2 のどれで落ちたか) を明示
-- `spec/feature/pr-lifecycle-notice.md` のイベント一覧と通知テストも同時に更新する。
-- 見送りは失敗ではないので、通知は 1 行で足りる。**理由を書かない通知は出さない**
-  (「降りませんでした」だけでは次の手が決まらない)。
+同期処理の戻り値だけを成功判定に使わず、マージ処理の最後に登録 checkout の
+`refs/heads/<baseRef>` が `mergeCommitSha` を含むかを検証する。含まない場合は local PR の
+`checkoutSync` に `state` (`worktree_dirty` / `not_fast_forward` / `missing_commit` /
+`unknown`)、`detail`、`baseRef`、`baseSha`、`mergeCommitSha`、`syncReason`、`checkedAt` を記録する。
+含む場合は `checkoutSync` を作らない。診断文は永続化前に秘密情報、private endpoint、
+ローカル絶対パスを除去し、長さを制限する。`revisor pr unsynced` はこの記録を一覧する。
+
+この検証は観測だけを行い、branch や worktree を変更しない。検証不能も merge の成否を
+変えず `unknown` として残す。見送りは `merge_checkout_not_synced` の warn ログにも残す。
 
 ## 5. 降りた後 (Concordia 側)
 

@@ -38,7 +38,12 @@ async function runGit(cwd, args, timeoutMs, configArgs = []) {
     timeoutMs,
   });
   if (!result.ok) {
-    throw new Error(`git ${args[0]} failed: ${result.stderr.trim() || result.stdout.trim()}`);
+    const error = new Error(`git ${args[0]} failed: ${result.stderr.trim() || result.stdout.trim()}`);
+    // Some Git predicates use exit status 1 as a normal false result. Preserve
+    // the status so callers can distinguish that from spawn, timeout, or
+    // repository failures without parsing localized stderr.
+    error.exitCode = result.exitCode;
+    throw error;
   }
   return result.stdout.trim();
 }
@@ -93,7 +98,7 @@ function parseWorktreeList(output) {
 // PR: the parent still records the same commit, so neither the review nor the
 // fast-forward is affected. A changed submodule *pointer* is a tracked change
 // and is still reported.
-async function trackedChanges(worktreePath, { run = git } = {}) {
+export async function trackedChanges(worktreePath, { run = git } = {}) {
   const args = [
     "status",
     "--porcelain",
@@ -103,7 +108,7 @@ async function trackedChanges(worktreePath, { run = git } = {}) {
   return run === git ? gitWithLfsFallback(worktreePath, args) : run(worktreePath, args);
 }
 
-async function branchWorktree(repoPath, ref, { run = git } = {}) {
+export async function branchWorktree(repoPath, ref, { run = git } = {}) {
   const branch = `refs/heads/${ref}`;
   const records = parseWorktreeList(await run(repoPath, ["worktree", "list", "--porcelain"]));
   return records.find((record) => record.branch === branch)?.worktree ?? null;
@@ -113,8 +118,9 @@ export async function isAncestor(repoPath, ancestor, descendant, { run = git } =
   try {
     await run(repoPath, ["merge-base", "--is-ancestor", ancestor, descendant]);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error?.exitCode === 1) return false;
+    throw error;
   }
 }
 

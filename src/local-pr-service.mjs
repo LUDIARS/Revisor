@@ -13,6 +13,11 @@ import {
 } from "./pr-lifecycle-notice.mjs";
 import { squashMergeLocalPullRequest } from "./local-merge.mjs";
 import { syncSourceCheckout } from "./source-checkout-sync.mjs";
+import {
+  CHECKOUT_SYNC_STATES,
+  inspectCheckoutSync,
+  sanitizeCheckoutSyncDetail,
+} from "./checkout-sync.mjs";
 import { mergeFailureMessage, writeMergeFailureLog } from "./merge-failure-log.mjs";
 import { prepareMergeRepository } from "./merge-repository.mjs";
 import { probeBaseMergeability } from "./submit-probe.mjs";
@@ -110,6 +115,7 @@ export class LocalPrService {
     probeMergeability = probeBaseMergeability,
     logMergeFailure = writeMergeFailureLog,
     syncCheckout = syncSourceCheckout,
+    inspectCheckout = inspectCheckoutSync,
     securityScan,
     publisher,
     prepareVersionFile = prepareRegisteredVersionFile,
@@ -135,6 +141,7 @@ export class LocalPrService {
     this.probeMergeability = probeMergeability;
     this.logMergeFailure = logMergeFailure;
     this.syncCheckout = syncCheckout;
+    this.inspectCheckout = inspectCheckout;
     this.securityScan = securityScan;
     this.publisher = publisher;
     this.prepareVersionFile = prepareVersionFile;
@@ -675,6 +682,62 @@ export class LocalPrService {
     return this.store.getPullRequest(pullRequest.id);
   }
 
+  /**
+   * マージ後、 登録 checkout に実際入ったかを見て PR へ記録する。
+   *
+   * **マージは既に成立し公開も済んでいる**ので、 ここで失敗にはしない。 記録するのは
+   * 「入っていない」という事実と理由だけで、 直すのは人の判断 (汚れた worktree を
+   * 捨てるか、 履歴をどうするか)。
+   *
+   * 記録しないと `merged` / `mergeError: null` のまま未反映が残り、 提出した側からは
+   * 成功にしか見えず、古い base のまま次の作業が始まる。
+   */
+  async #recordCheckoutSync({ pullRequest, repository, mergeCommitSha, syncReason }) {
+    let inspection;
+    try {
+      inspection = await this.inspectCheckout({
+        repoPath: repository.rootPath,
+        baseRef: pullRequest.baseRef,
+        mergeCommitSha,
+      });
+    } catch (error) {
+      // 判定できないこと自体はマージの失敗ではない。 判定不能として残す。
+      inspection = {
+        state: "unknown",
+        detail: sanitizeCheckoutSyncDetail(error),
+        baseSha: null,
+      };
+    }
+
+    const state = CHECKOUT_SYNC_STATES.includes(inspection?.state)
+      ? inspection.state
+      : "unknown";
+    if (state === "in_sync") {
+      return pullRequest;
+    }
+
+    const checkoutSync = {
+      state,
+      detail: sanitizeCheckoutSyncDetail(inspection?.detail),
+      baseRef: pullRequest.baseRef,
+      baseSha: inspection?.baseSha ?? null,
+      mergeCommitSha,
+      syncReason: syncReason ? sanitizeCheckoutSyncDetail(syncReason) : null,
+      checkedAt: new Date().toISOString(),
+    };
+    try {
+      this.log("merge_checkout_not_synced", {
+        localPrId: pullRequest.id,
+        repository: pullRequest.repository,
+        number: pullRequest.number,
+        state,
+        baseRef: pullRequest.baseRef,
+      }, { level: "warn" });
+    } catch {
+      // ログは観測用。 記録そのものを止めない。
+    }
+    return this.store.updatePullRequest(pullRequest.id, { checkoutSync });
+  }
   async #announceLifecycle(event, pullRequest) {
     if (typeof this.store.appendPullRequestEvent === "function") {
       this.store.appendPullRequestEvent(pullRequest.id, {
@@ -893,8 +956,17 @@ export class LocalPrService {
           + ` in ${repository.rootPath}: ${sync.reason}\n`,
         );
       }
-      await this.#announceLifecycle(bypass ? "bypass_merged" : "merged", merged);
-      return merged;
+      // sync の自己申告ではなく、 **登録 checkout の base が実際にマージを含むか**を見る。
+      // `already up to date` のように synced=false でも同期している場合があり、 逆に
+      // 成功と報告しても入っていない場合がある。
+      const settled = await this.#recordCheckoutSync({
+        pullRequest: merged,
+        repository,
+        mergeCommitSha,
+        syncReason: sync.synced ? null : sync.reason,
+      });
+      await this.#announceLifecycle(bypass ? "bypass_merged" : "merged", settled);
+      return settled;
     } catch (error) {
       try {
         this.logMergeFailure({

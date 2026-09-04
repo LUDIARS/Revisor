@@ -34,6 +34,7 @@ function printHelp(stdout) {
     "  revisor pr merge <number> --defer-push               # merge locally and hold the GitHub publish",
     "  revisor publish-pending [--repository <owner/name>] [--json]  # send the held publishes",
     "  revisor pr bypassed [--all] [--json]                 # bypass merges awaiting follow-up review",
+    "  revisor pr unsynced [--repository <owner/name>] [--json]  # merged PRs absent from a checkout",
     "  revisor pr bypass-reviewed <number> [--note <text>]",
     "  revisor repo register --json-file <path>",
     "  revisor repo list [--json]",

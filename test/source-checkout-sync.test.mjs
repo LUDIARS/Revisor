@@ -12,7 +12,11 @@ function fakeGit(responses = {}, { fail = new Set() } = {}) {
     calls.push({ repoPath, args: args.join(" ") });
     const command = args.join(" ");
     const key = args.slice(0, 2).join(" ");
-    if (fail.has(key) || fail.has(args[0])) throw new Error(`git ${key} failed`);
+    if (fail.has(key) || fail.has(args[0])) {
+      const error = new Error(`git ${key} failed`);
+      error.exitCode = 1;
+      throw error;
+    }
     if (args[0] === "rev-parse" && args[1] === "--verify"
       && args[2]?.startsWith("refs/revisor/source-checkout-sync/")) {
       return responses["rev-parse fetched"] ?? "";
