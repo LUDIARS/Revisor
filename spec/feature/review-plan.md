@@ -37,6 +37,9 @@ updated: 2026-09-04
   登録単体テストでは代替できない面。docs-only 変更は `ui/` 配下でも
   runtime surface を持たない (実行物が動いていないため)。
 - **規模**: 変更ファイル数と diff 本文行数 (`+++`/`---` はヘッダなので数えない)。
+- **依存更新のみ**: 全パスが依存マニフェストなら `dependencyOnly: true`。解析対象の
+  ソースは変わらない一方、第三者コードとビルド結果は変わり得るため、通常の非コード変更と
+  分けて扱う。
 
 ## ステージ
 
@@ -46,8 +49,8 @@ updated: 2026-09-04
 | `anatomia_domain_review` | ✔ | 省略不可 (ドキュメントも自身がドメイン) |
 | `spec_requirements` | ✔ | 省略不可 |
 | `reviewer_autofix` | ✔ | 省略不可 |
-| `anatomia_code_analysis` | | 実行コードを含まない変更 (docs/asset/generated のみ) |
-| `security_review` | | 同上 |
+| `anatomia_code_analysis` | | 実行コードを含まない変更 (docs/asset/generated のみ)、または依存更新のみ |
+| `security_review` | | 実行コードを含まない変更 (docs/asset/generated のみ)。依存更新のみでは省略しない |
 | `registered_tests` | | 変更種別を担当する登録テストが 1 件も無いとき |
 
 `leakage_scan` を必須にしているのは、このワークフローが存在する理由そのもの
@@ -187,6 +190,10 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 残り、UI と advisory に出る。「短い一覧」を「小さいテストスイート」と
 読み違えさせないため。
 
+依存更新のみの変更では、lock ファイルが `generated` に分類されても、実行系 kind
+(`code` / `infra` / `config` / `test`) を担当するケースを選ぶ。依存更新はソース差分を
+持たなくてもビルド・テスト結果を変えるためで、管制プランナーもこの選択を削れない。
+
 ## 管制プランナー (任意)
 
 決定的な計画が正本 (floor)。設定 `planAdvisor` で相談先を選べる。
@@ -225,10 +232,10 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 ### 安全下限 (`applyAdvisedPlan`)
 
 - 必須ステージは**落とせない**。落とす要求は却下として記録に残す。
-- 実行コードを含む変更では**登録テストを削れない** (再有効化のみ可)。
+- 実行コードを含む変更と依存更新のみの変更では**登録テストを削れない** (再有効化のみ可)。
 - 登録されていないテストケース名は無視する。
 - 省略できるのは `anatomia_code_analysis` と `security_review`、および
-  実行コードを含まない変更の `registered_tests` だけ。
+  実行コードを含まず依存更新のみでもない変更の `registered_tests` だけ。
 - `anatomia_code_analysis` の省略で節約されるのは高価な解析 (プロジェクト全体・
   base ベースライン) までで、**ゲートは緩まない**。quality / architecture の
   advisory 降格は決定的ルールが落としたときだけ成立する (`review-gate.md` の

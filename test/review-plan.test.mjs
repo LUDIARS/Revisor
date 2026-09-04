@@ -37,6 +37,43 @@ test("a docs-only change drops code analysis and the vulnerability pass", () => 
   assert.match(plan.review.label, /モデルレビュー/);
 });
 
+// 依存のみは docs-only とも実装ありとも違う三つ目の形。 解析するソースは無いが、
+// 脆弱性診断と登録テストはここでこそ要る。
+test("a dependency-only change keeps the vulnerability pass and tests but drops code analysis", () => {
+  // A lock file is classified as generated, so this also proves dependency
+  // changes retain executable-change tests without relying on an always case.
+  const plan = planFor(["package-lock.json"]);
+  assert.equal(stageEnabled(plan, "anatomia_code_analysis"), false);
+  assert.equal(stageEnabled(plan, "security_review"), true);
+  assert.equal(stageEnabled(plan, "registered_tests"), true);
+  assert.equal(stageEnabled(plan, "leakage_scan"), true);
+  assert.equal(plan.changeProfile.dependencyOnly, true);
+  assert.deepEqual(plan.testSelection.selected.sort(), ["check", "smoke", "unit"]);
+  assert.deepEqual(plan.testSelection.skipped.map((entry) => entry.name), ["docs-lint"]);
+  // 飛ばした理由が読めること (無言でスキップしない)。
+  const skipped = plan.stages.find((stage) => stage.id === "anatomia_code_analysis");
+  assert.match(skipped.reason, /依存の更新だけ/);
+  const security = plan.stages.find((stage) => stage.id === "security_review");
+  assert.match(security.reason, /依存の更新/);
+});
+
+test("one source file alongside the dependency bump restores code analysis", () => {
+  const plan = planFor(["package.json", "package-lock.json", "src/runner.mjs"]);
+  assert.equal(stageEnabled(plan, "anatomia_code_analysis"), true);
+  assert.equal(stageEnabled(plan, "security_review"), true);
+});
+
+test("an advisor cannot drop tests from a dependency-only change", () => {
+  const plan = applyAdvisedPlan(planFor(["Cargo.lock"]), {
+    advisor: "reviewer",
+    stages: [{ id: "registered_tests", run: false, reason: "lock file only" }],
+    testCases: [],
+  });
+  assert.equal(stageEnabled(plan, "registered_tests"), true);
+  assert.deepEqual(plan.testSelection.selected.sort(), ["check", "smoke", "unit"]);
+  assert.deepEqual(plan.advisedSkips, []);
+});
+
 test("cost validation mode records review, Genius and domain review as skipped", () => {
   const plan = applyCostValidationMode(planFor(["src/runner.mjs"]), true);
   assert.equal(stageEnabled(plan, "reviewer_autofix"), false);

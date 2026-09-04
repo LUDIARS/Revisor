@@ -4,6 +4,7 @@ import {
   classifyChange,
   classifyPath,
   diffLineStats,
+  isDependencyOnlyChange,
   isDocsOnlyChange,
   isDocsOrConfigOnlyChange,
 } from "../src/change-classification.mjs";
@@ -69,6 +70,21 @@ test("counts a removed Markdown rule instead of reading it as a file header", ()
     "+++text",
   ].join("\n");
   assert.deepEqual(diffLineStats(diff), { added: 1, removed: 2, changedLines: 3 });
+});
+
+// 依存だけの変更は「実行コードあり / なし」のどちらでもない。 ソースは動いて
+// いないが、脆弱性診断と登録テストは最も要る場面。
+test("treats a change as dependency-only only when every path is a dependency manifest", () => {
+  assert.equal(isDependencyOnlyChange(["package.json", "package-lock.json"]), true);
+  assert.equal(isDependencyOnlyChange(["pnpm-lock.yaml"]), true);
+  assert.equal(isDependencyOnlyChange(["Cargo.toml", "Cargo.lock"]), true);
+  assert.equal(isDependencyOnlyChange(["server/package.json", "web/pnpm-lock.yaml"]), true);
+  // 1 ファイルでもソースが混ざれば通常の実装変更として扱う。
+  assert.equal(isDependencyOnlyChange(["package.json", "src/runner.mjs"]), false);
+  assert.equal(isDependencyOnlyChange(["package.json", "README.md"]), false);
+  assert.equal(isDependencyOnlyChange([]), false);
+  assert.equal(classifyChange({ changedPaths: ["package.json", "package-lock.json"] }).dependencyOnly, true);
+  assert.equal(classifyChange({ changedPaths: ["src/a.ts"] }).dependencyOnly, false);
 });
 
 test("treats a change as docs-only only when every path is documentation", () => {

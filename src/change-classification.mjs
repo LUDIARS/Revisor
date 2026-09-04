@@ -158,6 +158,19 @@ export function isDocsOrConfigOnlyChange(changedPaths) {
       && (DOC_FILE.test(path) || CONFIG_FILE.test(path)));
 }
 
+/**
+ * 依存の更新だけで構成された変更。
+ *
+ * ソースが 1 行も動いていないので Anatomia の解析対象 (anchor / ドメイン) が
+ * 変わらない。 一方で**脆弱性診断と登録テストは最も必要な場面**でもある —
+ * 依存を上げてビルドが壊れる・既知の脆弱性が入る、がまさにこの形の変更で起きる。
+ * 「実行コードを含む / 含まない」の二分では両方を同じ扱いにしてしまうため、
+ * 独立した profile として持つ。
+ */
+export function isDependencyOnlyChange(changedPaths) {
+  return changedPaths.length > 0 && changedPaths.every((path) => DEPENDENCY_MANIFEST.test(path));
+}
+
 export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
   const files = changedPaths.map((path) => ({
     path,
@@ -176,6 +189,7 @@ export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
     ...stats,
     docsOnly: isDocsOnlyChange(changedPaths),
     docsOrConfigOnly: isDocsOrConfigOnlyChange(changedPaths),
+    dependencyOnly: isDependencyOnlyChange(changedPaths),
     // Anatomia domains describe production behaviour. Tests, operational
     // manifests, documentation and generated assets may contain parseable
     // functions, but assigning those helpers to an application domain invents

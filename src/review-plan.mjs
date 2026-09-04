@@ -34,13 +34,16 @@ const INERT_KINDS = new Set(["docs", "asset", "generated"]);
 const EXECUTABLE_KINDS = new Set(["code", "infra", "config", "test"]);
 const REVIEW_COST_TIERS = new Set(["model_review"]);
 
-// Every merge candidate receives model review. The concrete provider model and
-// effort are selected later, after Anatomia has supplied the edited-domain count.
+// Every merge candidate receives model review. 審査に使うモデルは呼び出しの用途で
+// 決まり (常に strong 側)、 差分規模と Anatomia のドメイン数が決めるのは
+// **effort と審査の構成** (単独 / investigator + judge の 2 段) のほう
+// (`review-strategy.mjs`)。 ここの `tier` は審査コストの段 (doc_only /
+// model_review) であって、 モデルの強弱ではない — 名前が同じで別概念なので注意。
 function reviewStrategy() {
   return {
     tier: "model_review",
-    label: "差分規模に応じたモデルレビュー",
-    reason: "変更行数・Anatomiaドメイン数・変更種別からレビューモデルを選択します",
+    label: "モデルレビュー",
+    reason: "変更行数・Anatomiaドメイン数・変更種別から審査の構成と effort を選びます",
   };
 }
 
@@ -69,7 +72,13 @@ function selectTestCases(testCases, classification) {
   const skipped = [];
   for (const testCase of testCases) {
     const coverage = testCaseCoverage(testCase);
-    if (coverage.always || coverage.kinds.some((kind) => classification.kinds.includes(kind))) {
+    const coversDependencyChange = classification.dependencyOnly === true
+      && coverage.kinds?.some((kind) => EXECUTABLE_KINDS.has(kind));
+    if (
+      coverage.always
+      || coverage.kinds.some((kind) => classification.kinds.includes(kind))
+      || coversDependencyChange
+    ) {
       selected.push(testCase.name);
       continue;
     }
@@ -83,25 +92,37 @@ function selectTestCases(testCases, classification) {
 
 function stageDecisions(classification, review) {
   const executable = hasExecutableChange(classification);
+  // 依存の更新だけの変更は「実行コードあり」と「なし」のどちらでもない。
+  // ソースが動いていないので Anatomia の解析対象は変わらないが、 脆弱性診断と
+  // 登録テストは**最も要る**場面 (依存を上げてビルドが壊れる / 既知の脆弱性が
+  // 入る、がまさにこの形で起きる)。 二分だと片方を必ず取り違える。
+  const dependencyOnly = classification.dependencyOnly === true;
   return {
     leakage_scan: { run: true, reason: "情報流出検査は変更種別に関係なく必須です" },
-    anatomia_code_analysis: executable
-      ? { run: true, reason: "実行されるコードを含む変更です" }
-      : {
+    anatomia_code_analysis: dependencyOnly
+      ? {
           run: false,
-          reason: `実行コードを含まない変更 (${classification.kinds.join("/")}) です`,
-        },
+          reason: "依存の更新だけの変更で、解析対象のソースが変わっていません",
+        }
+      : executable
+        ? { run: true, reason: "実行されるコードを含む変更です" }
+        : {
+            run: false,
+            reason: `実行コードを含まない変更 (${classification.kinds.join("/")}) です`,
+          },
     anatomia_domain_review: {
       run: true,
       reason: "ドキュメントも自身がドメインであり、ドメイン整合は常に確認します",
     },
     spec_requirements: { run: true, reason: "spec 要件の充足確認は常に行います" },
-    security_review: executable
-      ? { run: true, reason: "実行されるコードを含む変更です" }
-      : {
-          run: false,
-          reason: `実行コードを含まない変更 (${classification.kinds.join("/")}) には脆弱性診断は不要です`,
-        },
+    security_review: dependencyOnly
+      ? { run: true, reason: "依存の更新は脆弱性診断が最も要る変更です" }
+      : executable
+        ? { run: true, reason: "実行されるコードを含む変更です" }
+        : {
+            run: false,
+            reason: `実行コードを含まない変更 (${classification.kinds.join("/")}) には脆弱性診断は不要です`,
+          },
     reviewer_autofix: { run: true, reason: review.reason },
   };
 }
@@ -129,6 +150,7 @@ export function planReview({ classification, testCases = [] }) {
       changedLines: classification.changedLines,
       docsOnly: classification.docsOnly,
       docsOrConfigOnly: classification.docsOrConfigOnly,
+      dependencyOnly: classification.dependencyOnly,
       touchesSpec: classification.touchesSpec,
       runtimeSurfaces: classification.runtimeSurfaces,
     },
@@ -252,10 +274,11 @@ export function skippedTestOutcomes(plan) {
 
 // Applied to whatever an advisor returns. The advisor may re-enable anything and
 // may relax only the optional code-analysis and vulnerability stages; it may
-// drop test coverage only when the change contains nothing executable.
+// drop test coverage only when neither code nor dependencies can change execution.
 export function applyAdvisedPlan(plan, advice) {
   if (!advice || typeof advice !== "object") return plan;
   const executable = plan.changeProfile.kinds.some((kind) => EXECUTABLE_KINDS.has(kind));
+  const testCoverageRequired = executable || plan.changeProfile.dependencyOnly === true;
   const requested = new Map(
     Array.isArray(advice.stages)
       ? advice.stages
@@ -278,10 +301,10 @@ export function applyAdvisedPlan(plan, advice) {
         ? { ...stage, reason: `${stage.reason} (管制プランナーの省略要求は必須ステージのため却下)` }
         : stage;
     }
-    if (stage.id === "registered_tests" && executable) {
+    if (stage.id === "registered_tests" && testCoverageRequired) {
       return {
         ...stage,
-        reason: `${stage.reason} (実行コードを含むため管制プランナーの省略要求は却下)`,
+        reason: `${stage.reason} (実行コードまたは依存更新を含むため管制プランナーの省略要求は却下)`,
       };
     }
     if (!stage.run) return stage;
@@ -292,7 +315,7 @@ export function applyAdvisedPlan(plan, advice) {
   // follows it instead of being narrowed a second time under its own reason.
   const testsEnabled = stages.find((stage) => stage.id === "registered_tests")?.run !== false;
   const testSelection = testsEnabled
-    ? advisedTestSelection(plan, advice, executable, advisedSkips)
+    ? advisedTestSelection(plan, advice, testCoverageRequired, advisedSkips)
     : {
         selected: [],
         skipped: [
@@ -313,7 +336,7 @@ export function applyAdvisedPlan(plan, advice) {
   };
 }
 
-function advisedTestSelection(plan, advice, executable, advisedSkips) {
+function advisedTestSelection(plan, advice, testCoverageRequired, advisedSkips) {
   const known = new Set([
     ...plan.testSelection.selected,
     ...plan.testSelection.skipped.map((entry) => entry.name),
@@ -324,12 +347,13 @@ function advisedTestSelection(plan, advice, executable, advisedSkips) {
   if (!requested) return plan.testSelection;
   const added = requested.filter((name) => !plan.testSelection.selected.includes(name));
   const dropped = plan.testSelection.selected.filter((name) => !requested.includes(name));
-  // Re-enabling is always allowed; dropping coverage is not, on executable
-  // change. Without this an advisor could silently disable the whole suite.
-  const selected = executable
+  // Re-enabling is always allowed; dropping coverage is not when code or
+  // dependencies can change execution. Otherwise an advisor could silently
+  // disable the whole suite.
+  const selected = testCoverageRequired
     ? [...new Set([...plan.testSelection.selected, ...added])]
     : [...new Set(requested)];
-  if (!executable && dropped.length > 0) {
+  if (!testCoverageRequired && dropped.length > 0) {
     advisedSkips.push({
       id: "registered_tests",
       reason: `管制プランナーが ${dropped.join(", ")} を省略しました`,
