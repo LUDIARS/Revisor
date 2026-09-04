@@ -1,0 +1,15 @@
+{
+  "$comment": "Anatomia のプログラムドメイン (二層判定) 用の層宣言。 glob は repo 相対のファイルパスへ完全一致で当たる (`*` = 1 階層、 `**` = 任意階層)。 ローダーが glob 文字列でソートしてから先勝ちで評価するため記述順は効かない。 したがって glob 同士を重ねず、 モジュール 1 つにつき `<dir>/*` を 1 本だけ置く。 確認は `anatomia domains program --repo .` で unclassified 0 を保つこと。",
+
+  "layers": [
+    { "glob": "src/*", "layer": "application" },
+
+    { "glob": "scripts/*", "layer": "infrastructure" },
+
+    { "glob": "test/*", "layer": "shared" },
+    { "glob": "test/fixtures/*", "layer": "shared" },
+    { "glob": "test/helpers/*", "layer": "shared" }
+  ],
+
+  "mergeCouplingThreshold": 1
+}

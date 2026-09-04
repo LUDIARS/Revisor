@@ -4,4 +4,8 @@ coverage/
 .env
 
 # Anatomia のローカル状態 (ドメイン定義の正本は spec/domains/)
-.anatomia/
+# layers.json だけは解析キャッシュではなくリポジトリが持つ層宣言なので追跡する。
+# ディレクトリごと除外 (`.anatomia/`) すると中のファイルを `!` で再包含できないため
+# `.anatomia/*` の形にしてある。
+.anatomia/*
+!.anatomia/layers.json
