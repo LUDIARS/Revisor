@@ -198,3 +198,44 @@ test("records whether the change touched spec files", () => {
   assert.equal(classifyChange({ changedPaths: ["spec/feature/x.md"] }).touchesSpec, true);
   assert.equal(classifyChange({ changedPaths: ["src/x.mjs"] }).touchesSpec, false);
 });
+
+// 直下の `report/` は解析レポートの出力先で、生成物。 これが code へ落ちると
+// 「生成物を追跡から外すだけの PR」がアプリケーションドメインを要求されて止まる
+// (Concordia #1312 が実際にこれで action_required になった / Memoria #2022)。
+test("直下の report/ は生成物として扱い、src/report/ の手書きコードは巻き込まない", () => {
+  assert.equal(classifyPath("report/architecture-review.html"), "generated");
+  assert.equal(classifyPath("report/stages/05-anatomia-analysis.html"), "generated");
+  assert.equal(classifyPath("report/omnipotens-final.manifest.json"), "generated");
+
+  // `report` は普通の語なので、深さを問わず当てると手書きのソースを巻き込む。
+  // Concordia の src/report/generator.ts が実在するため、直下に固定してある。
+  assert.equal(classifyPath("src/report/generator.ts"), "code");
+  assert.equal(classifyPath("src/report/summary-event-excerpt.ts"), "code");
+  assert.equal(classifyPath("web/src/pages/report/View.tsx"), "code");
+});
+
+test("生成レポートだけを消す変更はドメインも runtime verification も要求されない", () => {
+  const changedPaths = [
+    "report/architecture-review.html",
+    "report/stages/00-source-manifest.html",
+    "report/omnipotens-final.manifest.json",
+  ];
+  const classification = classifyChange({ changedPaths, unifiedDiff: "" });
+
+  assert.deepEqual(classification.kinds, ["generated"]);
+  // codeDomainRequired が立たないことが、target-domain ゲートを通す条件
+  // (review-gate.mjs の needsTargetDomain)。
+  assert.equal(classification.codeDomainRequired, false);
+  assert.deepEqual(classification.runtimeSurfaces, []);
+});
+
+test("UI の .html は従来どおり code のままで runtime verification が緩まない", () => {
+  // report/ を生成物にしたことで .html 全体の扱いを変えていないこと。
+  assert.equal(classifyPath("web/public/index.html"), "code");
+  assert.equal(classifyPath("public/index.html"), "code");
+  assert.equal(classifyPath("src/ui/panel.html"), "code");
+
+  const ui = classifyChange({ changedPaths: ["web/public/index.html"], unifiedDiff: "" });
+  assert.equal(ui.codeDomainRequired, true);
+  assert.ok(ui.runtimeSurfaces.includes("ui"), "ui 面として runtime verification の対象に残る");
+});

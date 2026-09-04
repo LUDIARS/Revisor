@@ -47,8 +47,12 @@ const SPEC_DECLARATION_FILE =
 const KIND_RULES = [
   {
     kind: "generated",
+    // `report/` だけはリポジトリ直下に固定する。 他の生成物ディレクトリと違って
+    // `report` は普通の語なので、 深さを問わず当てると手書きのソースを巻き込む
+    // (Concordia の `src/report/generator.ts` が実在する)。 解析レポートの出力先は
+    // 直下の `report/` という慣習なので、 そこだけを生成物として扱う。
     pattern:
-      /(?:^|\/)(?:dist|build|out|coverage|node_modules)\/|(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock)$|\.min\.(?:js|css)$/i,
+      /(?:^|\/)(?:dist|build|out|coverage|node_modules)\/|^report\/|(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock)$|\.min\.(?:js|css)$/i,
   },
   {
     kind: "test",
@@ -172,11 +176,17 @@ export function isDependencyOnlyChange(changedPaths) {
 }
 
 export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
-  const files = changedPaths.map((path) => ({
-    path,
-    kind: classifyPath(path),
-    runtimeSurfaces: runtimeSurfacesOf(path),
-  }));
+  const files = changedPaths.map((path) => {
+    const kind = classifyPath(path);
+    return {
+      path,
+      kind,
+      // Generated output can have an executable-looking filename (for example,
+      // `report/*.html` or `dist/server.js`) without being a product surface a
+      // human must exercise. The source that produces it owns that obligation.
+      runtimeSurfaces: kind === "generated" ? [] : runtimeSurfacesOf(path),
+    };
+  });
   const counts = {};
   for (const file of files) counts[file.kind] = (counts[file.kind] ?? 0) + 1;
   const kinds = CHANGE_KINDS.filter((kind) => counts[kind] > 0);
