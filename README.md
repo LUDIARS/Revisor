@@ -227,6 +227,12 @@ Configuration defaults to:
 `REVISOR_CONFIG_PATH`, `REVISOR_KEY_PATH`, and `REVISOR_MASTER_KEY` remain
 available for intentional overrides.
 
+`REVISOR_CONFIDENTIAL_TERMS_FILE` may point to an absolute local JSON file whose
+`keywords` array lists unpublished product, customer, or organisation names.
+Matches in added diff content or paths are reported as an advisory without
+persisting the configured value or matching source text. Keep this file outside
+the repository; relative and UNC paths are rejected.
+
 ## Local API
 
 The API listens on loopback. Mutations require the workflow token; reads are

@@ -14,6 +14,7 @@ import { readSettings } from "./config.mjs";
 import { reconcileNarrativeForReview } from "./pr-narrative.mjs";
 import { runPlannedTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
+import { configuredConfidentialTermsAdvisory } from "./confidential-terms.mjs";
 import { assessMergeRisk, assessRuntimeVerification } from "./merge-risk.mjs";
 import { forcedReviewerFor } from "./forced-review-model.mjs";
 import { advisePlan } from "./plan-advisor.mjs";
@@ -247,6 +248,10 @@ function buildGateResult({
   analysisSource = "anatomia-cli",
   additionalReasons = [],
   additionalAdvisories = [],
+  // 公開できない語の検査に使う。 渡されなければ検査しない (既存の呼び出しを壊さない)。
+  unifiedDiff = null,
+  changedPaths = [],
+  env = process.env,
 }) {
   // A repository with no analyzed functions has Anatomia's neutral score of
   // 100. That score is not a comparable baseline for a newly introduced code
@@ -256,6 +261,11 @@ function buildGateResult({
     && baseline.quality.complexity.functions > 0
     ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
     : null;
+  const confidentialAdvisory = configuredConfidentialTermsAdvisory({
+    unifiedDiff,
+    changedPaths,
+    env,
+  });
   const { reasons: gateReasons, advisories } = gateOutcome({
     finalAnalysis,
     complexityScoreDelta,
@@ -325,6 +335,9 @@ function buildGateResult({
       ...advisories,
       ...additionalAdvisories,
       ...(anatomiaGate?.unavailable === true ? [anatomiaGate.message] : []),
+      // 資格情報しか見ない leakage スキャンでは素通りする面。 まず見えるようにする
+      // (既定は advisory、 詳細は confidential-terms.mjs)。
+      ...(confidentialAdvisory ? [confidentialAdvisory] : []),
     ],
     runtimeVerification,
     mergeRisk,
@@ -346,6 +359,9 @@ function buildAnatomiaBlockedResult({
   classification,
   reviewer = "skipped",
   contextSource = "anatomia-review-gate",
+  unifiedDiff = null,
+  changedPaths = [],
+  env = process.env,
 }) {
   return {
     ...buildGateResult({
@@ -356,6 +372,9 @@ function buildAnatomiaBlockedResult({
       reviewer,
       contextSource,
       reviewedHeadSha: request.headSha,
+      unifiedDiff,
+      changedPaths,
+      env,
       complexityDropThreshold,
       initialLeakage,
       leakage,
@@ -584,6 +603,9 @@ export async function runPartialVerification({
       ? { quality: { complexity: baselineComplexity } }
       : null,
     reviewer,
+    unifiedDiff: submitted.unifiedDiff ?? null,
+    changedPaths: submitted.changedPaths ?? [],
+    env,
     contextSource: autofixApplied
       ? `partial-verification-after-test-autofix:${[...targets].join(",")}`
       : `partial-verification:${[...targets].join(",")}`,
@@ -794,6 +816,9 @@ export function createPrReviewRunner({
           initialLeakage,
           docsOnly,
           docsOrConfigOnly,
+          unifiedDiff: submitted.unifiedDiff,
+          changedPaths: submitted.changedPaths,
+          env,
           plan: frontGatePlan,
           classification: submitted.classification,
         });
@@ -913,6 +938,11 @@ export function createPrReviewRunner({
         baseline,
         complexityDropThreshold,
         initialLeakage,
+        // 公開できない語の検査に使う。 ここへ置けば gateInput を spread する
+        // 全経路が対象になる (途中で止まった審査結果にも所見が載る)。
+        unifiedDiff: submitted.unifiedDiff,
+        changedPaths: submitted.changedPaths,
+        env,
         plan,
         classification: submitted.classification,
         security: initialSecurity,
@@ -1043,6 +1073,9 @@ export function createPrReviewRunner({
                 ci: initialCi,
                 docsOnly,
                 docsOrConfigOnly,
+                unifiedDiff: submitted.unifiedDiff,
+                changedPaths: submitted.changedPaths,
+                env,
                 plan,
                 classification: submitted.classification,
                 reviewer: externalReviewer,
@@ -1095,6 +1128,8 @@ export function createPrReviewRunner({
             reviewer: "skipped",
             contextSource: "cost-validation-mode",
             reviewedHeadSha,
+            unifiedDiff: reviewed.unifiedDiff,
+            changedPaths: reviewed.changedPaths,
             leakage: finalLeakage,
             ci: initialCi,
             docsOnly,
@@ -1322,6 +1357,8 @@ export function createPrReviewRunner({
           reviewer,
           contextSource: authorContext?.source ?? "pr-only",
           reviewedHeadSha,
+          unifiedDiff: reviewed.unifiedDiff,
+          changedPaths: reviewed.changedPaths,
           reviewerOutput: reviewResult.stdout,
           leakage: finalLeakage,
           ci: finalCi,

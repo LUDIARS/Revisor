@@ -90,6 +90,9 @@ published base commits and human-selected semantic version tags/Releases.
   truncated to a tail whose truncation is stated in the stored text.
 - `anatomia.mjs` owns direct CLI analysis.
 - `leakage.mjs` detects sensitive additions without retaining matched values.
+- `confidential-terms.mjs` optionally detects configured unpublished names in added
+  diff content and paths, retaining safe ids and locations only and redacting a
+  path when the path itself contains a configured term.
 - `security-scan.mjs` runs the `codex-security` CLI over a committed diff in a
   disposable worktree, retains finding locations only, and deletes the scan
   report artifacts. Each scan gets a private `CODEX_SECURITY_STATE_DIR`, because
@@ -254,6 +257,9 @@ See `spec/feature/pr-lifecycle-notice.md` for the `pr-notification` domain.
 - Leakage findings contain only rule, path, and line metadata. Security findings
   additionally keep their severity, never source excerpts, reproduction steps, or
   scanner stderr. Saved scan reports are deleted on every path.
+- Confidential-term advisories never retain matched content, configured values,
+  local configuration paths, or parser diagnostics that can quote source text.
+  A matching diff path is represented by an opaque per-scan label.
 - Reviewer access is blocked before external-model invocation when the local
   leakage scan finds a high-confidence match. The security scanner is an external
   model too, so the same leakage match also suppresses the scan.

@@ -145,6 +145,11 @@ test("the Anatomia front gate blocks before review and exposes violation details
   let reviewCalls = 0;
   try {
     const env = reviewEnvironment(fixture);
+    const termsPath = join(fixture.directory, "confidential-terms.json");
+    writeFileSync(termsPath, JSON.stringify({ keywords: [
+      { id: "product-001", value: "feature" },
+    ] }), "utf8");
+    env.REVISOR_CONFIDENTIAL_TERMS_FILE = termsPath;
     const runner = createPrReviewRunner({
       cwd: fixture.repoPath,
       env,
@@ -174,6 +179,8 @@ test("the Anatomia front gate blocks before review and exposes violation details
     assert.equal(result.conclusion, "action_required");
     assert.equal(result.reviewer, "skipped");
     assert.ok(result.reasons.some((reason) => reason.includes("forbidden dependency")));
+    assert.ok(result.advisories.some((advisory) => advisory.includes("1 箇所 / 1 ファイル")));
+    assert.equal(JSON.stringify(result.advisories).includes("feature"), false);
   } finally {
     removeFixture(fixture.directory);
   }
@@ -187,6 +194,11 @@ test("rechecks the front gate after registered-test autofix changes the diff", a
   let testRuns = 0;
   try {
     const env = reviewEnvironment(fixture);
+    const termsPath = join(fixture.directory, "confidential-terms.json");
+    writeFileSync(termsPath, JSON.stringify({ keywords: [
+      { id: "product-001", value: "autofixed" },
+    ] }), "utf8");
+    env.REVISOR_CONFIDENTIAL_TERMS_FILE = termsPath;
     const runner = createPrReviewRunner({
       cwd: fixture.repoPath,
       env,
@@ -239,6 +251,8 @@ test("rechecks the front gate after registered-test autofix changes the diff", a
     assert.equal(result.conclusion, "action_required");
     assert.ok(result.reasons.some((reason) => reason.includes("autofix dependency violation")));
     assert.equal(result.contextSource, "anatomia-review-gate-after-test-autofix");
+    assert.ok(result.advisories.some((advisory) => advisory.includes("1 箇所 / 1 ファイル")));
+    assert.equal(JSON.stringify(result.advisories).includes("autofixed"), false);
   } finally {
     removeFixture(fixture.directory);
   }

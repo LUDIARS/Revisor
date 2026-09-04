@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { classifyChange } from "../src/change-classification.mjs";
 import {
   runPartialVerification,
@@ -231,6 +234,8 @@ function verificationFixture({
   analyze,
   settings,
   runSecurity,
+  env = {},
+  readProfile,
   reusedStages = [],
 }) {
   const testCases = [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }];
@@ -261,7 +266,7 @@ function verificationFixture({
     settings: settings ?? { costValidationModeEnabled: false },
     worktrees: { head: "head-worktree", base: "base-worktree", mergeBase: "merge-base" },
     anatomiaCliPath: null,
-    env: {},
+    env,
     runSecurity: runSecurity ?? (async () => ({ status: "passed", totalFindings: 0 })),
     complexityDropThreshold: 10,
     analyze: analyze ?? (async () => passingAnalysis(90)),
@@ -270,7 +275,7 @@ function verificationFixture({
     repoPath: "repo",
     autofixTests,
     commitAutofix,
-    readProfile: async () => ({ classification, unifiedDiff: "+ fixed" }),
+    readProfile: readProfile ?? (async () => ({ classification, unifiedDiff: "+ fixed" })),
     resolveCli: async () => "anatomia-cli",
   });
 }
@@ -357,4 +362,34 @@ test("a repaired head re-runs the security scan instead of reusing the previous 
   });
   assert.deepEqual(scanned, ["security"], "the autofixed code is scanned, not the pre-fix code");
   assert.deepEqual(result.reasons, []);
+});
+
+test("a repaired head scans its final diff with the injected confidential-term configuration", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "terms-"));
+  try {
+    const termsPath = join(dir, "terms.json");
+    writeFileSync(termsPath, JSON.stringify({ keywords: [
+      { id: "product-001", value: "SecretTitle" },
+    ] }));
+    const classification = classifyChange({
+      changedPaths: ["server/src/index.ts"],
+      unifiedDiff: "+SecretTitle",
+    });
+    const result = await verificationFixture({
+      ci: [{ name: "unit", status: "failed" }],
+      env: { REVISOR_CONFIDENTIAL_TERMS_FILE: termsPath },
+      autofixTests: async () => ({
+        ci: [{ name: "unit", status: "passed" }],
+        status: "passed",
+        reviewer: "codex-sol",
+      }),
+      commitAutofix: async () => "c".repeat(40),
+      readProfile: async () => ({
+        classification,
+        unifiedDiff: "+++ b/server/src/index.ts\n@@ -0,0 +1 @@\n+SecretTitle\n",
+      }),
+    });
+    assert.ok(result.advisories.some((advisory) => advisory.includes("1 箇所 / 1 ファイル")));
+    assert.equal(JSON.stringify(result.advisories).includes("SecretTitle"), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -16,7 +16,7 @@ related:
   - ../architecture.md
   - ./review-plan.md
   - ./merge-risk.md
-updated: 2026-08-04
+updated: 2026-09-04
 ---
 
 # review-gate — マージ可否判定ポリシー
@@ -54,6 +54,30 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 - レビュー計画が担当外とした登録テスト (`status: "skipped"`)
 - 決定的ルールが `anatomia_code_analysis` を落としたときの全ゲート・全違反
 - 設定無効 (`disabled by settings`) 以外の理由でスキップされたセキュリティスキャン
+- `REVISOR_CONFIDENTIAL_TERMS_FILE` で設定された公開不可語が追加差分に現れた所見
+
+## SPEC-CONFIDENTIAL-TERM-ADVISORY: 公開不可語の追加差分検査
+
+資格情報の定型パターンでは検出できない未公開プロダクト名・顧客名・組織名を、
+`src/confidential-terms.mjs` が追加差分の本文とファイルパスから大文字小文字を区別せず検出する。
+語そのものはリポジトリへ置かず、`REVISOR_CONFIDENTIAL_TERMS_FILE` が示す外部 JSON の
+`keywords` 配列から読む。未設定時はこの任意検査だけを省略する。
+設定時は絶対ローカルパスと1件以上の有効語を必須とし、相対パスと UNC パスは拒否する。
+
+結果は既定では advisory とする。既存の識別子・API パスに該当語が使われている
+リポジトリを直ちに全面停止させず、許可整理後に enforced 化できるようにするためである。
+永続化され得る情報は安全な term id、パス、行番号に限定し、一致本文は保持しない。
+パス自体が一致した場合はパスを不透明な連番へ置換する。term id は短い ASCII 識別子だけを
+受理し、いずれかの登録語を含む id、重複 id、制御文字を含む id は連番 id に置換する。
+設定ファイルの読込・JSON parse エラーにも設定パス、OS エラー、入力断片を含めない。
+パス検査には NUL 区切りの raw changed-path 一覧も使い、本文差分に `+++` header が無い
+binary file や Git が C-quote した非 ASCII パスも見落とさない。本文側のパスを解釈できない
+場合も検査自体は継続し、所見のパスだけを固定の不透明ラベルへ置換する。
+
+提出後に test autofix またはレビュアーが変更した場合、advisory は提出時差分ではなく
+コミット対象の最終差分から作る。これにより自動修正が持ち込んだ公開不可語も検出する。
+登録テストは本文一致、パス一致時の秘匿、削除・文脈行の除外、大文字小文字、id の無害化、
+設定エラーの非漏洩を検証する。
 
 ## レビュー計画による降格 (neco 決定 2026-07-30)
 
