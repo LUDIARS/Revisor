@@ -19,8 +19,8 @@ import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 import { startRuntimeDiagnostics } from "./runtime-diagnostics.mjs";
 import { serviceLog } from "./service-log.mjs";
 
-function printHelp() {
-  process.stdout.write([
+function printHelp(stdout) {
+  stdout.write([
     "Usage:",
     "  revisor pr submit --repository <owner/name> --head-ref <branch> --title <text> [--body-file <path>] [--fast-lane]",
     "  revisor pr submit --json-file <path>   # same body the HTTP API accepts",
@@ -85,17 +85,22 @@ async function readStdin(stream = process.stdin) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export async function main(args, { stdin = process.stdin } = {}) {
+/**
+ * `stdout` は差し替えられる。 テストが `process.stdout.write` を直接奪うと、
+ * node:test 自身がレポータ用に書く V8 直列化フレームまで一緒に拾ってしまい、
+ * 出力比較が実行順に依存して落ちる (test:enqueue のバイト列が混ざる実害があった)。
+ */
+export async function main(args, { stdin = process.stdin, stdout = process.stdout } = {}) {
   if (args.length === 0 || args[0] === "help" || args[0] === "--help") {
-    printHelp();
+    printHelp(stdout);
     return 0;
   }
   // 審査キューは記録なので、投入も参照もマージも常駐プロセス無しで完結する。
-  const handled = await runLocalPrCommand(args, { stdin });
+  const handled = await runLocalPrCommand(args, { stdin, stdout });
   if (handled !== null) return handled;
   if (args[0] === "run-worker" && args.length === 1) {
     const outcome = await runReviewWorker();
-    process.stdout.write(
+    stdout.write(
       outcome.skipped
         ? "Revisor worker: another worker is already draining the queue.\n"
         : `Revisor worker: ${outcome.ran} review(s) completed.\n`,
@@ -103,15 +108,15 @@ export async function main(args, { stdin = process.stdin } = {}) {
     return 0;
   }
   if (args[0] === "config" && args[1] === "path" && args.length === 2) {
-    process.stdout.write(`${resolveConfigPath(process.env)}\n`);
+    stdout.write(`${resolveConfigPath(process.env)}\n`);
     return 0;
   }
   if (args[0] === "config" && args[1] === "github-app" && args[2] === "status") {
-    process.stdout.write(hasGitHubAppCredentials(process.env) ? "configured\n" : "not configured\n");
+    stdout.write(hasGitHubAppCredentials(process.env) ? "configured\n" : "not configured\n");
     return 0;
   }
   if (args[0] === "config" && args[1] === "discord-webhook" && args[2] === "status") {
-    process.stdout.write(hasDiscordWebhookUrl(process.env) ? "configured\n" : "not configured\n");
+    stdout.write(hasDiscordWebhookUrl(process.env) ? "configured\n" : "not configured\n");
     return 0;
   }
   if (args[0] === "config" && args[1] === "discord-webhook" && args[2] === "set") {
@@ -119,7 +124,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
       throw new Error("discord-webhook set requires --stdin.");
     }
     writeDiscordWebhookUrl(await readStdin(stdin), process.env);
-    process.stdout.write("Discord webhook URL saved.\n");
+    stdout.write("Discord webhook URL saved.\n");
     return 0;
   }
   if (
@@ -129,7 +134,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
     && args.length === 3
   ) {
     removeDiscordWebhookUrl(process.env);
-    process.stdout.write("Discord webhook URL removed.\n");
+    stdout.write("Discord webhook URL removed.\n");
     return 0;
   }
   if (args[0] === "config" && args[1] === "github-app" && args[2] === "set") {
@@ -138,7 +143,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
       throw new Error("github-app set requires --app-id and --private-key-stdin.");
     }
     writeGitHubAppCredentials({ appId, privateKey: await readStdin(stdin) }, process.env);
-    process.stdout.write("GitHub App credentials saved.\n");
+    stdout.write("GitHub App credentials saved.\n");
     return 0;
   }
   if (
@@ -148,12 +153,12 @@ export async function main(args, { stdin = process.stdin } = {}) {
     && args.length === 3
   ) {
     removeGitHubAppCredentials(process.env);
-    process.stdout.write("GitHub App credentials removed.\n");
+    stdout.write("GitHub App credentials removed.\n");
     return 0;
   }
   if (args[0] === "version" && args[1] === "show") {
     const repoPath = option(args, "--repo") ?? process.cwd();
-    process.stdout.write(`${await readLocalVersion(repoPath, { allowUninitialized: true })}\n`);
+    stdout.write(`${await readLocalVersion(repoPath, { allowUninitialized: true })}\n`);
     return 0;
   }
   if (args[0] === "version" && args[1] === "set") {
@@ -162,7 +167,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
       throw new Error("version set requires MAJOR.MINOR.PATCH.");
     }
     const version = await writeLocalVersion(repoPath, args[2]);
-    process.stdout.write(`${version}\n`);
+    stdout.write(`${version}\n`);
     return 0;
   }
   if (args[0] === "push") {
@@ -173,7 +178,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
       forceWithLease: args.includes("--force-with-lease"),
       actor: option(args, "--actor"),
     });
-    process.stdout.write(
+    stdout.write(
       `Pushed ${result.repository} ${result.branch} -> ${result.remoteBranch} `
       + `(${result.headSha.slice(0, 12)}).\n`,
     );
@@ -239,7 +244,7 @@ export async function main(args, { stdin = process.stdin } = {}) {
     throw error;
   }
   registerShutdown(service.close);
-  process.stdout.write(`Revisor: ${service.url}\n`);
+  stdout.write(`Revisor: ${service.url}\n`);
   return 0;
 }
 

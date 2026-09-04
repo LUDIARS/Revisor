@@ -18,31 +18,32 @@ function fixture() {
   };
 }
 
+// process.stdout を直接奪ってはいけない。 node:test は同じ stream にレポータの
+// V8 直列化フレームを書くので、 実行順によっては `test:enqueue` のバイト列が出力比較に
+// 混ざって落ちる (実際にそれで赤くなっていた)。 sink を渡して受け取る。
 test("configures, reports, and removes a Discord webhook from stdin", async () => {
   const state = fixture();
   const originalEnv = process.env;
-  const originalWrite = process.stdout.write;
   let output = "";
+  const stdout = { write: (chunk) => { output += chunk; return true; } };
   try {
     process.env = state.env;
-    process.stdout.write = (chunk) => {
-      output += chunk;
-      return true;
-    };
 
     assert.equal(await main(
       ["config", "discord-webhook", "set", "--stdin"],
-      { stdin: Readable.from([Buffer.from("https://discord.com/api/webhooks/123/abc\n")]) },
+      {
+        stdin: Readable.from([Buffer.from("https://discord.com/api/webhooks/123/abc\n")]),
+        stdout,
+      },
     ), 0);
-    assert.equal(await main(["config", "discord-webhook", "status"]), 0);
-    assert.equal(await main(["config", "discord-webhook", "remove"]), 0);
-    assert.equal(await main(["config", "discord-webhook", "status"]), 0);
+    assert.equal(await main(["config", "discord-webhook", "status"], { stdout }), 0);
+    assert.equal(await main(["config", "discord-webhook", "remove"], { stdout }), 0);
+    assert.equal(await main(["config", "discord-webhook", "status"], { stdout }), 0);
     assert.equal(
       output,
       "Discord webhook URL saved.\nconfigured\nDiscord webhook URL removed.\nnot configured\n",
     );
   } finally {
-    process.stdout.write = originalWrite;
     process.env = originalEnv;
     removeFixture(state.directory);
   }
