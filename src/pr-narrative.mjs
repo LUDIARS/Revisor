@@ -113,7 +113,13 @@ export function applyNarrativeToBody(body, { explanation, previousTitle }) {
   const range = findExplanationSection(lines);
   if (range) {
     const [start, end] = range;
-    return [...lines.slice(0, start), ...section.split("\n"), ...lines.slice(end)].join("\n");
+    // 解説の範囲は次の見出しの直前まで伸びており、そこには見出しを見出しとして
+    // 成立させている空行が入っている。 範囲ごと差し替えるとその空行まで持って
+    // いかれ、次の見出しが解説の最終行にくっつく (Markdown では見出しでなくなる)。
+    // 本文へ解説を書き込むたびに後続の見出しが 1 つずつ壊れていた。
+    let keepFrom = end;
+    while (keepFrom > start + 1 && lines[keepFrom - 1].trim() === "") keepFrom -= 1;
+    return [...lines.slice(0, start), ...section.split("\n"), ...lines.slice(keepFrom)].join("\n");
   }
   return source ? `${source.trimEnd()}\n\n${section}` : section;
 }
