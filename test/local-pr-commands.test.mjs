@@ -2,6 +2,74 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runLocalPrCommand } from "../src/local-pr-commands.mjs";
 
+test("repo divergence hides healthy rows but keeps failures that need attention", async () => {
+  const writes = [];
+  const repositories = [
+    { repository: "LUDIARS/Behind", rootPath: "/behind", baseRef: "main" },
+    { repository: "LUDIARS/Ahead", rootPath: "/ahead", baseRef: "develop" },
+    { repository: "LUDIARS/Broken", rootPath: "/broken", baseRef: "main" },
+  ];
+  const byRoot = {
+    "/behind": { state: "behind", ahead: 0, behind: 2, changedFiles: 1, detail: "behind" },
+    "/ahead": { state: "ahead", ahead: 1, behind: 0, changedFiles: 1, detail: "ahead" },
+    "/broken": { state: "unknown", ahead: 0, behind: 0, changedFiles: null, detail: "unknown" },
+  };
+  const inspected = [];
+
+  const code = await runLocalPrCommand(["repo", "divergence", "--json"], {
+    stdout: { write(value) { writes.push(value); } },
+    createContext: () => ({
+      store: { listRepositories: () => repositories },
+      jobs: {},
+      localPrService: {},
+    }),
+    async inspectDivergence(input) {
+      inspected.push(input);
+      return byRoot[input.rootPath];
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.deepEqual(inspected, [
+    { rootPath: "/behind", baseRef: "main" },
+    { rootPath: "/ahead", baseRef: "develop" },
+    { rootPath: "/broken", baseRef: "main" },
+  ]);
+  assert.deepEqual(JSON.parse(writes.join("")).map((row) => row.repository), [
+    "LUDIARS/Behind",
+    "LUDIARS/Broken",
+  ]);
+});
+
+test("repo divergence applies repository filtering before inspection and --all keeps healthy rows", async () => {
+  const writes = [];
+  const inspected = [];
+  const code = await runLocalPrCommand(
+    ["repo", "divergence", "--repository", "LUDIARS/Ahead", "--all", "--json"],
+    {
+      stdout: { write(value) { writes.push(value); } },
+      createContext: () => ({
+        store: {
+          listRepositories: () => [
+            { repository: "LUDIARS/Behind", rootPath: "/behind", baseRef: "main" },
+            { repository: "LUDIARS/Ahead", rootPath: "/ahead", baseRef: "develop" },
+          ],
+        },
+        jobs: {},
+        localPrService: {},
+      }),
+      async inspectDivergence(input) {
+        inspected.push(input);
+        return { state: "ahead", ahead: 1, behind: 0, changedFiles: 1, detail: "ahead" };
+      },
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.deepEqual(inspected, [{ rootPath: "/ahead", baseRef: "develop" }]);
+  assert.deepEqual(JSON.parse(writes.join("")).map((row) => row.repository), ["LUDIARS/Ahead"]);
+});
+
 test("lists only recorded checkout sync failures and supports repository filtering", async () => {
   const writes = [];
   const pullRequests = [

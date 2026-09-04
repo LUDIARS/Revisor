@@ -1,6 +1,6 @@
 {
   "name": "local-workspace",
-  "description": "ローカル repository 上の Revisor-owned merge repository、使い捨て detached worktree、local ref を所有する境界。登録 source だけを信頼する clone/fetch、ref / SHA 検証、固定 SHA の worktree 生成、tracked change だけを見る清潔さ判定、差分内容の指紋、compare-and-swap による branch 前進、マージ後の登録 checkout 同期検証、および best-effort cleanup を含む。push、審査、merge 可否判定は持たない。",
+  "description": "ローカル repository 上の Revisor-owned merge repository、使い捨て detached worktree、local ref を所有する境界。登録 source だけを信頼する clone/fetch、ref / SHA 検証、固定 SHA の worktree 生成、tracked change だけを見る清潔さ判定、差分内容の指紋、compare-and-swap による branch 前進、登録 checkout の同期検証と base 乖離診断、および best-effort cleanup を含む。push、審査、merge 可否判定は持たない。",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -26,13 +26,19 @@
       "pathPattern": "(^|/)test/workspace\\.test\\.mjs$"
     },
     {
+      "pathPattern": "(^|/)src/base-divergence\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/base-divergence\\.test\\.mjs$"
+    },
+    {
       "pathPattern": "(^|/)src/scratch-space\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/scratch-space\\.test\\.mjs$"
     }
   ],
-  "cardTemplate": "Summarise the \"local-workspace\" domain: 登録 source からの隔離 merge repository、local ref / SHA の安全性検証、固定 SHA の使い捨て detached worktree、差分内容の指紋、compare-and-swap の branch 前進、マージ後の checkout 同期検証、best-effort cleanup。",
+  "cardTemplate": "Summarise the \"local-workspace\" domain: 登録 source からの隔離 merge repository、local ref / SHA の安全性検証、固定 SHA の使い捨て detached worktree、差分内容の指紋、compare-and-swap の branch 前進、checkout 同期検証と base 乖離診断、best-effort cleanup。",
   "mechanics": [
     "disposable-worktree-lifecycle",
     "scratch-space-placement",
@@ -42,6 +48,7 @@
     "diff-content-fingerprint",
     "compare-and-swap-branch-advance",
     "post-merge-checkout-verification",
+    "base-divergence-diagnostic",
     "best-effort-cleanup"
   ],
   "specRefs": [
@@ -52,6 +59,7 @@
     "local-workspace — cleanup の best-effort 範囲",
     "local-workspace — worktree の清潔さと branch 前進",
     "checkout-publication — 結果の記録",
+    "local-workspace — 登録 checkout の base 乖離診断",
     "local-workspace — 登録 checkout と merge repository の分離"
   ],
   "rationale": "永続 merge repository と使い捨て worktree の生成・破棄は、審査可否 (review-gate) や汎用 process 起動 (runtime-execution) とは別の repository resource lifecycle 責務。local transport が開く登録 source の選定はこの境界が所有し、その protected config 配送は managed-git-runtime へ委譲する。cleanup の失敗許容度をここに閉じ、OS 由来の一時的 I/O 失敗を判定 domain へ波及させない。"

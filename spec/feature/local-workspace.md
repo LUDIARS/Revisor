@@ -1,7 +1,7 @@
 ---
 type: feature
 title: "local-workspace — 使い捨て worktree とローカル ref の境界"
-description: "review 元と Revisor 所有 merge repository の上で使い捨て detached worktree を作り、使い終えたら外す境界。ref / SHA 文字列の安全性検証、LFS フィルタ境界、差分内容の指紋、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。"
+description: "review 元と Revisor 所有 merge repository の上で使い捨て detached worktree を作り、使い終えたら外す境界。ref / SHA 文字列の安全性検証、登録 checkout の base 乖離診断、LFS フィルタ境界、差分内容の指紋、compare-and-swap による branch 前進、cleanup の best-effort 範囲を所有する。"
 service: revisor
 domain: local-workspace
 tags:
@@ -16,7 +16,7 @@ related:
   - ./merge-risk.md
   - ../architecture.md
   - ../plan/problem_logs/2026-08-09-merge-repository-source-ownership.md
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 # local-workspace — 使い捨て worktree とローカル ref の境界
@@ -30,6 +30,7 @@ state data 配下の独立 repository を merge 境界として用意する。
 - 固定 SHA を detached で checkout した使い捨て worktree を temp dir 配下に作る
 - worktree が tracked change を抱えていないかを判定する
 - 2 つのコミットの差分内容が同一かを判定できる指紋を返す
+- 登録 checkout の base とローカルの `origin/<base>` 追跡 ref の乖離を読み取る
 - 期待 SHA との compare-and-swap でローカル branch を fast-forward する
 - 使い終えた worktree と temp dir を外す
 
@@ -165,3 +166,19 @@ database を開く。sandbox account が作った source を service account が
 検証済みの source 絶対 path と Git がそこから解決した absolute git directory だけを
 command-scoped `safe.directory` として clone / fetch に渡す。linked worktree の git directory も
 推測で組み立てない。`safe.directory=*` と global Git config の変更は行わない。
+
+## 登録 checkout の base 乖離診断
+
+`revisor repo divergence` は各登録 checkout の `refs/heads/<baseRef>` と、最後に fetch された
+`refs/remotes/origin/<baseRef>` の commit graph を読み、`in_sync` / `ahead` / `behind` /
+`diverged` / `no_remote_ref` / `unknown` を返す。この照会は fetch や ref 更新を行わないため、
+GitHub の現在値ではなく手元の追跡 ref との比較である。
+
+既定表示は、古い base で審査する `behind` / `diverged` と、判定自体に失敗した `unknown` を
+対象にする。`--all` は正常系を含む全登録を表示する。追跡 ref の不在は Git が返す「ref なし」
+の status だけで判定し、repository の破損・権限不足・Git の起動失敗を `no_remote_ref` に
+読み替えない。診断エラーの stderr は資格情報、private endpoint、ローカル絶対 path を含みうる
+ため CLI / JSON へ出さない。ref は既存の安全性検証を通し、revision range には完全 ref 名を使う。
+
+検証では各 graph 状態、追跡 ref 不在と実行失敗の区別、不正な count の拒否、`--all` と既定の
+表示範囲、およびファイル名に改行がある場合の内容差件数を自動テストする。

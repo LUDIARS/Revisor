@@ -38,6 +38,7 @@ function printHelp(stdout) {
     "  revisor pr bypass-reviewed <number> [--note <text>]",
     "  revisor repo register --json-file <path>",
     "  revisor repo list [--json]",
+    "  revisor repo divergence [--repository <owner/name>] [--all] [--json]  # compare base with origin",
     "  revisor repo set-workflow <owner/name> <revisor|github>  # publish via GitHub App, or plain push",
     "  revisor queue status [--json]",
     "  revisor sweep [--json]        # auto-merge the Test OK PRs that became mergeable",

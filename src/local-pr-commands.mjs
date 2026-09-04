@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { inspectBaseDivergence, needsAttention } from "./base-divergence.mjs";
 import {
   validateFastLanePromotion,
   validatePullRequestSubmission,
@@ -24,6 +25,7 @@ const LOCAL_COMMANDS = new Set([
   "pr:bypass-reviewed",
   "repo:register",
   "repo:list",
+  "repo:divergence",
   "repo:set-workflow",
   "queue:status",
   "sweep",
@@ -98,6 +100,7 @@ export async function runLocalPrCommand(args, {
   stdin = process.stdin,
   stdout = process.stdout,
   createContext = createReviewContext,
+  inspectDivergence = inspectBaseDivergence,
 } = {}) {
   const [scope, action, ...rest] = args;
   const json = args.includes("--json");
@@ -244,6 +247,30 @@ export async function runLocalPrCommand(args, {
       : repositories.map((entry) =>
         `${entry.repository}  ${resolveRepositoryWorkflow(entry, env)}  ${entry.rootPath}`)
         .join("\n"));
+    return 0;
+  }
+  // 審査は base の内容で判定するので、 登録 checkout が古いと「ドメインが無い」等の
+  // 別の顔で PR が止まる。 止まってから辿るのをやめるため、 先に見えるようにする。
+  if (scope === "repo" && action === "divergence") {
+    const repository = option(args, "--repository");
+    const targets = store.listRepositories()
+      .filter((entry) => !repository || entry.repository === repository);
+    const rows = [];
+    for (const entry of targets) {
+      const result = await inspectDivergence({
+        rootPath: entry.rootPath,
+        baseRef: entry.baseRef ?? "main",
+      });
+      rows[rows.length] = { repository: entry.repository, baseRef: entry.baseRef ?? "main", ...result };
+    }
+    // 既定は修正または確認が必要なものだけ。 --all で全件。
+    const shown = args.includes("--all") ? rows : rows.filter((row) => needsAttention(row.state));
+    write(json
+      ? shown
+      : shown.map((row) =>
+        `${row.repository.padEnd(28)} ${row.state.padEnd(14)} 先行 ${String(row.ahead).padStart(3)} / 遅れ ${String(row.behind).padStart(3)}` +
+        `${row.changedFiles === null ? "" : ` / 内容差 ${row.changedFiles}`}  ${row.detail}`)
+        .join("\n") || "(no repository needs its base advanced)");
     return 0;
   }
   // 属性 1 つの変更。 登録本文を作り直させないために専用コマンドにしてある。
