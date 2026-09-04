@@ -2048,7 +2048,7 @@ test("a forced manual retry settles the stalled review job and re-queues it", as
       async submit(request, options) {
         submissions += 1;
         if (submissions === 2) {
-          ownershipRevokedBeforeRetry = store.getPullRequest(pullRequest.id).jobId === null;
+          ownershipRevokedBeforeRetry = store.getPullRequest(request.localPrId).jobId === null;
         }
         const { job, created } = await jobs.enqueue(request, options);
         if (created || job.status === "queued") {

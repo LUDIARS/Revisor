@@ -199,6 +199,7 @@ test("persists only the safe Anatomia gate projection", async () => {
         status: "blocked",
         message: "Anatomia review gate found 1 blocking reason(s).",
         reasons: ["Anatomia changed violation: forbidden dependency"],
+        advisories: ["Anatomia spec linkage is incomplete"],
         cliPath: "LOCAL_CLI_PATH_SHOULD_NOT_PERSIST",
         analysis: { proprietaryArtifact: "internal-module-map" },
       },
@@ -209,6 +210,10 @@ test("persists only the safe Anatomia gate projection", async () => {
     status: "blocked",
     message: "Anatomia review gate found 1 blocking reason(s).",
     reasons: ["Anatomia changed violation: forbidden dependency"],
+    // ブロックしない所見 (二層ドメインゲートの advisory 等) も判定の一部として残す。
+    // anatomia-review-gate.mjs が「永続化されたゲート判定が前段ゲートの見たものを
+    // 示すよう」同梱している値なので、伏せるのは cliPath と生の analysis だけ。
+    advisories: ["Anatomia spec linkage is incomplete"],
   });
   assert.doesNotMatch(
     JSON.stringify(record.anatomiaGate),
