@@ -167,10 +167,10 @@ async function hasStagedChanges(worktreePath) {
   return Boolean((await git(worktreePath, ["diff", "--cached", "--name-only"])).trim());
 }
 
-// An empty re-landing is safe only when the reviewed patch is already on the
-// base. A head may also become empty because somebody reset it and discarded
-// the reviewed work; `git cherry` distinguishes the equivalent-patch case
-// without trusting the branch pointer alone.
+// The current head can re-land empty even when `git cherry` cannot find every
+// reviewed patch on the base. The base may carry the same net effect through a
+// regenerated artifact or squash, but the current head may also have discarded
+// reviewed work. Keep the refusal, and describe only what each check established.
 async function assertReviewedContentAlreadyLanded(rootPath, reviewedHeadSha, baseSha) {
   try {
     assertSafeSha(reviewedHeadSha, "reviewed head sha");
@@ -184,7 +184,11 @@ async function assertReviewedContentAlreadyLanded(rootPath, reviewedHeadSha, bas
     );
   }
   throw new StaleReviewError(
-    "The reviewed content is not present on the current base; a new review is required.",
+    "Re-landing the current head on the current base produces no change, "
+    + "but git cherry does not find every reviewed patch on the base. The base may already "
+    + "carry the same effect by another route (a regenerated lockfile, a squash), or the "
+    + "current head may have discarded reviewed work. Compare the reviewed head with the "
+    + "current base before re-submitting.",
     { headSha: reviewedHeadSha },
   );
 }

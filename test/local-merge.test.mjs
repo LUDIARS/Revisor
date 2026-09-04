@@ -174,7 +174,7 @@ test("treats a rebased branch with no remaining diff as a logical merge", async 
   }
 });
 
-test("refuses an empty re-landing when the reviewed patch was discarded", async () => {
+test("explains an empty re-landing without assuming the reviewed patch was discarded", async () => {
   const fixture = repositoryFixture();
   try {
     const input = mergeInput(fixture);
@@ -182,7 +182,14 @@ test("refuses an empty re-landing when the reviewed patch was discarded", async 
 
     await assert.rejects(
       squashMergeLocalPullRequest({ ...input, log: () => {} }),
-      StaleReviewError,
+      (error) => {
+        assert.ok(error instanceof StaleReviewError);
+        assert.match(error.message, /current head .* produces no change/);
+        assert.match(error.message, /does not find every reviewed patch/);
+        assert.match(error.message, /Compare the reviewed head with the current base/);
+        assert.doesNotMatch(error.message, /content is not present on the current base/);
+        return true;
+      },
     );
     assert.equal(
       git(fixture.repoPath, "rev-parse", "refs/heads/main"),
