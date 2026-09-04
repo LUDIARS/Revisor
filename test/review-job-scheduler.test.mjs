@@ -64,8 +64,11 @@ test("a fast job arriving during standard work enters the reserved orchestration
 
 // 旧 in-process キューが持っていた同時実行の上限は、いまは drain 側の責務になっている。
 test("never runs more reviews at once than the configured concurrency", async () => {
-  const queued = ["job-1", "job-2", "job-3"].map((id) =>
-    ({ id, status: "queued", reviewLane: "standard" }));
+  const queued = [
+    { id: "fast-1", status: "queued", reviewLane: "fast" },
+    ...["job-1", "job-2", "job-3"].map((id) =>
+      ({ id, status: "queued", reviewLane: "standard" })),
+  ];
   let running = 0;
   let maximum = 0;
   const releases = [];
@@ -81,8 +84,8 @@ test("never runs more reviews at once than the configured concurrency", async ()
   };
   const draining = drainReviewJobs({
     jobs,
-    concurrency: 2,
-    reservation: 0,
+    concurrency: 3,
+    reservation: 1,
     queueCheckIntervalMs: 1,
     run: async () => {
       running += 1;
@@ -91,12 +94,12 @@ test("never runs more reviews at once than the configured concurrency", async ()
       running -= 1;
     },
   });
-  while (releases.length < 2) await new Promise((resolve) => setTimeout(resolve, 1));
-  assert.equal(maximum, 2);
-  assert.equal(queued.length, 1, "the third job waits for a free slot");
+  while (releases.length < 3) await new Promise((resolve) => setTimeout(resolve, 1));
+  assert.equal(maximum, 3);
+  assert.equal(queued.length, 1, "the fourth job waits for a free slot");
   releases.splice(0).forEach((release) => release());
   while (releases.length < 1) await new Promise((resolve) => setTimeout(resolve, 1));
   releases.splice(0).forEach((release) => release());
-  assert.deepEqual(await draining, { ran: 3 });
-  assert.equal(maximum, 2);
+  assert.deepEqual(await draining, { ran: 4 });
+  assert.equal(maximum, 3);
 });
