@@ -24,10 +24,10 @@ test("runs exactly the requested review stage", async () => {
   for (const [stage, result, executor] of cases) {
     const options = { stage };
     assert.equal(await runReviewWork({ stage, options }, executors), result);
-    // レビューステージだけは強制モデルの解決結果を足して渡す。
+    // レビューステージだけは強制モデルと強制 effort の解決結果を足して渡す。
     // 他のステージは options をそのまま素通しする。
     const expected = stage === REVIEW_WORK_STAGES.REVIEW
-      ? { forcedModel: "", ...options }
+      ? { forcedModel: "", forcedEffort: "", ...options }
       : options;
     assert.deepEqual(invoked.pop(), [executor, expected]);
   }

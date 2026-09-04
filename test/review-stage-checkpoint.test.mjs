@@ -223,15 +223,7 @@ test("verification reruns a stage that has not passed for this head", async () =
       reusedStages: scope.reusedStages,
       previousReview: store.record,
     },
-    submitted: {
-      unifiedDiff: "diff --git a/product.mjs b/product.mjs\n+export const version = 1;\n",
-      classification: {
-        docsOnly: false,
-        docsOrConfigOnly: false,
-        codeDomainRequired: true,
-        changeKinds: ["code"],
-      },
-    },
+    submitted: submittedChange(),
     settings: {},
     worktrees: { head: "unused", base: "unused", mergeBase: "unused" },
     anatomiaCliPath: null,
