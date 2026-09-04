@@ -52,6 +52,10 @@ import {
   prepareLocalWorktrees,
 } from "./workspace.mjs";
 import { REVIEW_WORK_STAGES } from "./review-work.mjs";
+import {
+  reviewedHeadShaOf,
+  securityStageCompleted,
+} from "./review-stage-progress.mjs";
 import { withWorktreeMutationLock } from "./worktree-mutation-lock.mjs";
 
 async function commitAndAdvanceAutofix(cwd, repoPath, request) {
@@ -412,6 +416,9 @@ export async function runPartialVerification({
   complexityDropThreshold,
   analyze = analyzePr,
   runTests = runPlannedTests,
+  // 再検証も途中で落ちる。 やり直した段階が通ったらその場で記録し、次の再投入では
+  // それも飛ばせるようにする。
+  checkpoint = () => Promise.resolve(),
   // テスト autofix に要る依存。 runReview が無ければ autofix は走らず従来どおり人間待ちになる。
   runReview = null,
   reviewerTimeoutMs,
@@ -425,10 +432,14 @@ export async function runPartialVerification({
   const targets = new Set(request.verificationTargets ?? []);
   // 載せ替えで SHA だけ変わったヘッドも同一内容として扱う。 判定は提出側が patch-id で
   // 行い、 request で渡ってくる (`local-pr-service.mjs`)。
+  const previousReviewedHead = reviewedHeadShaOf(previous);
   const sameReviewedHead = request.reviewedContentUnchanged === true || (
-    typeof previous.reviewedHeadSha === "string"
-    && previous.reviewedHeadSha.toLowerCase() === request.headSha.toLowerCase()
+    typeof previousReviewedHead === "string"
+    && previousReviewedHead.toLowerCase() === request.headSha.toLowerCase()
   );
+  // 再検証に入れたのは、モデルレビューを通過済みとして引き継いだから
+  // (`retryReviewScope`)。 その前提をそのまま結果へ持ち越す。
+  const reusedStages = Array.isArray(request.reusedStages) ? request.reusedStages : [];
   let analysis = targets.has("anatomia") ? null : previousAnalysis(previous);
   if (!targets.has("anatomia") && !analysis) {
     throw new Error("Partial verification requires the previous Anatomia result.");
@@ -515,6 +526,7 @@ export async function runPartialVerification({
     analysis = null;
   }
   if (autofixApplied) targets.add("security");
+  if (targets.has("tests") && testsPassed(ci)) await checkpoint("tests", { ci });
   let baselineComplexity = typeof previous.anatomia?.baselineComplexityScore === "number"
     ? {
         score: previous.anatomia.baselineComplexityScore,
@@ -542,6 +554,12 @@ export async function runPartialVerification({
     ]);
     analysis = currentAnalysis;
     baselineComplexity = baseline?.quality?.complexity ?? null;
+    await checkpoint("anatomia", {
+      analysis,
+      baselineComplexityScore: baselineComplexity?.score ?? null,
+      baselineComplexityFunctionCount: baselineComplexity?.functions ?? null,
+      analysisSource: "anatomia-cli",
+    });
   }
   if (!analysis) throw new Error("Partial verification requires an Anatomia result.");
   const security = targets.has("security")
@@ -554,6 +572,10 @@ export async function runPartialVerification({
         plan,
       })
     : previous.security;
+  if (targets.has("security") && securityStageCompleted(security)) {
+    await checkpoint("security", { security });
+  }
+  const actuallyReusedStages = reusedStages.filter((stage) => !targets.has(stage));
   const result = buildGateResult({
     request,
     firstAnalysis: null,
@@ -575,7 +597,8 @@ export async function runPartialVerification({
     plan,
     classification: submitted.classification,
     security,
-    intentReviewCompleted: previous.intentReviewCompleted === true,
+    intentReviewCompleted: actuallyReusedStages.includes("review")
+      || previous.intentReviewCompleted === true,
   });
   // autofix が入った head は審査時の内容と別物なので、 引き継ぎの前提が消える。
   const runtimeVerification = sameReviewedHead && !autofixApplied
@@ -597,6 +620,9 @@ export async function runPartialVerification({
     ...result,
     runtimeVerification,
     mergeRisk,
+    // 飛ばした段階を判定と一緒に残す。 黙って飛ばすと、通っていない段階が通ったように
+    // 見える事故になる。
+    reusedStages: actuallyReusedStages,
     humanQuestion: autofixFailed
       ? testAutofixHumanQuestion(autofixStatus)
       : needsTargetDomain(
@@ -609,21 +635,36 @@ export async function runPartialVerification({
 }
 
 /**
- * Records the intent-review checkpoint. A failure here must not fail the
- * review: the checkpoint only saves work on a later run, and losing it costs
- * one more model review. It is reported rather than swallowed so a permanently
+ * Records a review-stage checkpoint. A failure here must not fail the review:
+ * the checkpoint only saves work on a later run, and losing it costs one more
+ * run of that stage. It is reported rather than swallowed so a permanently
  * broken checkpoint does not stay invisible.
  */
-async function reportIntentReviewCompleted(report, checkpoint) {
+async function reportStageCompleted(report, checkpoint) {
   if (typeof report !== "function") return;
   try {
     await report(checkpoint);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     process.stderr.write(
-      `Revisor could not record the intent-review checkpoint for ${checkpoint.localPrId}: ${reason}\n`,
+      `Revisor could not record the '${checkpoint.stage}' review-stage checkpoint`
+      + ` for ${checkpoint.localPrId}: ${reason}\n`,
     );
   }
+}
+
+/**
+ * 段階チェックポイントの発行口。 request からの識別子を毎回書かずに済ませ、
+ * 「その段階を通したときの head SHA」を取り違えないよう 1 箇所に閉じる。
+ */
+function stageCheckpointReporter(report, request) {
+  return (stage, payload = {}) => reportStageCompleted(report, {
+    localPrId: request.localPrId,
+    jobId: request.jobId,
+    stage,
+    headSha: request.headSha,
+    ...payload,
+  });
 }
 
 export function createPrReviewRunner({
@@ -639,10 +680,10 @@ export function createPrReviewRunner({
   scheduleWork = null,
   mutateWorktrees = withWorktreeMutationLock,
   transport = fetch,
-  // Checkpoint for the one stage that cannot be repeated cheaply. Called the
-  // moment the intent review succeeds so that a crash later in the pipeline
-  // does not throw that work away (spec/feature/crash-recovery.md).
-  onIntentReviewCompleted = null,
+  // Checkpoint for each review stage. Called the moment a stage passes so that a
+  // crash later in the pipeline does not throw that work away; the requeued
+  // review then runs only what is left (spec/feature/crash-recovery.md).
+  onReviewStageCompleted = null,
   onNarrativeReconciled = null,
 } = {}) {
   return async (request) => {
@@ -652,6 +693,13 @@ export function createPrReviewRunner({
     const settings = readSettings(env);
     const workspaceRoot = resolveWorkspaceRoot(cwd);
     const repoPath = request.rootPath;
+    const reportStage = stageCheckpointReporter(onReviewStageCompleted, request);
+    // autofix が worktree を書き換えたら、そこから先の通過は request.headSha の
+    // 内容が通ったことにならない。 チェックポイントはヘッドと worktree が一致して
+    // いる間だけ書く — 通っていない内容が通ったように見える方が高くつく。
+    let worktreeMatchesHead = true;
+    const checkpoint = (stage, payload) =>
+      (worktreeMatchesHead ? reportStage(stage, payload) : Promise.resolve());
     const worktrees = await mutateWorktrees(
       repoPath,
       () => prepareLocalWorktrees(request, settings),
@@ -714,6 +762,7 @@ export function createPrReviewRunner({
           complexityDropThreshold,
           analyze: executeAnalysis,
           runTests: executeTests,
+          checkpoint,
           runReview: executeReview,
           reviewerTimeoutMs,
           repoPath,
@@ -825,6 +874,14 @@ export function createPrReviewRunner({
               initialAnalyze: executeInitialAnalysis,
             }),
       ]);
+      if (!anatomiaUnavailable) {
+        await checkpoint("anatomia", {
+          analysis: initial,
+          baselineComplexityScore: baseline ? baseline.quality.complexity.score : null,
+          baselineComplexityFunctionCount: baseline?.quality.complexity.functions ?? null,
+          analysisSource: "anatomia-cli",
+        });
+      }
       let reviewStrategy = selectReviewStrategy({
         classification: submitted.classification,
         unifiedDiff: submitted.unifiedDiff,
@@ -838,6 +895,7 @@ export function createPrReviewRunner({
         plan,
         env,
       });
+      if (testsPassed(initialCi)) await checkpoint("tests", { ci: initialCi });
       let initialSecurity = await reviewSecurityScan({
         runSecurity: executeSecurity,
         worktrees,
@@ -846,6 +904,9 @@ export function createPrReviewRunner({
         settings,
         plan,
       });
+      if (securityStageCompleted(initialSecurity)) {
+        await checkpoint("security", { security: initialSecurity });
+      }
       let gateInput = {
         request,
         firstAnalysis,
@@ -897,6 +958,9 @@ export function createPrReviewRunner({
             humanQuestion: "Registered tests must pass before validation can continue.",
           };
         }
+        // ここから worktree は request.headSha の内容ではなくなる。 以降の通過を
+        // このヘッドの通過として記録しない。
+        worktreeMatchesHead = false;
         const autofix = await autofixFailingTests({
           request,
           reviewer: externalReviewer,
@@ -1077,6 +1141,12 @@ export function createPrReviewRunner({
         codeDomainRequired,
         plan,
       });
+      // The judge may edit the review worktree. Only an unchanged worktree can
+      // prove that its completed review applies to request.headSha; if a crash
+      // loses uncommitted autofixes, the original head must be reviewed again.
+      const reviewInputFingerprint = worktreeMatchesHead
+        ? await worktreeChangeFingerprint(worktrees.head)
+        : null;
       const reviewResult = await reviewWithFallback({
         reviewer,
         cwd: worktrees.head,
@@ -1090,17 +1160,18 @@ export function createPrReviewRunner({
       if (!reviewResult.ok) {
         throw new Error("Opposite-model reviewer failed; output was withheld from the Check Run.");
       }
+      if (reviewInputFingerprint !== null) {
+        const reviewOutputFingerprint = await worktreeChangeFingerprint(worktrees.head);
+        worktreeMatchesHead = reviewInputFingerprint === reviewOutputFingerprint;
+      }
       // Persist the checkpoint before the remaining stages run. Everything after
       // this point is cheap to repeat; this is not. Recording it here is what
       // lets an interrupted review resume in verification mode instead of
       // paying for the model review again after every restart.
-      await reportIntentReviewCompleted(onIntentReviewCompleted, {
-        localPrId: request.localPrId,
-        jobId: request.jobId,
-        reviewedHeadSha: request.headSha,
-        reviewer,
-        plan,
-      });
+      await checkpoint("review", { reviewer, plan });
+      // レビュアーは worktree を書き換えられる。 ここから先の段階の通過は
+      // request.headSha の内容が通ったことにならないので記録しない。
+      worktreeMatchesHead = false;
       // The expensive intent review is deliberately single-shot. Failing tests
       // enter the narrow autofix loop and never trigger another general review.
       // Anatomia is rerun once after all edits, below, so the final domain and
@@ -1148,6 +1219,7 @@ export function createPrReviewRunner({
         env,
       });
       if (!testsPassed(finalCi)) {
+        worktreeMatchesHead = false;
         const autofix = await autofixFailingTests({
           request,
           reviewer,

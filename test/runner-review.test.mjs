@@ -224,7 +224,15 @@ test("does not compare against a persisted baseline without a function count", a
   assert.deepEqual(result.reasons, []);
 });
 
-function verificationFixture({ ci, autofixTests, commitAutofix, analyze, settings, runSecurity }) {
+function verificationFixture({
+  ci,
+  autofixTests,
+  commitAutofix,
+  analyze,
+  settings,
+  runSecurity,
+  reusedStages = [],
+}) {
   const testCases = [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }];
   const classification = classifyChange({ changedPaths: ["server/src/index.ts"], unifiedDiff: "" });
   return runPartialVerification({
@@ -235,6 +243,7 @@ function verificationFixture({ ci, autofixTests, commitAutofix, analyze, setting
       headRef: "feat/x",
       reviewMode: "verification",
       verificationTargets: ["tests"],
+      reusedStages,
       testCases,
       previousReview: {
         reviewedHeadSha: "a".repeat(40),
@@ -283,6 +292,7 @@ test("verification mode repairs failing registered tests with the bounded autofi
       calls.push(`analyze:${cwd}`);
       return passingAnalysis(90);
     },
+    reusedStages: ["anatomia", "review", "security"],
   });
   assert.deepEqual(calls.slice(0, 2), ["autofix", "commit"]);
   assert.ok(calls.includes("analyze:head-worktree"), "anatomia is re-run on the repaired head");
@@ -290,6 +300,7 @@ test("verification mode repairs failing registered tests with the bounded autofi
   assert.match(result.contextSource, /^partial-verification-after-test-autofix:/);
   assert.equal(result.humanQuestion, null);
   assert.deepEqual(result.reasons, []);
+  assert.deepEqual(result.reusedStages, ["review"]);
 });
 
 test("verification mode asks a human when the autofix cannot repair the tests", async () => {

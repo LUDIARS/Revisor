@@ -1,17 +1,17 @@
 {
   "name": "review-plan",
-  "description": "Local PR review orchestration and cost policy: deterministic stage selection, purpose-based model selection, diff/domain-based effort and reviewer topology, an operator-selectable opposite-model review policy, bounded test autofix, capacity fallback, model-free deterministic re-verification, best-effort PR narrative reconciliation, and operator-set forced review model and effort overrides.",
+  "description": "Local PR review orchestration and cost policy: deterministic stage selection, purpose-based model selection, diff/domain-based effort and reviewer topology, an operator-selectable opposite-model review policy, bounded test autofix, capacity fallback, model-free deterministic re-verification with per-stage crash checkpoints, best-effort PR narrative reconciliation, and operator-set forced review model and effort overrides.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
     {
-      "pathPattern": "(^|/)src/(?:anatomia|pr-narrative|review-plan|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:anatomia|pr-narrative|review-plan|review-stage-progress|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:pr-narrative|review-plan|review-strategy|reviewer|retry-review|runner-review|test-autofix)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:pr-narrative|review-plan|review-stage-progress|review-strategy|reviewer|retry-review|runner-review|test-autofix)\\.test\\.mjs$"
     },
     {
-      "pathPattern": "src/(?:anatomia|pr-narrative|review-plan|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
+      "pathPattern": "src/(?:anatomia|pr-narrative|review-plan|review-stage-progress|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
     },
     {
       "pathPattern": "(^|/)src/(?:claude\\-capacity|genius\\-review|plan\\-advisor|pull\\-request\\-diff\\-service|review\\-context|review\\-diff|review\\-work|reviewer\\-prompt|test\\-output)\\.mjs$"
@@ -20,7 +20,7 @@
       "pathPattern": "(^|/)test/(?:claude\\-capacity|genius\\-review|plan\\-advisor|pull\\-request\\-diff\\-service|review\\-context|review\\-diff|review\\-work|reviewer\\-prompt|test\\-output)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:anatomia|intent-review-checkpoint|retry-review-content-match|runner-verification-cleanup)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:anatomia|review-stage-checkpoint|retry-review-content-match|runner-verification-cleanup)\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)src/forced-review-(?:model|effort)\\.mjs$"
@@ -41,6 +41,7 @@
     "bounded-test-autofix",
     "provider-capacity-fallback",
     "deterministic-re-verification",
+    "review-stage-checkpointing",
     "cost-validation-mode",
     "pr-narrative-reconciliation",
     "forced-review-profile"
@@ -49,7 +50,8 @@
     "review-plan — 変更種別と規模ごとの審査ステージ設計",
     "review-plan — SPEC-REVIEW-MODEL-BY-PURPOSE",
     "review-cost-control — review model cost and retry control",
-    "review-plan — SPEC-PR-NARRATIVE-RECONCILIATION"
+    "review-plan — SPEC-PR-NARRATIVE-RECONCILIATION",
+    "crash-recovery — 段階ごとのチェックポイント"
   ],
   "rationale": "These modules jointly own how one local PR review is planned and executed. Gate interpretation remains in review-gate, Git worktree primitives remain in local-workspace, and publication remains in remote-publication."
 }

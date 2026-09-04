@@ -30,6 +30,12 @@ import {
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { diffPatchId, inspectLocalPullRequest, git } from "./workspace.mjs";
 import { retryReviewScope } from "./retry-review.mjs";
+import {
+  completedStagesForHead,
+  retainedStageProgress,
+  retainedStageProjection,
+  reviewedHeadShaOf,
+} from "./review-stage-progress.mjs";
 import { appendSourceLinks } from "./source-links.mjs";
 import {
   assertLocalVersionUnchanged,
@@ -67,6 +73,9 @@ function reviewRequest(repository, reviewRepository, pullRequest, options = {}) 
     testCases: repository.testCases,
     reviewMode: options.reviewMode ?? "full",
     verificationTargets: options.verificationTargets ?? [],
+    // どの段階を引き継いだか。 審査結果に載せて外から見えるようにする
+    // (`local-reporter.completed`)。
+    reusedStages: options.reusedStages ?? [],
     previousReview: options.previousReview ?? null,
     pullRequest: {
       title: pullRequest.title,
@@ -463,7 +472,9 @@ export class LocalPrService {
    * 「審査済み」と見なす側に倒さない。
    */
   async #reviewedContentUnchanged(repository, pullRequest, refs) {
-    const reviewed = pullRequest.reviewedHeadSha;
+    // 完走したレビューは `reviewedHeadSha` を残すが、途中で落ちたレビューでは
+    // 段階チェックポイントしか残らない。 どちらの場合も同じ入口から読む。
+    const reviewed = reviewedHeadShaOf(pullRequest);
     if (typeof reviewed !== "string" || !reviewed) return false;
     if (reviewed.toLowerCase() === refs.headSha.toLowerCase()) return true;
     try {
@@ -534,13 +545,20 @@ export class LocalPrService {
       ? validationModeSkips(this.loadSettings())
       : [];
     if (pullRequest.reviewPlan && !sameValidationMode(previousValidationMode, currentValidationMode)) {
+      // 設定が変わったら古い通過は使い回さない。 段階フラグごと捨てる。
       scope = { reviewMode: "full", verificationTargets: [] };
     }
     const previousReview = scope.reviewMode === "verification" ? pullRequest : null;
-    return this.#enqueue(
+    const reusedStages = scope.reusedStages ?? [];
+    const requeued = await this.#enqueue(
       repository,
       this.store.updatePullRequest(pullRequest.id, {
         ...pendingReviewProjection(),
+        // 引き継ぐ段階の通過と成果だけは捨てずに残す。 これが無いと、次に落ちた
+        // ときにまた最初からになるうえ、再検証が前回結果を読めない。
+        ...retainedStageProjection(pullRequest, reusedStages),
+        reviewStages: retainedStageProgress(pullRequest, reusedStages, refs.headSha),
+        reusedStages,
         headSha: refs.headSha,
         baseSha: refs.baseSha,
         checkStatus: "queued",
@@ -556,6 +574,32 @@ export class LocalPrService {
       { force: true },
       { announceFailure, requestOptions: { ...scope, previousReview, reviewedContentUnchanged } },
     );
+    // Queue admission can fail after the PR projection is prepared. Announce
+    // reuse only once a worker can actually consume the retained evidence.
+    this.#announceStageReuse(pullRequest, reusedStages, scope);
+    return requeued;
+  }
+
+  /**
+   * 引き継いだ段階を PR のタイムラインへ残す。
+   *
+   * 黙って飛ばすと、通っていない段階が通ったように見える事故になる。 何を、どの
+   * ヘッドの通過として引き継いだのかを、再投入の時点で読める場所に書く。
+   */
+  #announceStageReuse(pullRequest, reusedStages, scope) {
+    if (reusedStages.length === 0) return;
+    if (typeof this.store.appendPullRequestEvent !== "function") return;
+    const matchedBy = {
+      diff_content: "差分の内容一致",
+      merge_conflict_resolution: "マージ衝突解消後の引き継ぎ",
+      head_sha: "head SHA 一致",
+    }[scope.reusedReview?.matchedBy] ?? "記録済み段階";
+    this.store.appendPullRequestEvent(pullRequest.id, {
+      event: "review_stage_reuse",
+      message: `通過済みの審査段階を引き継ぎます (${reusedStages.join(", ")}): ${matchedBy}。`
+        + ` 再実行: ${scope.verificationTargets.join(", ") || "なし"}`,
+      tone: "idle",
+    });
   }
 
   /**
@@ -866,15 +910,19 @@ export class LocalPrService {
       // コンフリクトは再審査では直らない: ブランチ側の rebase が要るので、 Test OK
       // から外して人間の判断待ちに落とす (Test Forum からも消える)。
       if (error instanceof MergeConflictError) {
+        const reviewedHeadSha = reviewedHeadShaOf(pullRequest);
+        const reviewCompleted = completedStagesForHead(pullRequest, {
+          headSha: reviewedHeadSha,
+        }).has("review");
         this.store.updatePullRequest(id, {
           checkStatus: "action_required",
           reasons: [error.message],
           // 審査は通っている。 衝突解消で head が変わっても次の審査はモデルレビューを
           // 飛ばせるよう、 どの審査結果を引き継いでよいかを残す (retry-review.mjs)。
-          ...(pullRequest.intentReviewCompleted === true && pullRequest.reviewedHeadSha
+          ...(reviewCompleted && reviewedHeadSha
             ? {
                 mergeConflictAfterReview: {
-                  reviewedHeadSha: pullRequest.reviewedHeadSha,
+                  reviewedHeadSha,
                   conflictedPaths: error.conflictedPaths ?? [],
                   at: new Date().toISOString(),
                 },

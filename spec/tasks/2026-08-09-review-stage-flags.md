@@ -69,3 +69,16 @@ memory_links:
 - 落ちる原因そのものの修正 (incidents 29/24h)。これは別タスク。
   本タスクは「落ちても進む」ようにするだけで、落ちなくする話ではない。
 - review worker 数の変更。同時実行数は claude CLI のコストに直結するので neco 判断。
+
+## 実装 (2026-08-21)
+
+- 正本は `src/review-stage-progress.mjs` の `reviewStages`
+  (`anatomia` / `tests` / `review` / `security` の完了フラグと通過ヘッド SHA)。
+  旧 `intentReviewCompleted` はここへ統合し、読み出し時の後方互換だけ残した。
+- `LocalPrReporter.reviewStageCompleted()` が段階の通過とその成果をその場で書く。
+  runner は各段階の直後に呼び、worktree がヘッドと一致している間だけ記録する。
+- `retryReviewScope()` は現在のヘッドに対して有効な通過段階を求め、
+  未通過 / 前回失敗した段階だけを `verificationTargets` に載せる。
+- `#requeue` は引き継ぐ段階の記録と成果を捨てずに残し、lifecycle event
+  `review_stage_reuse` と `reusedStages` で引き継ぎを外から見えるようにする。
+- 詳細は `spec/feature/crash-recovery.md` §4.1。

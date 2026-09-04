@@ -2,6 +2,12 @@ import {
   pullRequestLifecycleMessage,
   pullRequestLifecycleTone,
 } from "./pr-lifecycle-notice.mjs";
+import {
+  REVIEW_STAGES,
+  stageProgressFromResult,
+  stageProgressRecord,
+  withCompletedStage,
+} from "./review-stage-progress.mjs";
 
 function analysisProjection(result) {
   const analysis = result?.analysis;
@@ -37,8 +43,24 @@ function anatomiaGateTone(status) {
   return "idle";
 }
 
+/**
+ * 段階チェックポイントが PR レコードへ書く成果。 `runPartialVerification` は
+ * ここに書かれた前回結果を読んで、通過済み段階を実行せずに済ませる。
+ */
+function stageOutcomeProjection(stage, payload) {
+  if (stage === "anatomia") return { anatomia: analysisProjection(payload) };
+  if (stage === "tests") return { ci: payload?.ci ?? [] };
+  if (stage === "security") return { security: payload?.security ?? null };
+  return {
+    reviewer: payload?.reviewer ?? null,
+    reviewPlan: payload?.plan ?? null,
+  };
+}
+
 // The review outcome fields owned by `completed`, cleared. A re-review resolves
 // fresh refs, so the previous run's outcome must not be read as the current one.
+// 段階の通過記録 (`reviewStages`) もここで捨てる。引き継ぐ段階がある再投入では
+// `local-pr-service` が捨てた直後に再利用分だけを書き戻す。
 //
 // `mergeConflictAfterReview` is the exception in ownership: the service writes it
 // on a failed merge (`local-pr-service.mjs`) rather than `completed`. It is cleared
@@ -49,7 +71,8 @@ export function pendingReviewProjection() {
   return {
     reviewedHeadSha: null,
     reviewer: null,
-    intentReviewCompleted: false,
+    reviewStages: null,
+    reusedStages: [],
     mergeConflictAfterReview: null,
     ci: [],
     anatomia: null,
@@ -164,27 +187,38 @@ export class LocalPrReporter {
   }
 
   /**
-   * Checkpoint written the moment the intent review succeeds, ahead of the
-   * remaining stages. `checkStatus` deliberately stays `running`: the review is
-   * not finished, only the part that cannot be repeated cheaply. If the process
-   * dies after this point, `retryReviewScope` sees a completed intent review for
-   * this head and resumes in verification mode instead of paying for the model
-   * review again (spec/feature/crash-recovery.md).
+   * Checkpoint written the moment a review stage passes, ahead of the remaining
+   * stages. `checkStatus` deliberately stays `running`: the review is not
+   * finished, only this stage is. If the process dies after this point,
+   * `retryReviewScope` sees the stage as passed for this head and the requeued
+   * review runs only what is left (spec/feature/crash-recovery.md).
+   *
+   * 書き込むのは通過フラグと、その段階の成果だけ。判定 (`checkStatus` / `reasons`)
+   * には触れない — 通っていない段階が通ったように見えてはならない。
    */
-  async intentReviewCompleted({ localPrId, jobId, reviewedHeadSha, reviewer, plan }) {
+  async reviewStageCompleted({ localPrId, jobId, stage, headSha, ...payload }) {
+    if (!REVIEW_STAGES.includes(stage)) {
+      throw new Error(`Unknown review stage '${stage}'.`);
+    }
     const pullRequest = this.store.getPullRequest(localPrId);
     if (
       !pullRequest
       || (jobId != null && pullRequest.jobId !== jobId)
-      || String(pullRequest.headSha).toLowerCase() !== String(reviewedHeadSha).toLowerCase()
+      || String(pullRequest.headSha).toLowerCase() !== String(headSha).toLowerCase()
     ) {
       return;
     }
     this.store.updatePullRequest(localPrId, {
-      intentReviewCompleted: true,
-      reviewedHeadSha,
-      reviewer: reviewer ?? null,
-      reviewPlan: plan ?? null,
+      ...stageOutcomeProjection(stage, payload),
+      // `reviewedHeadSha` はここでは書かない。あれはマージ時の陳腐化判定が読む
+      // 「審査を通り切ったヘッド」で、段階の通過とは意味が違う (完走時に `completed`
+      // が書く)。段階がどのヘッドを通したかは `reviewStages` 側が正本。
+      reviewStages: withCompletedStage(
+        stageProgressRecord(pullRequest),
+        stage,
+        headSha,
+        this.now(),
+      ),
     });
   }
 
@@ -236,7 +270,15 @@ export class LocalPrReporter {
       checkStatus: passed ? "test_ok" : "action_required",
       reviewedHeadSha: job.result?.reviewedHeadSha ?? job.request.headSha,
       reviewer: job.result?.reviewer ?? null,
-      intentReviewCompleted: job.result?.intentReviewCompleted === true,
+      // 完走時の書き込みは途中のチェックポイントを置き換える正本。 追加の状態では
+      // ないので、段階の通過は結果からもう一度組み立て直す。
+      reviewStages: stageProgressFromResult(
+        job.result,
+        job.result?.reviewedHeadSha ?? job.request.headSha,
+        this.now(),
+      ),
+      // どの段階を再利用したかは判定の前提そのものなので、結果と一緒に残す。
+      reusedStages: job.result?.reusedStages ?? job.request?.reusedStages ?? [],
       ci: job.result?.ci ?? [],
       anatomia: analysisProjection(job.result),
       anatomiaGate: anatomiaGateProjection(job.result),

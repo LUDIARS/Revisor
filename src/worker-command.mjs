@@ -51,10 +51,10 @@ export async function runReviewWorker({
       cwd,
       env,
       scheduleWork: (work, options) => stageWorkers.run(work, options),
-      // 短命ワーカーは審査の途中で落ちうる。 intent review が成功した時点で
-      // チェックポイントを書いておくと、 次のワーカーが verification から再開でき、
-      // 最も高いモデルレビューをやり直さずに済む (spec/feature/crash-recovery.md)。
-      onIntentReviewCompleted: (checkpoint) => context.reporter.intentReviewCompleted(checkpoint),
+      // 短命ワーカーは審査の途中で落ちうる。 段階が通るたびにチェックポイントを
+      // 書いておくと、 次のワーカーは残りの段階だけを実行でき、 通過済みの
+      // モデルレビューや登録テストをやり直さずに済む (spec/feature/crash-recovery.md)。
+      onReviewStageCompleted: (checkpoint) => context.reporter.reviewStageCompleted(checkpoint),
       onNarrativeReconciled: ({ localPrId, ...narrative }) =>
         context.reporter.narrativeReconciled(localPrId, narrative),
     });

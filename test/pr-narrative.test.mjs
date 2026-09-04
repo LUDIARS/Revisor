@@ -9,6 +9,9 @@ import {
   sanitizeExplanation,
   sanitizeTitle,
 } from "../src/pr-narrative.mjs";
+import { LocalPrReporter } from "../src/local-reporter.mjs";
+
+const NARRATIVE_HEAD = "b".repeat(40);
 
 test("the narrative prompt includes PR context, truncates the diff, and rejects diff instructions", () => {
   const prompt = narrativePrompt({
@@ -167,4 +170,62 @@ test("review reconciliation honors model-free and leakage boundaries before chec
   assert.equal(checkpoints.length, 1);
   assert.equal(checkpoints[0].headSha, request.headSha);
   assert.equal(reviews[0].readOnly, true);
+});
+
+// 整合結果を PR レコードへ書く側。 段階チェックポイントの試験から切り離して
+// ここへ置く — 対象は narrative であって審査段階ではない。
+function narrativeStoreDouble(initial = {}) {
+  const record = { id: "PR1", ...initial };
+  return {
+    record,
+    updatePullRequest(id, patch) {
+      assert.equal(id, "PR1");
+      Object.assign(record, patch);
+      return record;
+    },
+    getPullRequest: () => record,
+    appendPullRequestEvent() {},
+  };
+}
+
+test("narrative reconciliation updates only a matching head and records an event", async () => {
+  const store = narrativeStoreDouble({ headSha: NARRATIVE_HEAD, title: "旧題", body: "本文" });
+  const events = [];
+  store.appendPullRequestEvent = (_id, event) => events.push(event);
+  const reporter = new LocalPrReporter(store, { now: () => "2026-08-13T00:00:00.000Z" });
+
+  await reporter.narrativeReconciled("PR1", {
+    headSha: NARRATIVE_HEAD,
+    title: "新題",
+    body: "本文\n\n## 解説\n説明",
+  });
+
+  assert.equal(store.record.title, "新題");
+  assert.equal(store.record.narrative.adjustedTitle, true);
+  assert.equal(store.record.narrative.at, "2026-08-13T00:00:00.000Z");
+  assert.equal(events[0].event, "narrative");
+
+  // ヘッドが動いた後の整合結果は、いま審査している内容の説明ではない。
+  await reporter.narrativeReconciled("PR1", {
+    headSha: "c".repeat(40),
+    title: "無視",
+    body: "無視",
+  });
+  assert.equal(store.record.title, "新題");
+  assert.equal(store.record.body, "本文\n\n## 解説\n説明");
+});
+
+test("narrative reconciliation keeps the title for a body-only update", async () => {
+  const store = narrativeStoreDouble({ headSha: NARRATIVE_HEAD, title: "旧題", body: "本文" });
+  const reporter = new LocalPrReporter(store);
+
+  await reporter.narrativeReconciled("PR1", {
+    headSha: NARRATIVE_HEAD,
+    title: null,
+    body: "解説付き本文",
+  });
+
+  assert.equal(store.record.title, "旧題");
+  assert.equal(store.record.body, "解説付き本文");
+  assert.equal(store.record.narrative.adjustedTitle, false);
 });

@@ -210,6 +210,7 @@ export const PR_VIEW_SOURCE = `
     definition(list, 'branch', pr.headRef + ' → ' + pr.baseRef);
     definition(list, 'head SHA', pr.headSha);
     definition(list, 'reviewed head SHA', pr.reviewedHeadSha || '—');
+    definition(list, '引き継いだ審査段階', (pr.reusedStages || []).join(', ') || '—');
     definition(list, 'base SHA', pr.baseSha);
     definition(list, 'labels', pr.labels.join(', ') || '—');
     definition(list, '更新', pr.updatedAt);

@@ -483,16 +483,24 @@ test("re-reviews an unchanged head and drops the previous outcome", async () => 
     // The head has not moved, so the queue holds a settled job under this key.
     const retried = await service.retryPullRequest(submitted.id);
     assert.equal(retried.headSha, submitted.headSha);
+    // 前回の判定は捨てる。 再審査は refs を引き直すので、古い判定を現在のものと
+    // して読ませない。
     assert.equal(retried.reviewedHeadSha, null);
-    assert.equal(retried.reviewer, null);
-    assert.deepEqual(retried.ci, []);
     assert.deepEqual(retried.reasons, []);
+    // モデルレビューだけがこのヘッドを通っている。 その段階の成果 (reviewer) は
+    // 引き継ぎ、通っていない登録テストの成果は捨てる
+    // (`spec/feature/crash-recovery.md` §4.1)。
+    assert.deepEqual(retried.reusedStages, ["review"]);
+    assert.equal(retried.reviewer, "codex-sol");
+    assert.deepEqual(retried.ci, []);
 
     await releaseRun(releases);
     await waitForCheckStatus(store, submitted.id, "action_required");
     assert.deepEqual(runs.map((request) => request.headSha), [submitted.headSha, submitted.headSha]);
     assert.equal(runs[1].reviewMode, "verification");
-    assert.deepEqual(runs[1].verificationTargets, ["tests"]);
+    // 通過が記録されているのは `review` だけなので、決定的段階は全部やり直す。
+    assert.deepEqual(runs[1].verificationTargets, ["leakage", "tests", "anatomia", "security"]);
+    assert.deepEqual(runs[1].reusedStages, ["review"]);
     assert.equal(runs[1].previousReview.reviewedHeadSha, submitted.headSha);
   } finally {
     await queue.idle();
@@ -1113,6 +1121,9 @@ test("a merge conflict drops the PR to action_required instead of leaving it Tes
     store.updatePullRequest(pullRequest.id, {
       checkStatus: "test_ok",
       reviewedHeadSha: pullRequest.headSha,
+      reviewStages: {
+        review: { completed: true, headSha: pullRequest.headSha, at: null },
+      },
     });
 
     await assert.rejects(service.mergePullRequest(pullRequest.id), MergeConflictError);
@@ -1121,6 +1132,7 @@ test("a merge conflict drops the PR to action_required instead of leaving it Tes
     assert.equal(after.status, "open");
     assert.equal(after.checkStatus, "action_required");
     assert.match(after.reasons.join(" "), /conflicts/);
+    assert.equal(after.mergeConflictAfterReview.reviewedHeadSha, pullRequest.headSha);
     // Test OK から外れたので Test Forum の候補にも載らない。
     assert.deepEqual(store.testWorkflowProducts(), []);
   } finally {

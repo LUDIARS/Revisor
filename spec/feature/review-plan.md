@@ -118,17 +118,21 @@ section 置換、leakage / verification / checkpoint / cost skip、head 一致�
 うち `code` 分類ファイルの追加・削除本文だけを数え、ドキュメントや diff header を
 含めない。モデルへ渡す前に登録 base の一致、空でない changed paths と patch を確認する。
 
-`intentReviewCompleted=true` の PR は、head SHA が変わっても同じ方針のモデルレビューを
-繰り返さない。同じ reviewed head の再審査では失敗した tests / leakage / Anatomia / security
-だけを再実行する。ただし前回の計画が model-advised なら、検証のみモードへ助言済み skip を
-持ち込まないため全決定的ゲートを再実行する。tests または leakage のため security が skip
-されていた場合は、その依存先として security も再実行する。head が変わった場合もモデルを
-呼ばず、leakage・登録テスト・Anatomia・security の決定的ゲートをすべて新しい head で
-再実行する。このとき前回の助言済み計画は流用せず、現在差分の変更種別から決定的に再計画し、
-complexity baseline と動作確認判定も現在の merge-base と head に対して更新する。
+`reviewStages.review` が現在の head を通過済み、または patch-id で差分内容が同じ PR は、
+同じ方針のモデルレビューを繰り返さない。マージ衝突後の解消だけは明示的な引き継ぎ記録が
+ある場合にもモデルレビューを再利用する。旧 `intentReviewCompleted` は移行前レコードの
+読み出し互換にだけ使う。
 
-通常レビューへ戻すのは、intent review がまだ完了していない、reviewer が方針判断に必要な情報
-不足を返した、または validation mode 設定が変わって review policy 自体が変化した場合だけとする。
+検証のみモードでは leakage を常に再計算し、現在の head に対する通過記録と成果がそろわない
+tests / Anatomia / security だけを再実行する。ただし前回の計画が model-advised、または
+マージ衝突後の解消なら、全決定的ゲートを再実行する。tests または leakage に阻まれて
+security が skip された結果は通過記録にせず、依存先が直った後に security を実行する。
+前回の助言済み計画は流用せず、現在差分の変更種別から決定的に再計画し、complexity baseline
+と動作確認判定も現在の merge-base と head に対して更新する。
+
+通常レビューへ戻すのは、review 段階がまだ完了していない、内容が変わって引き継ぎ例外もない、
+reviewer が方針判断に必要な情報不足を返した、または validation mode 設定が変わって review
+policy 自体が変化した場合とする。
 
 reviewer と限定 test autofix の編集が終わった後、コミット対象の最終差分へ Anatomia を1回
 再実行する。target domain、architecture、complexity のゲートは、この最終結果だけで判定する。
@@ -251,6 +255,12 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
   「編集するな」とプロンプトで頼むだけの防御にしない。
 - 検証のみモード (`reviewMode: "verification"`) はモデルを一切呼ばないので
   決定的な計画に固定する。
+- 検証のみモードで**何を実行するか**は、段階ごとの通過記録から決まる
+  (`reviewStages`, `spec/feature/crash-recovery.md` §4.1)。現在のヘッドに対して
+  通過済みの段階は再実行せず、未通過 / 前回失敗した段階だけを回す。`leakage` は
+  差分から即座に再計算できるので段階に数えず常にやり直す。
+- 引き継いだ段階は `reusedStages` として審査結果と PR レコードに残す。黙って
+  飛ばすと、通っていない段階が通ったように見える事故になる。
 
 管制プランナーが落としたステージは `advisedSkips` に記録し、マージリスクの
 加点要因になる (`merge-risk.md`)。薄い審査を厚い審査と同じ安全さに見せない。
