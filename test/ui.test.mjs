@@ -649,6 +649,116 @@ test("a Test OK card shows current and stale Augur verification badges", () => {
   );
 });
 
+test("a Test OK card shows a contracts badge only for the current head, coloured by violations", () => {
+  const record = {
+    source: "augur",
+    headSha: "a".repeat(40),
+    runId: "run-1",
+    decision: "accept",
+    by: "neco",
+    at: "2026-08-23T00:00:00.000Z",
+    summary: { total: 4, passed: 3, failed: 1, skipped: 0, error: 0 },
+  };
+  const base = {
+    id: "pr-ok",
+    number: 8,
+    repository: "Revisor",
+    title: "approved",
+    status: "open",
+    checkStatus: "test_ok",
+    decision: { state: "auto_ok", label: "自動マージ可", tone: "ok" },
+  };
+  const clean = renderCard({
+    ...base,
+    headSha: record.headSha,
+    externalVerification: {
+      ...record,
+      summary: { ...record.summary, contracts: { covered: 5, violated: 0, uncovered: 0 } },
+    },
+  });
+  const cleanBadge = firstNode(clean, (node) =>
+    node.textContent === "covered 5 / violated 0 / uncovered 0");
+  assert.equal(cleanBadge?.className, "badge ok");
+
+  const uncovered = renderCard({
+    ...base,
+    headSha: record.headSha,
+    externalVerification: {
+      ...record,
+      summary: { ...record.summary, contracts: { covered: 4, violated: 0, uncovered: 1 } },
+    },
+  });
+  const uncoveredBadge = firstNode(uncovered, (node) =>
+    node.textContent === "covered 4 / violated 0 / uncovered 1");
+  assert.equal(uncoveredBadge?.className, "badge warn");
+
+  const violated = renderCard({
+    ...base,
+    headSha: record.headSha,
+    externalVerification: {
+      ...record,
+      summary: { ...record.summary, contracts: { covered: 2, violated: 1, uncovered: 1 } },
+    },
+  });
+  const violatedBadge = firstNode(violated, (node) =>
+    node.textContent === "covered 2 / violated 1 / uncovered 1");
+  assert.equal(violatedBadge?.className, "badge bad");
+
+  const withoutContracts = renderCard({
+    ...base,
+    headSha: record.headSha,
+    externalVerification: record,
+  });
+  assert.equal(flatten(withoutContracts).some((entry) => entry.includes("covered")), false);
+
+  const staleHead = renderCard({
+    ...base,
+    headSha: "b".repeat(40),
+    externalVerification: {
+      ...record,
+      summary: { ...record.summary, contracts: { covered: 2, violated: 1, uncovered: 1 } },
+    },
+  });
+  assert.equal(flatten(staleHead).some((entry) => entry.includes("covered")), false);
+});
+
+test("the PR detail shows the contracts summary only when the record carries one", () => {
+  const withContracts = renderDecision({
+    mergeRisk: null,
+    runtimeVerification: null,
+    autoMerge: null,
+    externalVerification: {
+      summary: { contracts: { covered: 2, violated: 1, uncovered: 1 } },
+    },
+    decision: {
+      state: "auto_ok",
+      label: "自動マージ可",
+      blockers: [],
+      riskScore: null,
+      riskThreshold: 15,
+      autoMergeEnabled: false,
+      autoMergeEligible: false,
+    },
+  });
+  assert.equal(flatten(withContracts).includes("covered 2 / violated 1 / uncovered 1"), true);
+
+  const withoutContracts = renderDecision({
+    mergeRisk: null,
+    runtimeVerification: null,
+    autoMerge: null,
+    decision: {
+      state: "auto_ok",
+      label: "自動マージ可",
+      blockers: [],
+      riskScore: null,
+      riskThreshold: 15,
+      autoMergeEnabled: false,
+      autoMergeEligible: false,
+    },
+  });
+  assert.equal(flatten(withoutContracts).some((entry) => entry.includes("covered")), false);
+});
+
 test("the PR detail renders structured source links safely", () => {
   const rendered = renderOverview({
     repository: "LUDIARS/Revisor",

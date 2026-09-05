@@ -24,6 +24,10 @@ updated: 2026-08-23
 `bundle: { kind, testIds }`、`string | null` の `reportUrl` と最大 2,000 文字の
 `note` を持つ。`reject` を含む `accept` 以外の判断と不正な本文は 400 で拒否する。
 
+`summary.contracts: { covered, violated, uncovered }` は省略可。Augur が契約テストの
+集計を送るときだけ付き、指定時は 3 つとも非負整数を必須とする。省略した既存クライアント
+の呼び出しはそれまでと同じに検証・受理される。
+
 存在しない PR は JSON の
 `404 { error: { code: "not_found", message } }` を返す。route 自体が無い場合の既定
 404 と本文で区別できるため、Augur は未導入を `not_supported`、未知の PR を
@@ -64,3 +68,10 @@ board と Test Workflow は `Open / Test OK` の PR に、現在の保証は `Au
 古い head の記録は灰色の `Augur 保証 (古い head)` として表示する。どちらも保存済み
 PR の head と記録だけを、disposition / merge-risk と共通の
 `externalVerificationClears` で解釈する。
+
+`summary.contracts` を伴う記録は、board のカードと local PR 詳細に
+`covered n / violated n / uncovered n` を表示する。card 側は Augur 保証バッジと同じく
+現在の head の記録だけを表示し、古い head の記録は表示しない。`violated > 0` は赤、
+`uncovered > 0` (violated が 0) は黄、どちらも 0 なら緑で区別する。`summary.contracts`
+のない記録には何も表示しない。この集計は表示のみで、disposition・merge-risk・
+auto-merge の判定には使わない。

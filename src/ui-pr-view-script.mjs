@@ -82,6 +82,18 @@ export const PR_VIEW_SOURCE = `
     };
   }
 
+  // Same current/stale head predicate as the Augur badge: a contracts summary
+  // recorded against an old head must not be shown as if it described the code
+  // sitting on the board now.
+  function contractsBadgeOf(pr) {
+    const contracts = pr.externalVerification?.summary?.contracts;
+    if (!contracts || !externalVerificationClears(pr)) return null;
+    return {
+      label: contractsSummaryText(contracts),
+      tone: contracts.violated > 0 ? 'bad' : (contracts.uncovered > 0 ? 'warn' : 'ok'),
+    };
+  }
+
   function menuDecisionLabel(pr) {
     if (pr.checkStatus === 'test_ok') return 'Test OK';
     return pr.decision.state === 'needs_human' ? 'レビュー項目があります' : pr.decision.label;
@@ -101,6 +113,8 @@ export const PR_VIEW_SOURCE = `
     card.append(head);
     const verificationBadge = externalVerificationBadgeOf(pr);
     if (verificationBadge) card.append(badge(verificationBadge.label, verificationBadge.tone));
+    const contractsBadge = contractsBadgeOf(pr);
+    if (contractsBadge) card.append(badge(contractsBadge.label, contractsBadge.tone));
     card.append(element('div', 'card-repository', pr.repository));
     card.append(element('div', 'card-title', pr.title));
     const activate = () => select(pr.id);
@@ -129,6 +143,10 @@ export const PR_VIEW_SOURCE = `
       definition(list, '自動マージ結果',
         (pr.autoMerge.merged ? 'マージ済み' : '見送り') + ' — ' + pr.autoMerge.reason);
     }
+    const contracts = pr.externalVerification?.summary?.contracts;
+    if (contracts) {
+      definition(list, '契約', contractsSummaryText(contracts));
+    }
     wrapper.append(list);
     const blockerTitle = pr.decision.state === 'failed'
       ? '審査失敗の理由'
@@ -140,6 +158,14 @@ export const PR_VIEW_SOURCE = `
     wrapper.append(block('マージリスクの内訳', factorsOf(pr.mergeRisk)));
     wrapper.append(block('動作確認の必要性', runtimeOf(pr.runtimeVerification)));
     return wrapper;
+  }
+
+  // Display only: disposition / merge-risk / auto-merge never read this value,
+  // so it is safe to summarize here without touching their inputs.
+  function contractsSummaryText(contracts) {
+    return 'covered ' + contracts.covered
+      + ' / violated ' + contracts.violated
+      + ' / uncovered ' + contracts.uncovered;
   }
 
   function factorsOf(risk) {

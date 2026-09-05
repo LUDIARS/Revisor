@@ -320,6 +320,15 @@ export function validateExternalVerification(body) {
     ["total", "passed", "failed", "skipped", "error"].map((key) =>
       [key, nonNegativeInteger(body.summary[key], `summary.${key}`)]),
   );
+  // Optional: only Augur runs that measure contract coverage send this. Older
+  // clients that omit it must keep verifying exactly as before.
+  if (body.summary.contracts !== undefined) {
+    object(body.summary.contracts, "summary.contracts");
+    summary.contracts = Object.fromEntries(
+      ["covered", "violated", "uncovered"].map((key) =>
+        [key, nonNegativeInteger(body.summary.contracts[key], `summary.contracts.${key}`)]),
+    );
+  }
   object(body.bundle, "bundle");
   return {
     source,

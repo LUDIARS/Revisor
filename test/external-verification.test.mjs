@@ -61,6 +61,29 @@ test("validates only accepted Augur verification for a full SHA", () => {
   assert.equal(validateExternalVerification(verification({ note: "" })).note, "");
 });
 
+test("summary.contracts is optional and validated as non-negative integers when present", () => {
+  assert.equal(validateExternalVerification(verification()).summary.contracts, undefined);
+  const withContracts = validateExternalVerification(verification({
+    summary: {
+      total: 1, passed: 1, failed: 0, skipped: 0, error: 0,
+      contracts: { covered: 3, violated: 1, uncovered: 2 },
+    },
+  }));
+  assert.deepEqual(withContracts.summary.contracts, { covered: 3, violated: 1, uncovered: 2 });
+  assert.throws(() => validateExternalVerification(verification({
+    summary: {
+      total: 1, passed: 1, failed: 0, skipped: 0, error: 0,
+      contracts: { covered: -1, violated: 0, uncovered: 0 },
+    },
+  })), /summary\.contracts\.covered/);
+  assert.throws(() => validateExternalVerification(verification({
+    summary: {
+      total: 1, passed: 1, failed: 0, skipped: 0, error: 0,
+      contracts: { covered: 1, violated: 1 },
+    },
+  })), /summary\.contracts\.uncovered/);
+});
+
 test("current external verification clears the runtime hold and expires with a moved head", () => {
   const settings = {
     autoMergeEnabled: true,
@@ -281,6 +304,72 @@ test("persists the latest verification with recordedAt and returns it in the ful
     assert.equal(moved.externalVerification.runId, "run-2");
     assert.equal(moved.decision.externalVerification.current, false);
     assert.ok(moved.decision.blockers.includes("人間による動作確認が必要です"));
+  } finally {
+    try {
+      removeFixture(directory);
+    } catch (error) {
+      if (error?.code !== "EPERM" && error?.code !== "EBUSY") throw error;
+    }
+  }
+});
+
+test("summary.contracts persists and reaches the full and summary API responses", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-external-verification-contracts-"));
+  const store = new LocalPrStore({
+    path: join(directory, "state.db"),
+    createId: () => "pr-contracts",
+    now: () => "2026-08-23T01:00:00.000Z",
+  });
+  try {
+    const created = store.createPullRequest({
+      repository: "LUDIARS/Revisor",
+      title: "契約集計を保存する",
+      body: "",
+      author: "neco",
+      headRef: "feat/contracts-summary",
+      baseRef: "main",
+      headSha: HEAD,
+      baseSha: "b".repeat(40),
+    });
+    store.updatePullRequest(created.id, { checkStatus: "test_ok" });
+    const service = new LocalPrService({
+      store,
+      queue: {},
+      loadSettings: () => ({ autoMergeEnabled: false }),
+    });
+    const withContracts = verification({
+      summary: {
+        total: 4, passed: 3, failed: 1, skipped: 0, error: 0,
+        contracts: { covered: 2, violated: 1, uncovered: 1 },
+      },
+    });
+    const recorded = service.recordExternalVerification(created.id, withContracts);
+    assert.deepEqual(
+      recorded.externalVerification.summary.contracts,
+      { covered: 2, violated: 1, uncovered: 1 },
+    );
+
+    const handle = createUiRequestHandler({
+      env: {},
+      sessionToken: "session",
+      queue: { state: () => ({}) },
+      localPrService: service,
+    });
+    const full = response();
+    await handle(request("", { method: "GET", url: "/api/local-prs" }), full);
+    assert.deepEqual(
+      JSON.parse(full.body).pullRequests[0].externalVerification.summary.contracts,
+      { covered: 2, violated: 1, uncovered: 1 },
+    );
+    const summary = response();
+    await handle(request("", {
+      method: "GET",
+      url: "/api/local-prs?view=summary&state=open",
+    }), summary);
+    assert.deepEqual(
+      JSON.parse(summary.body).pullRequests[0].externalVerification.summary.contracts,
+      { covered: 2, violated: 1, uncovered: 1 },
+    );
   } finally {
     try {
       removeFixture(directory);
