@@ -16,7 +16,7 @@ related:
   - ./merge-risk.md
   - ../architecture.md
   - ../plan/problem_logs/2026-08-09-merge-repository-source-ownership.md
-updated: 2026-09-05
+updated: 2026-09-07
 ---
 
 # local-workspace — 使い捨て worktree とローカル ref の境界
@@ -142,6 +142,24 @@ untracked file は判定に入れない。審査は固定 SHA を別の worktree
 中断する)。submodule の未コミット内容も同様に無視し、submodule pointer の変更だけを
 tracked change として扱う。checkout 中の worktree が無い場合は `update-ref` の
 compare-and-swap、ある場合は `merge --ff-only` で前進する。
+
+### SPEC-ADVANCE-AUTOFIX: 自分の autofix で動いた分は外部変更としない
+
+期待 SHA と現在値が食い違ったとき、その差分が **Revisor 自身の autofix コミットだけ**なら
+失敗させず、現在の tip を新しい期待 SHA として前進を続ける。autofix を外部変更として弾くと、
+autofix が入る PR は必ず一度 `checkStatus: failed` になり、人手の `pr retry --force` を要求する
+(2026-09-05 に 1 日 4 件、うち 2 件が autofix 起因)。
+
+自己要因の判定は commit 本文の trailer 行 `Revisor-Autofix: true` が
+`expectedSha..currentSha` の**全コミット**に載っていることで行う。目印は **trailer 行そのもの**
+としてだけ認め、本文中の部分文字列一致では認めない。この機能を説明する commit や task md を
+引用した提出者のコミットが自己要因に化けるため。本文が空のコミットも自己要因にしない。
+range が引けない場合も外部要因として扱う。判定不能を自己要因へ倒すと、提出者が足した
+コミットを黙って飲み込む経路になる。
+
+自己要因と判定しても、前進先が現在の tip の上に載っていなければ ff できない。到達関係を
+確かめ、既に反映済みなら現在の tip を返し、載っていなければ autofix を取りこぼすので拒否する。
+外部要因の失敗とは**文面を分けて**、受け取った側が原因を切り分けられるようにする。
 
 ## 登録 checkout と merge repository の分離 (2026-08-08 neco 指示)
 

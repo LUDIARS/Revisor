@@ -14,7 +14,7 @@
       "pathPattern": "src/(?:merge-repository|workspace)\\.mjs$"
     },
     {
-      "namePattern": "assertSafeRef|assertSafeSha|parseWorktreeList|trackedChanges|branchWorktree|inspectLocalPullRequest|prepareLocalWorktrees|diffPatchId|advanceLocalBranch|cleanupWorktrees"
+      "namePattern": "assertSafeRef|assertSafeSha|parseWorktreeList|trackedChanges|branchWorktree|inspectLocalPullRequest|prepareLocalWorktrees|diffPatchId|advanceLocalBranch|revisorAutofixOnly|cleanupWorktrees"
     },
     {
       "pathPattern": "(^|/)src/(?:checkout\\-sync|file\\-lock|source\\-checkout\\-sync|worktree\\-mutation\\-lock)\\.mjs$"
@@ -23,7 +23,7 @@
       "pathPattern": "(^|/)test/(?:checkout\\-sync|file\\-lock|source\\-checkout\\-sync|worktree\\-mutation\\-lock)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/workspace\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/workspace(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)src/base-divergence\\.mjs$"
@@ -58,6 +58,7 @@
     "local-workspace — SPEC-REVIEW-SCRATCH-ROOT",
     "local-workspace — cleanup の best-effort 範囲",
     "local-workspace — worktree の清潔さと branch 前進",
+    "local-workspace — SPEC-ADVANCE-AUTOFIX",
     "checkout-publication — 結果の記録",
     "local-workspace — 登録 checkout の base 乖離診断",
     "local-workspace — 登録 checkout と merge repository の分離"

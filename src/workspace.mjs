@@ -262,11 +262,87 @@ export async function diffPatchId(repoPath, sha, baseSha) {
   return patchId;
 }
 
+/** autofix コミットの目印。 `commitAndAdvanceAutofix` が trailer として必ず書く。 */
+export const AUTOFIX_TRAILER = "Revisor-Autofix: true";
+
+// 目印は **trailer 行そのもの**としてだけ認める。 本文のどこかに現れる部分文字列で
+// 判定すると、 この機能を説明する commit や task md を引用した提出者のコミットが
+// 自己要因に化ける (この repository の履歴には実際にその文字列が載る)。
+const AUTOFIX_TRAILER_LINE = new RegExp(
+  `^${AUTOFIX_TRAILER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+);
+
+function hasAutofixTrailer(body) {
+  return body.split(/\r?\n/).some((line) => AUTOFIX_TRAILER_LINE.test(line.trim()));
+}
+
+/**
+ * `expectedSha..currentSha` の全コミットが Revisor 自身の autofix か。
+ *
+ * 空 (= 進んでいない) なら false を返す — 呼び出し側は先に一致判定を済ませている前提で、
+ * 「進んでいないのに自己要因」という判定を作らない。 range が引けない (片方が到達不能
+ * など) 場合も false = 外部要因扱いにする。 判定不能を自己要因へ倒すと、 提出者が足した
+ * コミットを黙って飲み込む経路になる。
+ */
+export async function revisorAutofixOnly(repoPath, expectedSha, currentSha, { run = git } = {}) {
+  assertSafeSha(expectedSha, "expected sha");
+  assertSafeSha(currentSha, "current sha");
+  let log;
+  try {
+    // 1 コミット 1 レコードを NUL で区切る。 %B (本文) は空にもなりうるので、 レコード数を
+    // 数えられるよう %H を先頭に置く。 本文が空のコミットを「無かったこと」にすると、
+    // メッセージ無しで積まれた提出者のコミットが黙って通る。
+    log = await run(repoPath, ["log", "--format=%H%n%B%x00", `${expectedSha}..${currentSha}`]);
+  } catch {
+    return false;
+  }
+  // レコード間の区切りは NUL。 各レコードの先頭行が %H で、 残りが本文。 レコードの前後には
+  // 改行が付きうるので、 SHA 行は位置ではなく「最初の非空行」として落とす。
+  const records = log.split("\0").filter((record) => record.trim());
+  if (records.length === 0) return false;
+  return records.every((record) => {
+    const lines = record.split(/\r?\n/);
+    const shaLine = lines.findIndex((line) => line.trim());
+    return hasAutofixTrailer(lines.slice(shaLine + 1).join("\n"));
+  });
+}
+
+/**
+ * 審査中にブランチが動いていないことを確かめてから ff で進める。
+ *
+ * ガード自体は正しい (提出者が提出後にコミットを足す事故を止める) が、 **Revisor 自身の
+ * autofix コミットまで外部変更として弾いていた**。 autofix が入る PR は必ず一度
+ * `checkStatus: failed` になり、 人手の `pr retry --force` が要る状態だった
+ * (2026-09-05 に 1 日 4 件、 うち 2 件が autofix 起因)。
+ *
+ * そこで「期待 head からの差分が Revisor 自身の autofix コミットだけか」を見る。
+ * 自己要因なら現在の tip を新しい期待 head として審査を続行する。 外部要因は従来どおり
+ * 失敗させ、 **文面を分けて**受け取った側が原因を切り分けられるようにする。
+ */
 export async function advanceLocalBranch(repoPath, ref, expectedSha, nextSha, { run = git } = {}) {
   assertSafeRef(ref, "branch");
-  const current = await run(repoPath, ["rev-parse", "--verify", `refs/heads/${ref}`]);
+  let current = await run(repoPath, ["rev-parse", "--verify", `refs/heads/${ref}`]);
   if (current.toLowerCase() !== expectedSha.toLowerCase()) {
-    throw new Error(`Local branch '${ref}' changed while Revisor was working.`);
+    if (!(await revisorAutofixOnly(repoPath, expectedSha, current, { run }))) {
+      throw new Error(
+        `Local branch '${ref}' changed while Revisor was working `
+        + `(external commits were added on top of ${expectedSha}).`,
+      );
+    }
+    // 自分の autofix で進んだだけ。 ただし進める先がその上に載っていなければ ff できず、
+    // 無理に進めると autofix を取りこぼす。 到達関係を確かめてから続行する。
+    if (nextSha.toLowerCase() === current.toLowerCase()
+      || await isAncestor(repoPath, nextSha, current, { run })) {
+      // 既に反映済み (再入 / 再試行)。 これ以上進めるものは無い。
+      return current;
+    }
+    if (!(await isAncestor(repoPath, current, nextSha, { run }))) {
+      throw new Error(
+        `Local branch '${ref}' advanced by Revisor's own autofix to ${current}, `
+        + `but ${nextSha} is not built on it; refusing to drop the autofix commits.`,
+      );
+    }
+    expectedSha = current;
   }
   if (current.toLowerCase() === nextSha.toLowerCase()) return nextSha;
   const checkedOutAt = await branchWorktree(repoPath, ref, { run });
