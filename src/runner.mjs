@@ -1,3 +1,4 @@
+import { compareComplexity } from "./complexity-comparison.mjs";
 import { analyzePr, ensureInitialAnalysis, resolveAnatomiaCli } from "./anatomia.mjs";
 import {
   evaluateAnatomiaReviewGate,
@@ -253,14 +254,8 @@ function buildGateResult({
   changedPaths = [],
   env = process.env,
 }) {
-  // A repository with no analyzed functions has Anatomia's neutral score of
-  // 100. That score is not a comparable baseline for a newly introduced code
-  // area, so only a measured baseline may enforce a complexity regression.
-  const complexityScoreDelta = baseline
-    && typeof baseline.quality.complexity.functions === "number"
-    && baseline.quality.complexity.functions > 0
-    ? finalAnalysis.quality.complexity.score - baseline.quality.complexity.score
-    : null;
+  const complexityComparison = compareComplexity(baseline?.quality, finalAnalysis.quality);
+  const complexityScoreDelta = complexityComparison.delta;
   const confidentialAdvisory = configuredConfidentialTermsAdvisory({
     unifiedDiff,
     changedPaths,
@@ -281,6 +276,11 @@ function buildGateResult({
     security,
     humanReviewRequired,
   });
+  advisories.push(complexityComparison.mode === "matched-functions"
+    ? `Call-graph complexity: ${complexityComparison.compared} matched, `
+      + `${complexityComparison.added} added, ${complexityComparison.removed} removed; `
+      + `new maximum ${complexityComparison.addedMaximum}`
+    : `Complexity comparison uses legacy aggregate: ${complexityComparison.reason}`);
   const reasons = [...new Set([...gateReasons, ...additionalReasons])];
   const runtimeVerification = assessRuntimeVerification({
     classification,
@@ -325,6 +325,8 @@ function buildGateResult({
     analysis: finalAnalysis,
     baselineComplexityScore: baseline ? baseline.quality.complexity.score : null,
     baselineComplexityFunctionCount: baseline?.quality.complexity.functions ?? null,
+    baselineFunctionComplexity: baseline?.quality.functionComplexity ?? null,
+    complexityComparison,
     complexityScoreDelta,
     initialLeakage,
     leakage,
@@ -546,6 +548,10 @@ export async function runPartialVerification({
   }
   if (autofixApplied) targets.add("security");
   if (targets.has("tests") && testsPassed(ci)) await checkpoint("tests", { ci });
+  // 関数スナップショットは関数数と組でなければ検証できない (`complexity-comparison.mjs`
+  // の `valid`)。 関数数を残していない古いチェックポイントを引き継いだ場合は、
+  // 取りこぼしを検出できないので集計比較へ落ちる。 ゲートは緩まない。
+  let baselineFunctionComplexity = previous.anatomia?.baselineFunctionComplexity ?? null;
   let baselineComplexity = typeof previous.anatomia?.baselineComplexityScore === "number"
     ? {
         score: previous.anatomia.baselineComplexityScore,
@@ -573,10 +579,12 @@ export async function runPartialVerification({
     ]);
     analysis = currentAnalysis;
     baselineComplexity = baseline?.quality?.complexity ?? null;
+    baselineFunctionComplexity = baseline?.quality?.functionComplexity ?? null;
     await checkpoint("anatomia", {
       analysis,
       baselineComplexityScore: baselineComplexity?.score ?? null,
       baselineComplexityFunctionCount: baselineComplexity?.functions ?? null,
+      baselineFunctionComplexity,
       analysisSource: "anatomia-cli",
     });
   }
@@ -600,7 +608,7 @@ export async function runPartialVerification({
     firstAnalysis: null,
     finalAnalysis: analysis,
     baseline: baselineComplexity
-      ? { quality: { complexity: baselineComplexity } }
+      ? { quality: { complexity: baselineComplexity, functionComplexity: baselineFunctionComplexity } }
       : null,
     reviewer,
     unifiedDiff: submitted.unifiedDiff ?? null,
@@ -904,6 +912,7 @@ export function createPrReviewRunner({
           analysis: initial,
           baselineComplexityScore: baseline ? baseline.quality.complexity.score : null,
           baselineComplexityFunctionCount: baseline?.quality.complexity.functions ?? null,
+          baselineFunctionComplexity: baseline?.quality.functionComplexity ?? null,
           analysisSource: "anatomia-cli",
         });
       }

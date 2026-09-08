@@ -425,13 +425,22 @@ export const PR_VIEW_SOURCE = `
     const wrapper = document.createElement('div');
     const list = element('dl', 'meta');
     definition(list, '解析元', pr.anatomia.source);
-    definition(list, 'complexity score', pr.anatomia.baselineComplexityScore === null
+    const comparison = pr.anatomia.complexityComparison;
+    definition(list, 'complexity score (集計)', pr.anatomia.quality?.complexity?.score ?? '未計測');
+    definition(list, '比較方式', comparison?.mode === 'matched-functions'
+      ? '対応付けた関数どうし'
+      : '集計スコア (' + (comparison?.reason || '従来方式') + ')');
+    definition(list, '悪化スコア差', pr.anatomia.baselineComplexityScore === null
       ? '計画により未計測'
       : pr.anatomia.complexityScoreDelta === null
         ? '比較対象の基準関数を確認できないため未計測'
-        : pr.anatomia.baselineComplexityScore
-          + ' → ' + (pr.anatomia.baselineComplexityScore + pr.anatomia.complexityScoreDelta)
-          + ' (Δ ' + pr.anatomia.complexityScoreDelta + ')');
+        : pr.anatomia.complexityScoreDelta);
+    if (comparison?.mode === 'matched-functions') {
+      definition(list, '対応付け / 追加・未対応 / 削除・未対応',
+        comparison.compared + ' / ' + comparison.added + ' / ' + comparison.removed);
+      definition(list, '新規関数の最大値 (呼び出し出次数 + 1)', comparison.addedMaximum);
+      definition(list, '本体不変で変化した関数', comparison.graphContextChanges ?? 0);
+    }
     definition(list, '対象ドメイン', (pr.anatomia.domain && pr.anatomia.domain.hasTargetDomain)
       ? (pr.anatomia.domain.targetDomains || [])
           .map((entry) => (entry && entry.name) || entry).join(', ') || 'あり'

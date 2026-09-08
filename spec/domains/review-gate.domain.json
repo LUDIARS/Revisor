@@ -24,6 +24,9 @@
     },
     {
       "pathPattern": "(^|/)test/(?:review-gate|security-scan)\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)(src/complexity-comparison\\.mjs|test/complexity-comparison\\.test\\.mjs)$"
     }
   ],
   "cardTemplate": "Summarise the \"review-gate\" domain: ローカル PR のマージ可否判定ポリシー (gate/advisory 判定・非コード変更の application domain 除外・セキュリティスキャン結果の扱い)。",

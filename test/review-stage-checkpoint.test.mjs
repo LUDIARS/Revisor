@@ -247,3 +247,11 @@ test("verification reruns a stage that has not passed for this head", async () =
   assert.deepEqual(checkpoints.map((entry) => entry.stage), ["tests"]);
   assert.deepEqual(result.reusedStages, ["anatomia", "review", "security"]);
 });
+
+test("checkpoints preserve versioned baseline comparison evidence", async () => {
+  const store=storeDouble({checkStatus:"running",headSha:HEAD,reasons:[]});
+  const reporter=new LocalPrReporter(store);
+  const snapshot={version:1,metric:"call-out-degree-plus-one",functions:[{key:"key",structuralHash:null,value:1}]};
+  await reporter.reviewStageCompleted({localPrId:"PR1",stage:"anatomia",headSha:HEAD,analysis:analysisFixture(),baselineComplexityScore:100,baselineComplexityFunctionCount:1,baselineFunctionComplexity:snapshot});
+  assert.deepEqual(store.record.anatomia.baselineFunctionComplexity,snapshot);
+});

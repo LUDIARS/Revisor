@@ -19,6 +19,8 @@ function analysisProjection(result) {
     baselineComplexityScore: result.baselineComplexityScore,
     baselineComplexityFunctionCount: result.baselineComplexityFunctionCount,
     complexityScoreDelta: result.complexityScoreDelta,
+    baselineFunctionComplexity: result.baselineFunctionComplexity ?? null,
+    complexityComparison: result.complexityComparison ?? null,
     source: result.analysisSource,
   };
 }
