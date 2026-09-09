@@ -7,6 +7,7 @@ import {
   REVIEW_LANES,
 } from "./review-lane.mjs";
 import { serviceLog } from "./service-log.mjs";
+import { selectAuxiliaryReviewer } from "./auxiliary-model-selection.mjs";
 
 const WORKER_ENTRY = fileURLToPath(new URL("./worker-entry.mjs", import.meta.url));
 
@@ -188,6 +189,18 @@ export class PrReviewWorkerPool {
       if (taskIndex === -1) return;
       const worker = this.#idle.shift();
       const [task] = this.#waiting.splice(taskIndex, 1);
+      if (task.request?.stage === "reviewer" && task.request.options?.purpose === "auxiliary") {
+        const reviewer = selectAuxiliaryReviewer(
+          [...this.#active.values()].map((active) => active.request),
+        );
+        task.request = { ...task.request, options: {
+          ...task.request.options, reviewer, forcedModel: "", forcedEffort: "",
+        } };
+        this.log("auxiliary_model_selected", {
+          reviewer, localPrId: task.request.localPrId ?? null,
+          reason: "fewest_active_review_calls",
+        });
+      }
       task.worker = worker;
       task.workerId = this.#workerIds.get(worker) ?? "worker";
       task.status = "running";

@@ -186,6 +186,12 @@ export async function runReviewWithCapacityFallback(
   if (typeof execute !== "function") {
     throw new TypeError("A reviewer executor function is required.");
   }
+  // Auxiliary execution owns its bounded capacity fallback and never inherits
+  // the review override. Do not repeat a two-provider attempt here.
+  if (options.purpose === "auxiliary") {
+    const result = await execute({ ...options, forcedModel: "", forcedEffort: "" });
+    return { ...result, reviewer: result.reviewer ?? options.reviewer };
+  }
   // A forced model pins the reviewer family too, so the reported reviewer
   // matches what actually ran instead of the one selection asked for.
   const forcedReviewer = forcedReviewerFor(forcedModel);
@@ -854,10 +860,9 @@ export function createPrReviewRunner({
         env,
         transport,
       });
-      // The forced model overrides the author-based cross-check selection so
-      // the plan advisor and narrative reconciliation — which call the reviewer
-      // directly rather than through the capacity wrapper — report and run the
-      // same reviewer as every other stage.
+      // The forced model overrides author-based cross-check selection for review
+      // judgments such as the plan advisor. Auxiliary narrative work is selected
+      // independently by the review worker pool.
       let externalReviewer = forcedReviewerFor(settings.forcedReviewModel)
         ?? reviewerForProvider(
           authorContext?.provider,

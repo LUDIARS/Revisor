@@ -35,7 +35,7 @@ const BODY = `
           <option value="opus">Claude Opus に固定</option>
           <option value="gpt-5.6-sol">Codex Sol に固定</option>
         </select>
-        <span class="note">指定するとレビュアー選定と容量不足時の系列切替を上書きし、全レビューがこのモデルで走ります。容量不足になっても別系列へは切り替わらず、審査が失敗として表面化します。</span>
+        <span class="note">審査判断のモデルを固定します。テスト自動修正とPR説明生成は対象外で、空き状況からTerraまたはSonnetを選びます。固定した審査が容量不足になった場合は別系列へ切り替えません。</span>
       </div>
       <div class="field">
         <label for="forced-review-effort">レビュー effort の強制指定</label>
@@ -45,7 +45,7 @@ const BODY = `
           <option value="medium">Medium に固定</option>
           <option value="high">High に固定</option>
         </select>
-        <span class="note">指定すると investigator、judge、test autofix、narrative、plan advisor を含む全レビューの effort を上書きします。Codex Security スキャンは独立した設定です。</span>
+        <span class="note">investigator、judge、plan advisor のeffortを上書きします。テスト自動修正とPR説明生成の補助用途には適用しません。Codex Security スキャンは独立した設定です。</span>
       </div>
       <div class="field">
         <label class="check">

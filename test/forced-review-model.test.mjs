@@ -49,17 +49,15 @@ test("falls back to no override when the settings cannot be read", () => {
   assert.equal(configuredForcedReviewModel({}, () => ({ forcedReviewModel: "opus" })), "opus");
 });
 
-test("replaces the purpose-derived model on both reviewer families", () => {
-  // 補助用途なら sonnet / terra が選ばれる呼び出しに強制をかける。 用途に
-  // かかわらず強制が勝つことは、既定と違う側でしか確かめられない。
+test("keeps auxiliary models independent of review overrides", () => {
   assert.deepEqual(
     reviewerInvocation("claude-opus", { purpose: "auxiliary", forcedModel: "opus" }).args,
-    ["--model", "opus", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
+    ["--model", "sonnet", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
   );
   assert.deepEqual(
     reviewerInvocation("codex-sol", { purpose: "auxiliary", forcedModel: "gpt-5.6-sol" }).args,
     [
-      "exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium",
+      "exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium",
       "--sandbox", "workspace-write", "-",
     ],
   );
@@ -108,8 +106,8 @@ test("leaves the purpose-derived model alone when nothing is forced", () => {
   );
 });
 
-// runReviewer is the single choke point every review path funnels into, so the
-// override has to hold even when the caller asked for the other family.
+// runReviewer is the single choke point for review judgments, so the override
+// has to hold even when the caller asked for the other family.
 test("forces the reviewer family and model whatever the caller selected", async () => {
   let invocation = null;
   await runReviewer({

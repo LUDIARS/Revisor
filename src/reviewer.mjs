@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { claudeSessionCapacityUnavailable } from "./claude-capacity.mjs";
 import { forcedReviewerFor } from "./forced-review-model.mjs";
 import { codexSandboxArgs, runCodexAwareCli } from "./codex-runtime.mjs";
+import { serviceLog } from "./service-log.mjs";
 
 // Persisted reviewer ids identify a provider family for config compatibility.
 // The concrete model comes from what the call is *for*, not from the diff size.
@@ -41,6 +42,7 @@ export function reviewerInvocation(reviewer, {
   env = process.env,
   platform = process.platform,
 } = {}) {
+  if (purpose === "auxiliary") forcedModel = "";
   // A forced model replaces the purpose-derived one but must belong to the
   // reviewer being invoked; the callers resolve the reviewer from the same
   // registry, so a mismatch here is a wiring bug rather than bad config.
@@ -108,7 +110,7 @@ export function reviewerForProvider(provider, fallbackReviewer, {
 // plan advisor being the one. It asks a question about the diff and consumes a
 // JSON reply, so granting it write access to a worktree whose contents are later
 // committed would be privilege it has no use for, guarded only by the prompt.
-export async function runReviewer({
+async function runSingleReviewer({
   reviewer,
   cwd,
   prompt,
@@ -126,10 +128,8 @@ export async function runReviewer({
   sessionIdFactory = randomUUID,
   detectClaudeCapacity = claudeSessionCapacityUnavailable,
 } = {}) {
-  // Every review path — judge, investigator, test autofix, narrative and the
-  // plan advisor — funnels into this function, so resolving the override here
-  // is what makes "forced" mean forced. Doing it at the selection sites would
-  // leave whichever caller was missed quietly running the old model.
+  // Review judgments retain their override; runReviewer strips both overrides
+  // before auxiliary calls reach this single-attempt executor.
   const activeReviewer = forcedReviewerFor(forcedModel) ?? reviewer;
   const sessionId = activeReviewer === "claude-opus" ? sessionIdFactory() : null;
   const invocation = reviewerInvocation(activeReviewer, {
@@ -152,6 +152,25 @@ export async function runReviewer({
     ...result,
     stderr: `${result.stderr ?? ""}\nClaude capacity unavailable: rate_limit (HTTP 429)`.trim(),
   };
+}
+
+/** @implements SPEC-AUXILIARY-MODEL-CAPACITY */
+export async function runReviewer(options, dependencies = {}) {
+  if (options.purpose !== "auxiliary") return runSingleReviewer(options, dependencies);
+  const selected = {
+    ...options,
+    reviewer: options.reviewer ?? "codex-sol",
+    forcedModel: "",
+    forcedEffort: "",
+  };
+  const first = await runSingleReviewer(selected, dependencies);
+  if (first.ok || !reviewerCapacityUnavailable(first)) return { ...first, reviewer: selected.reviewer };
+  const reviewer = alternateReviewer(selected.reviewer);
+  (dependencies.log ?? serviceLog)("auxiliary_model_capacity_fallback", {
+    from: selected.reviewer, to: reviewer,
+  });
+  const second = await runSingleReviewer({ ...selected, reviewer }, dependencies);
+  return { ...second, reviewer };
 }
 
 export function alternateReviewer(reviewer) {

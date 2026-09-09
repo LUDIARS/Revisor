@@ -5,6 +5,9 @@
   "templateRules": [],
   "membership": [
     {
+      "pathPattern": "(^|/)(?:src/auxiliary-model-selection|test/auxiliary-model-capacity\\.test)\\.mjs$"
+    },
+    {
       "pathPattern": "(^|/)src/(?:anatomia|pr-narrative|review-plan|review-stage-progress|review-strategy|reviewer|retry-review|runner|test-autofix)\\.mjs$"
     },
     {
@@ -49,6 +52,7 @@
   "specRefs": [
     "review-plan — 変更種別と規模ごとの審査ステージ設計",
     "review-plan — SPEC-REVIEW-MODEL-BY-PURPOSE",
+    "review-plan — SPEC-AUXILIARY-MODEL-CAPACITY",
     "review-cost-control — review model cost and retry control",
     "review-plan — SPEC-PR-NARRATIVE-RECONCILIATION",
     "crash-recovery — 段階ごとのチェックポイント"

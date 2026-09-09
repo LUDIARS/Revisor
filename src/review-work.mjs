@@ -46,12 +46,12 @@ export async function runReviewWork(work, {
       return runTests(options);
     case REVIEW_WORK_STAGES.REVIEW:
       // 審査ステージはすべてここを通るので、強制モデルの解決はこの 1 箇所で
-      // 済む。judge / investigator / test autofix / narrative / plan advisor の
-      // どの経路も個別に設定を読まない。
+      // 済む。補助用途ではモデルとeffortの強制を明示的に除外する。
       return review({
         forcedModel: forcedReviewModel(),
         forcedEffort: forcedReviewEffort(),
         ...options,
+        ...(options.purpose === "auxiliary" ? { forcedModel: "", forcedEffort: "" } : {}),
       });
     case REVIEW_WORK_STAGES.SECURITY:
       return security(options);

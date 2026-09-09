@@ -101,7 +101,16 @@ section 置換、leakage / verification / checkpoint / cost skip、head 一致�
   `gpt-5.6-sol` を使う。investigator、judge、plan advisor はいずれも審査判断なのでこちらに含む。
 - `auxiliary` は審査判断を行わない機械作業専用である。Claude 系列は `sonnet`、Codex 系列は
   `gpt-5.6-terra` を使う。現時点では test autofix と PR narrative 整合だけが明示指定する。
-- `forcedReviewModel` がある場合は用途より優先し、補助タスクも指定された strong モデルを使う。
+- `forcedReviewModel` / `forcedReviewEffort` は審査判断だけに適用し、補助タスクでは無視する。
+
+### SPEC-AUXILIARY-MODEL-CAPACITY: 補助モデルを空き状況から選ぶ
+
+テスト自動修正とPR説明生成は、審査の強制設定・作成者系列から独立して選ぶ。
+Rvのレビューワーカープールで実行中の系列別件数をdispatch時に比較し、少ない方の
+TerraまたはSonnetを選ぶ。同数はTerra優先。これはRv内の負荷の指標であり、
+他サービスやアカウント全体の利用枠を測った値ではない。
+容量不足ならもう一方を一度だけ試す。通常の失敗は再試行しない。
+選択と容量不足による切替をログに残す。補助作業のeffortは呼び出し側のlowを維持する。
 
 ## レビュー effort・分業段階
 
@@ -270,7 +279,7 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 
 通常、レビューモデルは呼び出しの用途 (`purpose`) が決める — 審査判断は必ず strong 側
 (`opus` / `gpt-5.6-sol`)、補助タスクだけが auxiliary 側へ降りる (SPEC-REVIEW-MODEL-BY-PURPOSE)。
-運用側で「しばらく全部このモデルで見たい」ときに、その選択ごと踏み潰す設定が
+運用側で「審査判断をこのモデルで行う」ときに、その選択を上書きする設定が
 `forcedReviewModel` である。`forcedReviewEffort` は同様に各 review
 stage が選んだ effort を上書きする。モデルは空文字が既定で、そのときは用途ごとのモデル選択を
 維持する。effort は 2026-08-23 の運用指示により `medium` を既定とし、空文字へ明示変更した
@@ -288,7 +297,7 @@ stage が選んだ effort を上書きする。モデルは空文字が既定で
    審査を進めるが、モデルを固定している間にそれをやると、運用者が外したはずのモデルで
    黙って審査することになる。固定中は切替えず、容量不足を審査の失敗として表面化させる。
 4. 解決は審査ステージの入口 (`runReviewWork` の REVIEW) 1 箇所で行う。judge・investigator・
-   test autofix・narrative・plan advisor はすべてここを通るため、個別の呼び出し側が設定を
+   test autofix・narrative・plan advisor はすべてここを通る。補助用途は強制設定を除外し、個別の呼び出し側が設定を
    読む必要がない。逆に選定側だけで上書きすると、拾い漏れた経路が黙って旧モデルで走る。
 5. 設定を読めない環境では「強制なし」に倒す。審査ステージは子ワーカーで走るので、設定
    ファイルが無い / 壊れている状況で審査そのものを落とすと、強制を使っていない環境まで
