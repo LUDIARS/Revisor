@@ -19,6 +19,7 @@ function review(number, quality = {}) {
           value: 4,
         })),
       },
+      projectOrphans: { status: "measured", scope: "project", count: 0 },
       changedOrphans: [], ...quality,
     }, architecture: { isolatedChangedAnchors: [] } },
   };
@@ -51,16 +52,20 @@ test("high absolute complexity suggests refactoring without requiring a baseline
   assert.equal(refactoringProposal(incompleteSnapshot).status, "unmeasured");
 });
 
-test("isolated anchors are deduplicated across the two reports", () => {
-  const pr = review(1, { changedOrphans: ["a", "b", "c"].map((anchor) => ({ anchor })) });
-  pr.anatomia.architecture.isolatedChangedAnchors = ["a", "b", "c", "d"];
+test("project-wide orphan count includes unchanged code and ignores diff-local arrays", () => {
+  const pr = review(1, { projectOrphans: { status: "measured", scope: "project", count: 4 } });
+  pr.anatomia.architecture.isolatedChangedAnchors = ["a", "b", "c", "d", "e"];
   assert.equal(refactoringProposal(pr).status, "clear");
-  pr.anatomia.architecture.isolatedChangedAnchors.push("e");
+  pr.anatomia.quality.projectOrphans.count = 120;
   assert.equal(refactoringProposal(pr).status, "suggested");
+  assert.equal(refactoringProposal(pr).projectOrphanCount, 120);
+  delete pr.anatomia.quality.projectOrphans;
+  assert.equal(refactoringProposal(pr).status, "unmeasured");
+  assert.equal(refactoringProposal(pr).projectOrphanCount, null);
 });
 
 test("new healthy evidence clears the project marker; stale, closed and running reviews do not", () => {
-  const old = review(1, { complexity: { functions: 10, score: 30 } });
+  const old = review(1, { complexity: { functions: 12, score: 30 } });
   const healthy = review(2);
   const stale = { ...review(3), headSha: "unreviewed" };
   const closed = { ...review(4), status: "closed" };

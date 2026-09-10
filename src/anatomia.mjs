@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { runProcess } from "./process.mjs";
+import { analyzeProjectOrphans } from "./project-orphans.mjs";
 
 export const REVISOR_ANATOMIA_MODEL = "claude-sonnet-4-6";
 
@@ -94,6 +95,7 @@ export async function analyzePr({
   cwd,
   base,
   enforceDualLayerDomainGate = false,
+  includeProjectOrphans = false,
   run = runProcess,
 }) {
   const result = await run({
@@ -129,5 +131,14 @@ export async function analyzePr({
       result.stderr.trim() || result.stdout.trim()
     }`);
   }
-  return parseJson(result.stdout, "Anatomia PR analysis");
+  const analysis = parseJson(result.stdout, "Anatomia PR analysis");
+  if (includeProjectOrphans) {
+    analysis.quality = {
+      ...analysis.quality,
+      projectOrphans: await analyzeProjectOrphans({
+        cliPath, cwd, run, env: analysisEnv({ ANATOMIA_CACHE: "off" }),
+      }),
+    };
+  }
+  return analysis;
 }

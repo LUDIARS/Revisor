@@ -576,6 +576,7 @@ export async function runPartialVerification({
         cliPath,
         cwd: worktrees.head,
         base: worktrees.mergeBase,
+        includeProjectOrphans: true,
       }),
       stageEnabled(plan, "anatomia_code_analysis")
         ? analyze({
@@ -768,7 +769,11 @@ export function createPrReviewRunner({
       // dual-layer enforcement decision is made once from settings.
       const enforceDualLayerDomainGate = settings.anatomiaDualLayerGateMode === "enforced";
       const executeAnalysis = (options) =>
-        runStage(REVIEW_WORK_STAGES.ANALYZE, { ...options, enforceDualLayerDomainGate }, 1);
+        runStage(REVIEW_WORK_STAGES.ANALYZE, {
+          ...options,
+          enforceDualLayerDomainGate,
+          includeProjectOrphans: options.base !== "HEAD",
+        }, 1);
       const executeInitialAnalysis = (options) =>
         runStage(REVIEW_WORK_STAGES.INITIAL_ANALYZE, options, 1);
       const executeSecurity = (options) => runStage(REVIEW_WORK_STAGES.SECURITY, options, 2);

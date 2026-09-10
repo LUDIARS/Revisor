@@ -13,6 +13,7 @@ export async function runProcess({
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let stdinFailed = false;
     let invocation = { command, args, env };
     try {
       if (isGitCommand(command)) invocation = managedGitInvocation(args, { cwd, env });
@@ -55,7 +56,14 @@ export async function runProcess({
       finish({ ok: false, stdout, stderr: error.message, exitCode: null });
     });
     child.on("close", (exitCode) => {
-      finish({ ok: exitCode === 0, stdout, stderr, exitCode });
+      finish({ ok: exitCode === 0 && !stdinFailed, stdout, stderr, exitCode });
+    });
+    child.stdin.on("error", (error) => {
+      // A child can close its input while end() is still writing. Stream errors
+      // do not reach child.on('error'); without this handler they kill the worker.
+      // Await close (or timeout) so the child is reaped and its diagnostics retained.
+      stdinFailed = true;
+      stderr += `\nstdin write failed (${error.code ?? "unknown"})`;
     });
     child.stdin.end(stdin, "utf8");
   });

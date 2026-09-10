@@ -1,6 +1,6 @@
 {
   "name": "runtime-execution",
-  "description": "Policy-neutral child-process execution primitives used by Revisor adapters, including captured output, timeout termination, platform launch shims (the Windows cmd.exe shim for npm CLIs and the opt-in WSL launch for the codex CLI), the Windows-native Codex sandbox-launch workaround, and per-call environment forwarding.",
+  "description": "Policy-neutral child-process execution primitives used by Revisor adapters, including captured output, safe stdin delivery, timeout termination, platform launch shims (the Windows cmd.exe shim for npm CLIs and the opt-in WSL launch for the codex CLI), the Windows-native Codex sandbox-launch workaround, and per-call environment forwarding.",
   "presetRules": [],
   "templateRules": [],
   "membership": [
@@ -23,9 +23,10 @@
       "namePattern": "runCodexAwareCli|buildWslCodexArgs|codexRuntimeConfig|codexSandboxMode|codexSandboxArgs|windowsPathToWslPath|posixShellQuote|quoteWslBinary|wslLauncherEnv"
     }
   ],
-  "cardTemplate": "Summarise the runtime-execution domain: policy-neutral child-process invocation, timeout ownership, captured output, and environment forwarding.",
+  "cardTemplate": "Summarise the runtime-execution domain: policy-neutral child-process invocation, safe stdin delivery, timeout ownership, captured output, and environment forwarding.",
   "mechanics": [
     "child-process-invocation",
+    "stdin-delivery-failure",
     "timeout-termination",
     "environment-forwarding",
     "wsl-launch-selection",

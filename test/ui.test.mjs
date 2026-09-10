@@ -223,7 +223,9 @@ test("the dashboard keeps the operational panels and hands PR triage to the top 
   assert.match(page, /<th>リファクタリング<\/th>/);
   assert.match(page, /◆ リファクタリング提案 \(助言\)/);
   assert.match(page, /根拠 PR #/);
-  assert.match(page, /マージは妨げません。孤立要素は差分内の観測値です。/);
+  assert.match(page, /プロジェクト全体の孤立関数: /);
+  assert.match(page, /マージは妨げません。/);
+  assert.match(page, /孤立関数は静的に呼び出し元を確認できない関数であり、不要コードの断定ではありません。/);
   assert.match(page, /request\('\/api\/releases'\)/);
   assert.doesNotMatch(page, /push guard/i);
   assert.doesNotMatch(page, /<h2>テストワークフロー<\/h2>/);

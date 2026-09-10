@@ -1,11 +1,11 @@
 /** @implements SPEC-REFACTORING-PROPOSAL
  * Derive an advisory project marker from the latest measured PR evidence.
- * Diff-local isolation counts are never presented as a whole-project census.
+ * Project isolation uses the uncapped whole-project count, never diff-local arrays.
  */
 export const REFACTORING_THRESHOLDS = Object.freeze({
   maximumScore: 50,
   minimumMaximumComplexity: 20,
-  minimumIsolatedAnchors: 5,
+  minimumProjectOrphans: 5,
 });
 
 const FUNCTION_COMPLEXITY_METRIC = "call-out-degree-plus-one";
@@ -42,20 +42,19 @@ export function refactoringProposal(pullRequest) {
     && maximumFunctionComplexity >= REFACTORING_THRESHOLDS.minimumMaximumComplexity) {
     findings.push(`関数の最大複雑度 ${maximumFunctionComplexity} (呼び出し出次数 + 1、提案: ${REFACTORING_THRESHOLDS.minimumMaximumComplexity} 以上)`);
   }
-  const orphans = quality?.changedOrphans;
-  const isolated = pullRequest?.anatomia?.architecture?.isolatedChangedAnchors;
-  // Both reports use Anatomia anchor IDs; the same function must count only once.
-  const anchors = new Set([
-    ...(Array.isArray(orphans) ? orphans.map((entry) => entry?.anchor) : []),
-    ...(Array.isArray(isolated) ? isolated : []),
-  ].filter((anchor) => typeof anchor === "string" && anchor.length > 0));
-  if (anchors.size >= REFACTORING_THRESHOLDS.minimumIsolatedAnchors) {
-    findings.push(`差分内の孤立要素 ${anchors.size} 件 (提案: ${REFACTORING_THRESHOLDS.minimumIsolatedAnchors} 件以上)`);
+  const projectOrphans = quality?.projectOrphans;
+  const orphansMeasured = projectOrphans?.status === "measured"
+    && projectOrphans.scope === "project"
+    && Number.isSafeInteger(projectOrphans.count) && projectOrphans.count >= 0;
+  if (orphansMeasured && projectOrphans.count >= REFACTORING_THRESHOLDS.minimumProjectOrphans) {
+    findings.push(`プロジェクト全体の孤立関数 ${projectOrphans.count} 件 (提案: ${REFACTORING_THRESHOLDS.minimumProjectOrphans} 件以上)`);
   }
   return {
-    status: findings.length > 0 ? "suggested" : measured ? "clear" : "unmeasured",
+    status: findings.length > 0 ? "suggested" : measured && orphansMeasured ? "clear" : "unmeasured",
     advisory: true,
     findings,
+    projectOrphanCount: orphansMeasured ? projectOrphans.count : null,
+    projectOrphanStatus: orphansMeasured ? "measured" : "unmeasured",
     sourcePrNumber: pullRequest?.number ?? null,
     sourceHeadSha: pullRequest?.reviewedHeadSha ?? null,
     thresholds: REFACTORING_THRESHOLDS,

@@ -1,11 +1,12 @@
 ---
 type: feature
 title: "runtime-execution — policy-neutral child-process boundary"
-description: "Revisor adaptersが利用する子プロセス起動、出力捕捉、timeout終了、Windows shim、呼出単位env転送の共通境界。個別CLIのpolicyや環境変数の意味は持たない。"
+description: "Revisor adaptersが利用する子プロセス起動、入出力捕捉、stdin配送失敗、timeout終了、Windows shim、呼出単位env転送の共通境界。個別CLIのpolicyや環境変数の意味は持たない。"
 service: revisor
 domain: runtime-execution
 tags:
   - child-process
+  - stdin
   - timeout
   - environment
   - wsl
@@ -14,7 +15,7 @@ related:
   - ./security-scan.md
   - ./review-plan.md
   - ../architecture.md
-updated: 2026-08-24
+updated: 2026-09-10
 ---
 
 # runtime-execution — policy-neutral child-process boundary
@@ -24,6 +25,8 @@ updated: 2026-08-24
 
 - shell文字列ではなく実行ファイルとargvを分離して起動する
 - stdout/stderrを捕捉し、timeout時は所有する子プロセスを終了する
+- stdin書き込み中に子プロセスが入力を閉じてもworkerを異常終了させず、子プロセスの
+  closeを待って実際の終了コードと入力配送失敗を失敗結果として返す
 - Windowsのnpm shim起動差を吸収する
 - 呼出側が指定した任意の `env` を子プロセスへ渡し、省略時はサービス環境を維持する
 
@@ -34,7 +37,8 @@ updated: 2026-08-24
 この境界により、`review-gate` のsecurity policyが汎用process primitiveへ逆流せず、
 CI・Anatomia・reviewerなど他adapterも同じprocess lifecycle実装を再利用できる。
 
-`env` の転送は `test/process.test.mjs` が実際に子プロセスを起動して確認する。
+`env` の転送とstdin早期close時のEPIPE処理は `test/process.test.mjs` が実際に子プロセスを
+起動して確認する。
 adapter側のtestは `execute` をstubするため、`runNamedCli` / `runProcess` が `env` を
 落としても気付けない (scanごとのstate隔離が黙って共有dirへ戻る) 唯一の箇所だから。
 

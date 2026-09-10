@@ -62,9 +62,16 @@ const CONTROLLER_SOURCE = `
       if (proposal?.sourcePrNumber != null) {
         proposalCell.append(paragraph('根拠 PR #' + proposal.sourcePrNumber));
       }
+      proposalCell.append(paragraph(proposal?.projectOrphanStatus === 'measured'
+        ? 'プロジェクト全体の孤立関数: ' + proposal.projectOrphanCount + ' 件'
+        : 'プロジェクト全体の孤立関数: 未計測'));
       if (proposal?.findings?.length) {
         proposalCell.append(listOf(proposal.findings));
-        proposalCell.append(paragraph('マージは妨げません。孤立要素は差分内の観測値です。'));
+        proposalCell.append(paragraph('マージは妨げません。'));
+        if (proposal?.projectOrphanStatus === 'measured'
+            && proposal.projectOrphanCount >= proposal.thresholds?.minimumProjectOrphans) {
+          proposalCell.append(paragraph('孤立関数は静的に呼び出し元を確認できない関数であり、不要コードの断定ではありません。'));
+        }
       }
       row.append(
         cell(repository.repository),

@@ -110,9 +110,11 @@ test("moved-head verification replans and refreshes head-dependent evidence", as
     },
   });
 
-  assert.deepEqual(calls.map(({ cwd, base }) => ({ cwd, base })), [
-    { cwd: "head-worktree", base: "merge-base" },
-    { cwd: "base-worktree", base: "HEAD" },
+  assert.deepEqual(calls.map(({ cwd, base, includeProjectOrphans }) => ({
+    cwd, base, includeProjectOrphans,
+  })), [
+    { cwd: "head-worktree", base: "merge-base", includeProjectOrphans: true },
+    { cwd: "base-worktree", base: "HEAD", includeProjectOrphans: undefined },
   ]);
   assert.equal(result.plan.source, "deterministic");
   assert.deepEqual(result.plan.testSelection.selected, ["unit"]);

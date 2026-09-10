@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runNamedCli } from "../src/process.mjs";
+import { runNamedCli, runProcess } from "../src/process.mjs";
 
 // A real child process is launched here on purpose: every other suite stubs
 // `execute`, so the only place the caller-supplied `env` is observed as the
@@ -36,4 +36,23 @@ test("keeps the service environment when no environment is given", async () => {
     if (original === undefined) delete process.env[PROBE];
     else process.env[PROBE] = original;
   }
+});
+
+test("reports a child closing stdin without crashing or hiding its exit code", async () => {
+  const result = await runProcess({
+    command: process.execPath,
+    args: [
+      "-e",
+      "process.exit(0)",
+    ],
+    // Exceed the pipe buffer so input delivery cannot finish before the child
+    // closes its read end. The child exits successfully to prove EPIPE alone
+    // still makes the command result unsuccessful.
+    stdin: "x".repeat(8 * 1024 * 1024),
+    timeoutMs: TIMEOUT_MS,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stderr, /stdin write failed \([^)]+\)/);
 });
