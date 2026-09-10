@@ -56,7 +56,7 @@ updated: 2026-08-06
 | severity=error のアーキテクチャ違反 | 20/件 (上限 60) |
 | error 未満のアーキテクチャ違反 | 4/件 (上限 12) |
 | 対象ドメイン欠如 (docs-only を除く) | 20 |
-| complexity スコア低下 | 低下幅 (上限 20) |
+| complexity スコア低下 | 加点しない (advisory 件数からも除外) |
 | 孤立した変更関数 | 4/件 (上限 12) |
 | 差分規模 | 150 行ごと +3、5 ファイルごと +2 (上限 18) |
 | 変更種別 | infra 14 / config 8 / code 6 / test・asset・generated 2 / docs 0 |

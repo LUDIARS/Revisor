@@ -125,7 +125,6 @@ export function assessMergeRisk({
   reasons = [],
   advisories = [],
   analysis = null,
-  complexityScoreDelta = null,
   leakage = null,
   ci = [],
   runtimeVerification,
@@ -164,13 +163,6 @@ export function assessMergeRisk({
     && hasAnalyzableChangedAnchors(analysis)
   ) {
     add("missing_domain", 20, "対象ドメインが未定義です");
-  }
-  if (typeof complexityScoreDelta === "number" && complexityScoreDelta < 0) {
-    add(
-      "complexity_drop",
-      Math.min(20, -complexityScoreDelta),
-      `complexity スコアが ${-complexityScoreDelta} 低下`,
-    );
   }
   const orphans = analysis?.quality?.changedOrphans ?? [];
   add("orphans", Math.min(12, orphans.length * 4), `孤立した変更関数 ${orphans.length} 件`);
@@ -217,7 +209,10 @@ export function assessMergeRisk({
   if (reasons.length > 0) {
     add("blocking_reasons", 100, `マージブロック理由 ${reasons.length} 件`);
   }
-  add("advisories", Math.min(6, advisories.length * 2), `所見 ${advisories.length} 件`);
+  // Complexity remains visible without indirectly crossing the auto-merge threshold.
+  const riskAdvisories = advisories.filter((entry) =>
+    !/^(complexity score dropped by |Call-graph complexity: |Complexity comparison uses legacy aggregate: )/.test(entry));
+  add("advisories", Math.min(6, riskAdvisories.length * 2), `所見 ${riskAdvisories.length} 件`);
 
   const score = clamp(factors.reduce((total, factor) => total + factor.points, 0));
   const { band, label } = riskBandOf(score);

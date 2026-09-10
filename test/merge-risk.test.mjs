@@ -72,6 +72,18 @@ test("the reviewer marker alone can require a human run", () => {
   assert.equal(pointsFor(runtime, "reviewer_marker"), 30);
 });
 
+test("complexity regressions and their advisory messages cannot increase merge risk", () => {
+  const input = { classification: profile(["src/a.mjs"]), analysis: CLEAN_ANALYSIS };
+  const baseline = assessMergeRisk(input);
+  const regression = assessMergeRisk({ ...input, complexityScoreDelta: -100, advisories: [
+    "complexity score dropped by 100 points",
+    "Call-graph complexity: 10 matched, 2 added, 0 removed; new maximum 30",
+    "Complexity comparison uses legacy aggregate: Function snapshots unavailable or invalid",
+  ] });
+  assert.deepEqual(regression, baseline);
+  assert.ok(assessMergeRisk({ ...input, advisories: ["another finding"] }).score > baseline.score);
+});
+
 test("a small clean documentation change scores as low risk", () => {
   const classification = profile(["README.md"], "+++ b/README.md\n+one line\n");
   const risk = assessMergeRisk({

@@ -210,9 +210,9 @@ export function gateOutcome({
   if (advisoryViolations > 0) {
     advisories.push(`${advisoryViolations} non-blocking architecture rule violation(s) remain`);
   }
-  // A skipped code analysis produces no baseline, so there is no delta to gate on.
+  // Complexity is a refactoring suggestion, never a merge prerequisite.
   if (typeof complexityScoreDelta === "number" && complexityScoreDelta <= -threshold) {
-    reasons.push(`complexity score dropped by ${Math.abs(complexityScoreDelta)} points`);
+    advisories.push(`complexity score dropped by ${Math.abs(complexityScoreDelta)} points`);
   }
   if (humanReviewRequired) {
     reasons.push(GENIUS_HUMAN_DECISION_REASON);

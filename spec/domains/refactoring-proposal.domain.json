@@ -1,0 +1,9 @@
+{
+  "name": "refactoring-proposal",
+  "description": "保存済みの解析からプロジェクトの非ブロックなリファクタリング提案を導出する。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [{ "pathPattern": "(^|/)(src/refactoring-proposal\\.mjs|test/refactoring-proposal\\.test\\.mjs|spec/feature/refactoring-proposal\\.md)$" }],
+  "specRefs": ["refactoring-proposal — SPEC-REFACTORING-PROPOSAL"],
+  "rationale": "マージ判定とは独立した、プロジェクトへの改善提案の導出責務。"
+}

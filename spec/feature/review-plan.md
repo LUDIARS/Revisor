@@ -144,7 +144,7 @@ reviewer が方針判断に必要な情報不足を返した、または validat
 policy 自体が変化した場合とする。
 
 reviewer と限定 test autofix の編集が終わった後、コミット対象の最終差分へ Anatomia を1回
-再実行する。target domain、architecture、complexity のゲートは、この最終結果だけで判定する。
+再実行する。target domain、architecture のゲートと complexity の助言は、この最終結果だけで判定する。
 
 ### コスト・品質・速度の検証モード
 
@@ -168,7 +168,7 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 
 の 3 つ。時間の大半は前 2 つなので、実測上の節約はここで得られる。
 ベースラインが無い審査では `complexityScoreDelta` は `null` になり、
-複雑度低下によるブロックは発生しない。
+複雑度低下の助言は発生しない。計測できる場合も complexity はマージを阻害しない。
 保存済みレビューにベースラインスコアだけがあり、対応する関数数を 0 より大きい数値として
 確認できない場合も、比較可能な実測ベースラインとは扱わず `complexityScoreDelta` を `null` にする。
 

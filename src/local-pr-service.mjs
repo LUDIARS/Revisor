@@ -48,6 +48,7 @@ import {
 } from "./local-version.mjs";
 import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
 import { decisionSettingsKey, PrListCache } from "./pr-list-cache.mjs";
+import { projectRefactoringProposals } from "./refactoring-proposal.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -191,7 +192,7 @@ export class LocalPrService {
   }
 
   listRepositories() {
-    return this.store.listRepositories();
+    return projectRefactoringProposals(this.store.listRepositories(), this.store.listPullRequests());
   }
 
   getRepository(repository) {

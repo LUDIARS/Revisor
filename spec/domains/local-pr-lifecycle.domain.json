@@ -72,7 +72,8 @@
     "early-qa-mode — SHA契約 (先行QA中は reviewedHeadSha を出さない)",
     "early-qa-mode — 安全境界 (マージ条件と reviewed head の意味を緩和しない)",
     "external-verification — Augur の保証記録と current head に対する読み取り時の効果導出",
-    "Local PR の内容不足でレビューを開始してしまう"
+    "Local PR の内容不足でレビューを開始してしまう",
+    "refactoring-proposal — SPEC-REFACTORING-PROPOSAL の repositories 読み取り時 projection"
   ],
   "rationale": "「この PR はもう誰かを待っているか」を決めるのは status 遷移とその読み取り時の判定であり、審査の実行 (runner) やマージ可否のポリシー (review-gate) とは別の責務。遷移を持つ LocalPrService と、遷移結果を判定へ写す pr-disposition を 1 つのドメインに置き、終局の規則が両者で食い違わないようにする。実際の squash merge 手順は local-merge、リスク評価は merge-risk が担い、ここでは status だけを解釈する。"
 }

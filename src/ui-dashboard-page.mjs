@@ -11,7 +11,7 @@ const BODY = `
     <p class="note">登録済みのローカルリポジトリです。追加は<a href="/settings">設定</a>から行います。</p>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>repository</th><th>version</th><th>root path</th><th>base</th><th>テストケース</th><th>Open PR</th></tr></thead>
+        <thead><tr><th>repository</th><th>リファクタリング</th><th>version</th><th>root path</th><th>base</th><th>テストケース</th><th>Open PR</th></tr></thead>
         <tbody id="repository-rows"></tbody>
       </table>
     </div>
@@ -54,8 +54,21 @@ const CONTROLLER_SOURCE = `
       const row = document.createElement('tr');
       const releaseProject = releaseProjects.find((candidate) =>
         candidate.repository.toLowerCase() === repository.repository.toLowerCase());
+      const proposal = repository.refactoringProposal;
+      const proposalCell = cell(proposal?.status === 'suggested'
+        ? '◆ リファクタリング提案 (助言)'
+        : proposal?.status === 'clear' ? '直近の解析では提案なし' : '未計測',
+        proposal?.status === 'suggested' ? 'warn' : '');
+      if (proposal?.sourcePrNumber != null) {
+        proposalCell.append(paragraph('根拠 PR #' + proposal.sourcePrNumber));
+      }
+      if (proposal?.findings?.length) {
+        proposalCell.append(listOf(proposal.findings));
+        proposalCell.append(paragraph('マージは妨げません。孤立要素は差分内の観測値です。'));
+      }
       row.append(
         cell(repository.repository),
+        proposalCell,
         cell(releaseProject?.version.version || '未登録',
           releaseProject?.version.status === 'ready' ? 'ok' : 'warn'),
         cell(repository.rootPath),

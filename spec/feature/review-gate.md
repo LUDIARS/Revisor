@@ -34,7 +34,6 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
   advisory 集合に載っていないゲートの不合格 (未知のゲートは fail-closed で
   ブロックする。ゲート名なしの検証失敗もブロック)
 - severity=error の変更行アーキテクチャ違反
-- complexity スコアの閾値超過低下
 - レビュアーの `PR_GATE_NEEDS_HUMAN` 報告
 - 情報流出所見
 - 設定 severity 以上のセキュリティ finding (`status: "findings"`)
@@ -44,6 +43,8 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 
 ## advisory 条件 (非ブロック)
 
+- complexity スコアの閾値超過低下。リスク加点にも使わず、プロジェクトの
+  [リファクタリング提案](refactoring-proposal.md) として報告する。
 - Anatomia の **warn 相当ゲート** の不合格 (下記):
   `spec_linkage` / `coupling_delta` / `convention_drift`
 - 孤立関数 (orphan)
@@ -83,7 +84,7 @@ binary file や Git が C-quote した非 ASCII パスも見落とさない。�
 
 **決定的ルール**が `anatomia_code_analysis` を落とした審査では、
 quality / architecture のゲートと違反を**ブロックにしない**。ベースラインが
-無いので complexity 差分も `null` になり、複雑度低下でのブロックも起きない。
+無いので complexity 差分も `null` になり、複雑度低下の助言も出さない。
 計画が「この変更に不要」と判断した検査の所見でブロックすると、誰も依頼して
 いない証拠で変更を止めることになるため。ゲートの他条件 (テスト失敗・leakage・
 対象ドメイン・`PR_GATE_NEEDS_HUMAN`) は不変。
@@ -154,7 +155,7 @@ plan`) として記録する。これは advisory であって pass ではない
   片方だけ緩和が効かない状態を作らない。
 - 維持されるもの: 相互モデルレビューは docs-only / 設定のみでも実行する
   (仕様と記述・設定値の整合性チェック)。`PR_GATE_NEEDS_HUMAN`・登録テスト・
-  leakage・複雑度・severity=error のアーキ違反・セキュリティスキャンの
+  leakage・severity=error のアーキ違反・セキュリティスキャンの
   ブロックは不変。緩和されるのは対象ドメイン欠如だけ。
 - 緩和しないもの: docs / 設定のみを理由とするマージリスクの `missing_domain`
   加点は据え置き (ブロックではなく人間の判断要否の重み付けであり、ゲートとは

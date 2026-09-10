@@ -112,7 +112,7 @@ export function buildReviewerPrompt({
     `Unified PR diff (may be truncated):\n${unifiedDiff}`,
     domainInstruction({ analysis, docsOnly, docsOrConfigOnly, codeDomainRequired }),
     stageEnabled(plan, "anatomia_code_analysis")
-      ? "Resolve newly orphaned functions and avoid a material complexity-score regression where practical."
+      ? "Report high complexity and fragmented or orphaned code as advisory refactoring suggestions. Complexity alone must never require a fix, runtime verification, or human approval for merging."
       : null,
     runtimeCheckInstruction(),
     plan ? planInstruction(plan) : null,

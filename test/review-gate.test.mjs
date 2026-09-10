@@ -127,7 +127,7 @@ test("never turns an unexplained verification failure into a pass", () => {
   assert.deepEqual(outcome.reasons, ["Anatomia gate(s) did not pass: unspecified"]);
 });
 
-test("blocks on failed tests, leakage, error violations and complexity drops", () => {
+test("blocks on failed tests, leakage and error violations but only advises complexity drops", () => {
   const outcome = evaluate(
     analysis({
       changedViolations: [
@@ -144,11 +144,11 @@ test("blocks on failed tests, leakage, error violations and complexity drops", (
   assert.deepEqual(outcome.reasons, [
     "1 registered test case(s) failed",
     "1 changed architecture rule violation(s) remain",
-    "complexity score dropped by 12 points",
     "1 potential information leakage finding(s) remain",
   ]);
   assert.deepEqual(outcome.advisories, [
     "1 non-blocking architecture rule violation(s) remain",
+    "complexity score dropped by 12 points",
   ]);
 });
 
@@ -312,7 +312,6 @@ test("the config-only relaxation covers the missing domain and nothing else", ()
   assert.deepEqual(outcome.reasons, [
     "1 registered test case(s) failed",
     "Anatomia gate(s) did not pass: rule_conformance",
-    "complexity score dropped by 14 points",
     "reviewer reported insufficient information for a safe domain/spec definition",
     "2 potential information leakage finding(s) remain",
     "1 security finding(s) at or above 'high'",
@@ -400,6 +399,12 @@ test("a control planner cannot demote a blocking architecture error to an adviso
     outcome.reasons.some((entry) => entry.includes("architecture rule violation")),
     true,
   );
+});
+
+test("a large complexity regression remains advisory", () => {
+  const outcome = evaluate(analysis(), { complexityScoreDelta: -100 });
+  assert.deepEqual(outcome.reasons, []);
+  assert.ok(outcome.advisories.includes("complexity score dropped by 100 points"));
 });
 
 test("a complexity delta that was never measured cannot block", () => {

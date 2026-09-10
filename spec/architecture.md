@@ -362,10 +362,14 @@ does not overwrite the shared hook.
 
 A local PR blocks on registered test failures, information leakage findings,
 security findings at or above the configured severity, a security scan that did
-not complete, error-severity changed architecture violations, a material
-complexity-score drop, a missing target domain, a block-severity Anatomia gate
+not complete, error-severity changed architecture violations,
+a missing target domain, a block-severity Anatomia gate
 (`rule_conformance`, `duplication`) or any gate outside the advisory set below,
 and a reviewer that reports `PR_GATE_NEEDS_HUMAN`.
+
+Complexity findings are advisory and excluded from merge-risk scoring, including
+the advisory count. High complexity or isolated code triggers a project-level
+refactoring suggestion with its measured evidence (see `feature/refactoring-proposal.md`).
 
 A security scan skipped because it is disabled in the settings is silent; a scan
 skipped because the leakage gate or the registered tests already block is an
@@ -381,7 +385,7 @@ change is never asked to invent a code domain and never blocks on the resulting
 `PR_GATE_NEEDS_HUMAN`. The final gate re-derives the exemption from the reviewed
 diff, so an autofix that reaches code files makes the change no longer docs-only
 and the missing target domain blocks again. It relaxes nothing else: tests,
-leakage, architecture violations, complexity, and every other gate apply
+leakage, architecture violations, and every other blocking gate apply
 unchanged.
 
 Spec traceability is reported, not enforced: a failed `spec_linkage` gate,
@@ -409,7 +413,7 @@ An Anatomia verification that fails while naming no gate blocks the merge; it is
 never treated as a pass.
 
 When the review plan drops code analysis there is no baseline, so the complexity
-delta is absent and cannot block, and the quality and architecture findings are
+delta is absent and produces no advisory, and the quality and architecture findings are
 recorded as advisories: gating on a check the plan deliberately did not ask for
 would block a change on evidence nobody requested. A registered test the plan did
 not select is `skipped`, which is an advisory and never a failure.

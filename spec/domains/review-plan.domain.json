@@ -55,6 +55,7 @@
     "review-plan — SPEC-AUXILIARY-MODEL-CAPACITY",
     "review-cost-control — review model cost and retry control",
     "review-plan — SPEC-PR-NARRATIVE-RECONCILIATION",
+    "refactoring-proposal — SPEC-REFACTORING-PROPOSAL の reviewer 指示",
     "crash-recovery — 段階ごとのチェックポイント"
   ],
   "rationale": "These modules jointly own how one local PR review is planned and executed. Gate interpretation remains in review-gate, Git worktree primitives remain in local-workspace, and publication remains in remote-publication."

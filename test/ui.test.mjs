@@ -220,12 +220,19 @@ test("the dashboard keeps the operational panels and hands PR triage to the top 
   assert.doesNotMatch(page, /class="cards" id="pr-cards"/);
   assert.match(page, /href="\/dashboard" class="active"/);
   assert.match(page, /<th>version<\/th>/);
+  assert.match(page, /<th>リファクタリング<\/th>/);
+  assert.match(page, /◆ リファクタリング提案 \(助言\)/);
+  assert.match(page, /根拠 PR #/);
+  assert.match(page, /マージは妨げません。孤立要素は差分内の観測値です。/);
   assert.match(page, /request\('\/api\/releases'\)/);
   assert.doesNotMatch(page, /push guard/i);
   assert.doesNotMatch(page, /<h2>テストワークフロー<\/h2>/);
   assert.match(page, /<label for="pr-body">PR内容<\/label>/);
   assert.match(page, /## 実装内容/);
   assert.match(page, /## 受け入れ条件/);
+  const script = page.match(/<script nonce="session-nonce">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  assert.doesNotThrow(() => new Function(script));
 });
 
 test("the PR board receives realtime status events and logs them below the detail", () => {

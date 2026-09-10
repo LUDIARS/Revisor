@@ -282,11 +282,13 @@ function buildGateResult({
     security,
     humanReviewRequired,
   });
-  advisories.push(complexityComparison.mode === "matched-functions"
-    ? `Call-graph complexity: ${complexityComparison.compared} matched, `
-      + `${complexityComparison.added} added, ${complexityComparison.removed} removed; `
-      + `new maximum ${complexityComparison.addedMaximum}`
-    : `Complexity comparison uses legacy aggregate: ${complexityComparison.reason}`);
+  if (codeAnalysisGating(plan)) {
+    advisories.push(complexityComparison.mode === "matched-functions"
+      ? `Call-graph complexity: ${complexityComparison.compared} matched, `
+        + `${complexityComparison.added} added, ${complexityComparison.removed} removed; `
+        + `new maximum ${complexityComparison.addedMaximum}`
+      : `Complexity comparison uses legacy aggregate: ${complexityComparison.reason}`);
+  }
   const reasons = [...new Set([...gateReasons, ...additionalReasons])];
   const runtimeVerification = assessRuntimeVerification({
     classification,
