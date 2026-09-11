@@ -14,6 +14,13 @@ import {
   withImmediateTransaction,
   withReadTransaction,
 } from "./revisor-db.mjs";
+import {
+  detachAnatomia,
+  needsAnatomiaSplit,
+  readAnatomia,
+  splitInlineAnatomia,
+  writeAnatomia,
+} from "./pull-request-anatomia.mjs";
 
 const STATE_PATH_ENV = "REVISOR_STATE_PATH";
 const QA_ELIGIBLE_CHECK_STATUSES = new Set(["queued", "running", "test_ok"]);
@@ -89,6 +96,15 @@ function parsePullRequestRecord(record) {
   };
 }
 
+/**
+ * 解析結果 (`anatomia`) を付け戻した記録。 本体に残っている値 (旧コードの書き込み) が
+ * あればそれを、 無ければ別テーブルの値を使う。 どちらにも無ければキーを作らない。
+ */
+function attachAnatomia(loaded, database, id) {
+  const anatomia = loaded.inline ? loaded.anatomia : readAnatomia(database, id);
+  return anatomia === undefined ? loaded.light : { ...loaded.light, anatomia };
+}
+
 export class LocalPrStore {
   #database = null;
   #writes = 0;
@@ -117,6 +133,7 @@ export class LocalPrStore {
       const displaced = displaceLegacyJson(this.path);
       const database = openRevisorDatabase(this.path);
       this.#importLegacy(database, displaced);
+      this.#splitAnatomia(database);
       this.#database = database;
     } catch (error) {
       throw new RevisorError(`Revisor state is unreadable: ${this.path}`, { cause: error });
@@ -160,6 +177,15 @@ export class LocalPrStore {
     }
   }
 
+  /**
+   * 本体に入っている解析結果を別テーブルへ一度だけ移す。 移行済みかは読むだけで判定し、
+   * 済んだ database を開くたびに書き込みロックを取らない (審査ワーカーは頻繁に開く)。
+   */
+  #splitAnatomia(database) {
+    if (!needsAnatomiaSplit(database)) return;
+    withImmediateTransaction(database, () => splitInlineAnatomia(database));
+  }
+
   #mutate(run) {
     const database = this.#db();
     const result = withImmediateTransaction(database, () => run(database));
@@ -183,20 +209,32 @@ export class LocalPrStore {
       .run(record.id, JSON.stringify(record));
   }
 
+  /** 一覧用の記録。 解析結果 (`anatomia`) は持たない — 単一 PR の取得で読む。 */
   #allPullRequests(database) {
     return database.prepare("SELECT record FROM pull_requests").all()
-      .map((row) => parsePullRequestRecord(row.record));
+      .map((row) => detachAnatomia(parsePullRequestRecord(row.record)).light);
+  }
+
+  #loadPullRequest(database, id) {
+    const row = database.prepare("SELECT record FROM pull_requests WHERE id = ?").get(id);
+    return row ? detachAnatomia(parsePullRequestRecord(row.record)) : null;
   }
 
   #getPullRequestRecord(database, id) {
-    const row = database.prepare("SELECT record FROM pull_requests WHERE id = ?").get(id);
-    return row ? parsePullRequestRecord(row.record) : null;
+    const loaded = this.#loadPullRequest(database, id);
+    return loaded ? attachAnatomia(loaded, database, id) : null;
   }
 
-  #savePullRequest(database, record) {
+  /**
+   * 記録を保存する。 解析結果は `anatomiaTouched` のときだけ書き直す — 状態遷移や
+   * イベント追記のたびに数 MB の解析結果を書き直さないため。
+   */
+  #savePullRequest(database, record, { anatomiaTouched = true } = {}) {
+    const { light, anatomia } = detachAnatomia(record);
     database
       .prepare("INSERT OR REPLACE INTO pull_requests (id, record) VALUES (?, ?)")
-      .run(record.id, JSON.stringify(record));
+      .run(record.id, JSON.stringify(light));
+    if (anatomiaTouched) writeAnatomia(database, record.id, anatomia);
   }
 
   emitPullRequest(type, record) {
@@ -288,7 +326,10 @@ export class LocalPrStore {
           candidate.status === "open"
           && candidate.repository.toLowerCase() === pullRequest.repository.toLowerCase()
           && candidate.headSha.toLowerCase() === pullRequest.headSha.toLowerCase());
-        if (existing) return { pullRequest: existing, created: false };
+        if (existing) {
+          // 相乗り先は再投入に使われるので、 引き継ぐ段階の成果まで揃えて返す。
+          return { pullRequest: this.#getPullRequestRecord(database, existing.id), created: false };
+        }
       }
       const timestamp = this.now();
       const number = takeCounter(database, NEXT_PR_NUMBER_KEY);
@@ -322,13 +363,27 @@ export class LocalPrStore {
     return this.#getPullRequestRecord(this.#db(), id);
   }
 
-  findExactPullRequest(repository, headSha) {
-    return this.#allPullRequests(this.#db()).find((candidate) =>
-      candidate.status === "open"
-      && candidate.repository.toLowerCase() === repository.toLowerCase()
-      && candidate.headSha.toLowerCase() === headSha.toLowerCase()) ?? null;
+  /** 1 件の解析結果だけ。 一覧の記録から提案を導くときに使う。 無ければ null。 */
+  getPullRequestAnatomia(id) {
+    const database = this.#db();
+    const loaded = this.#loadPullRequest(database, id);
+    if (!loaded) return null;
+    return (loaded.inline ? loaded.anatomia : readAnatomia(database, id)) ?? null;
   }
 
+  findExactPullRequest(repository, headSha) {
+    const database = this.#db();
+    const found = this.#allPullRequests(database).find((candidate) =>
+      candidate.status === "open"
+      && candidate.repository.toLowerCase() === repository.toLowerCase()
+      && candidate.headSha.toLowerCase() === headSha.toLowerCase());
+    return found ? this.#getPullRequestRecord(database, found.id) : null;
+  }
+
+  /**
+   * 一覧。 記録は解析結果 (`anatomia`) を持たない。 解析結果が要る処理は
+   * {@link getPullRequest} で 1 件ずつ読むこと。
+   */
   listPullRequests() {
     return this.#allPullRequests(this.#db())
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -352,8 +407,9 @@ export class LocalPrStore {
   /** @implements SPEC-DAEMONLESS-PROCESS-LOCKS */
   updatePullRequestWith(id, createPatch) {
     const outcome = this.#mutate((database) => {
-      const record = this.#getPullRequestRecord(database, id);
-      if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
+      const loaded = this.#loadPullRequest(database, id);
+      if (!loaded) throw new RevisorError(`Local PR '${id}' was not found.`);
+      const record = attachAnatomia(loaded, database, id);
       // patch 関数へはコピーを渡す。 返り値だけが反映され、引数への直接変更は捨てられる
       // — という契約を JSON ファイル時代から変えない。
       const patch = createPatch(structuredClone(record));
@@ -361,7 +417,10 @@ export class LocalPrStore {
         return { pullRequest: record, updated: false };
       }
       const merged = { ...record, ...patch, id: record.id, updatedAt: this.now() };
-      this.#savePullRequest(database, merged);
+      // 本体に残っていた解析結果は、 この書き込みで別テーブルへ移す。
+      this.#savePullRequest(database, merged, {
+        anatomiaTouched: loaded.inline || Object.hasOwn(patch, "anatomia"),
+      });
       return { pullRequest: merged, updated: true };
     });
     if (outcome.updated) this.emitPullRequest("pull_request.updated", outcome.pullRequest);
@@ -370,8 +429,9 @@ export class LocalPrStore {
 
   appendPullRequestEvent(id, event) {
     const updated = this.#mutate((database) => {
-      const record = this.#getPullRequestRecord(database, id);
-      if (!record) throw new RevisorError(`Local PR '${id}' was not found.`);
+      const loaded = this.#loadPullRequest(database, id);
+      if (!loaded) throw new RevisorError(`Local PR '${id}' was not found.`);
+      const record = attachAnatomia(loaded, database, id);
       const lifecycleEvents = Array.isArray(record.lifecycleEvents)
         ? record.lifecycleEvents
         : [];
@@ -383,7 +443,7 @@ export class LocalPrStore {
       });
       record.lifecycleEvents = lifecycleEvents.slice(-MAX_PULL_REQUEST_EVENTS);
       record.updatedAt = this.now();
-      this.#savePullRequest(database, record);
+      this.#savePullRequest(database, record, { anatomiaTouched: loaded.inline });
       return record;
     });
     this.emitPullRequest("pull_request.updated", updated);

@@ -82,7 +82,8 @@ function findByNumber(store, value) {
   if (!Number.isInteger(number)) throw new Error(`'${value}' is not a local PR number.`);
   const pullRequest = store.listPullRequests().find((candidate) => candidate.number === number);
   if (!pullRequest) throw new Error(`Local PR #${number} was not found.`);
-  return pullRequest;
+  // 一覧の記録は解析結果 (anatomia) を持たない。 単一 PR の操作・表示は全体を読む。
+  return store.getPullRequest?.(pullRequest.id) ?? pullRequest;
 }
 
 function summarize(pullRequest) {

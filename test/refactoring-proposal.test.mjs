@@ -77,3 +77,28 @@ test("new healthy evidence clears the project marker; stale, closed and running 
   assert.equal(marker([healthy, old]).sourcePrNumber, 2);
   assert.equal(marker([{ ...old, repository: "other/repo" }]).status, "unmeasured");
 });
+
+test("reads analyses newest first and stops at the first measured review", () => {
+  const visited = [];
+  const proposalOf = (pr) => {
+    visited.push(pr.number);
+    return refactoringProposal(pr);
+  };
+  const older = review(1);
+  const measured = review(2);
+  const unmeasured = { ...review(3), anatomia: { quality: {} } };
+  const [projected] = projectRefactoringProposals(
+    [repository],
+    [older, unmeasured, measured],
+    { proposalOf },
+  );
+  assert.equal(projected.refactoringProposal.sourcePrNumber, 2);
+  assert.deepEqual(visited, [3, 2]);
+});
+
+test("a review created at the same time with the higher number wins", () => {
+  const first = review(5);
+  const second = { ...review(6), createdAt: first.createdAt };
+  const [projected] = projectRefactoringProposals([repository], [second, first]);
+  assert.equal(projected.refactoringProposal.sourcePrNumber, 6);
+});

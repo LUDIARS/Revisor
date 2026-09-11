@@ -5,13 +5,13 @@
   "templateRules": [],
   "membership": [
     {
-      "pathPattern": "(^|/)src/(?:revisor-db|state-store|job-store)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:revisor-db|state-store|job-store|pull-request-anatomia)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:revisor-db|state-store(?:-concurrency)?|job-store)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:revisor-db|state-store(?:-concurrency)?|job-store|pull-request-anatomia)\\.test\\.mjs$"
     },
     {
-      "pathPattern": "src/(?:revisor-db|state-store|job-store)\\.mjs$"
+      "pathPattern": "src/(?:revisor-db|state-store|job-store|pull-request-anatomia)\\.mjs$"
     },
     {
       "namePattern": "openRevisorDatabase|withImmediateTransaction|withReadTransaction|resolveDbPath|displaceLegacyJson|archiveLegacyJson|resolveStatePath|resolveJobsPath"

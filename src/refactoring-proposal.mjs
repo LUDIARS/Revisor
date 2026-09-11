@@ -61,21 +61,48 @@ export function refactoringProposal(pullRequest) {
   };
 }
 
-export function projectRefactoringProposals(repositories, pullRequests) {
-  const latest = new Map();
+function completedReview(pr) {
+  return pr.status !== "closed" && Boolean(pr.reviewedHeadSha)
+    && pr.reviewedHeadSha.toLowerCase() === pr.headSha?.toLowerCase()
+    && ["test_ok", "action_required"].includes(pr.checkStatus);
+}
+
+// Lifecycle updates (a late merge/close) must not revive older measurements:
+// the newest review by creation time wins, then the higher number.
+function newestFirst(left, right) {
+  return String(right.createdAt).localeCompare(String(left.createdAt))
+    || right.number - left.number;
+}
+
+/**
+ * `proposalOf` lets the caller supply the analysis lazily: list records do not
+ * carry `anatomia`, and each one is megabytes, so a repository is scanned newest
+ * first and stops at its first measured review.
+ */
+export function projectRefactoringProposals(
+  repositories,
+  pullRequests,
+  { proposalOf = refactoringProposal } = {},
+) {
+  const candidates = new Map();
   for (const pr of pullRequests) {
-    if (pr.status === "closed" || !pr.anatomia || !pr.reviewedHeadSha
-      || pr.reviewedHeadSha.toLowerCase() !== pr.headSha?.toLowerCase()
-      || !["test_ok", "action_required"].includes(pr.checkStatus)) continue;
-    if (refactoringProposal(pr).status === "unmeasured") continue;
+    if (!completedReview(pr)) continue;
     const key = pr.repository.toLowerCase();
-    const previous = latest.get(key);
-    // Lifecycle updates (a late merge/close) must not revive older measurements.
-    if (!previous || String(pr.createdAt).localeCompare(String(previous.createdAt)) > 0
-      || (pr.createdAt === previous.createdAt && pr.number > previous.number)) latest.set(key, pr);
+    if (!candidates.has(key)) candidates.set(key, []);
+    candidates.get(key).push(pr);
+  }
+  const latest = new Map();
+  for (const [key, reviews] of candidates) {
+    for (const pr of reviews.sort(newestFirst)) {
+      const proposal = proposalOf(pr);
+      if (proposal.status === "unmeasured") continue;
+      latest.set(key, proposal);
+      break;
+    }
   }
   return repositories.map((repository) => ({
     ...repository,
-    refactoringProposal: refactoringProposal(latest.get(repository.repository.toLowerCase())),
+    refactoringProposal: latest.get(repository.repository.toLowerCase())
+      ?? refactoringProposal(undefined),
   }));
 }

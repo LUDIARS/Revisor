@@ -48,7 +48,7 @@ import {
 } from "./local-version.mjs";
 import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
 import { decisionSettingsKey, PrListCache } from "./pr-list-cache.mjs";
-import { projectRefactoringProposals } from "./refactoring-proposal.mjs";
+import { RefactoringProposalCache } from "./refactoring-proposal-cache.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 
@@ -161,6 +161,10 @@ export class LocalPrService {
   // まだ走っているうちに次を重ねると、同じ候補を二重に処理しにいく。
   #sweeping = false;
   #listCache = new PrListCache();
+  // 一覧の記録は解析結果を持たないので、 提案の根拠 PR だけ 1 件ずつ読む。
+  #refactoringProposals = new RefactoringProposalCache(
+    (id) => this.store.getPullRequestAnatomia?.(id) ?? null,
+  );
 
   // squash の最中にある PR の id。 マージは数分かかる (マージ前セキュリティスキャン)
   // 一方 closePullRequest は同期で status を書くので、 走っているマージが完了時に
@@ -192,7 +196,10 @@ export class LocalPrService {
   }
 
   listRepositories() {
-    return projectRefactoringProposals(this.store.listRepositories(), this.store.listPullRequests());
+    return this.#refactoringProposals.project(
+      this.store.listRepositories(),
+      this.store.listPullRequests(),
+    );
   }
 
   getRepository(repository) {
@@ -444,7 +451,9 @@ export class LocalPrService {
 
     const recovered = [];
     const failed = [];
-    for (const pullRequest of interrupted) {
+    for (const candidate of interrupted) {
+      // 一覧の記録は解析結果を持たない。 再投入は引き継ぐ段階の成果を読むので全体を読む。
+      const pullRequest = this.store.getPullRequest(candidate.id) ?? candidate;
       try {
         // 復旧失敗の通知はここが唯一の担当。 #enqueue に送らせると、直後に上書き
         // する enqueue 側の理由で 1 通出てから復旧理由でもう 1 通出てしまう。
