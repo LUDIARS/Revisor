@@ -236,6 +236,8 @@ export async function runLocalPrCommand(args, {
   if (scope === "repo" && action === "register") {
     const body = await readJsonBody(args, stdin);
     if (!body) throw new Error("repo register requires --json-file or --json-stdin.");
+    const notify = option(args, "--notify");
+    if (notify) body.notify = JSON.parse(notify);
     const registration = validateRepositoryRegistration(body);
     const repository = await localPrService.registerRepository(registration);
     write(json ? repository : `Registered ${repository.repository} (${repository.rootPath})`);

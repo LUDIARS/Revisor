@@ -23,6 +23,15 @@
       "pathPattern": "(^|/)src/(?:branch\\-push|branch\\-push\\-flag)\\.mjs$"
     },
     {
+      "pathPattern": "(^|/)src/(?:manual\\-release|repository\\-changes|repository\\-notification)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:manual\\-release|repository\\-changes|repository\\-notification)\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)spec/feature/remote\\-publication\\.md$"
+    },
+    {
       "pathPattern": "(^|/)test/branch\\-push\\.test\\.mjs$"
     },
     {

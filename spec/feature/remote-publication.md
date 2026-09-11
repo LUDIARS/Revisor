@@ -93,6 +93,24 @@ There are no LTS or maintenance lines. Older immutable tags and Releases are
 historical records, not separately operated streams. A product may project the
 released value at build/runtime but must not maintain a second release line.
 
+## Notifications and release-note API
+
+`GET /v1/repositories/:id/changes?from=&to=` exposes the registered repository's
+commit range, merged local PR metadata, release-note-shaped Markdown, and a
+sanitized notification summary. Omitting `from` selects the latest local Release
+tag. The API never returns webhook secrets, raw local paths, or unsafe mentions.
+
+Repository registration may declare `notify: { release: ["discord:name"], merged:
+["slack:name"] }`; both lists default to empty. `release` is sent only after a
+GitHub Release was created. `merged` is optional and off by default, for owners
+who want to know that the repository changed before deployment. Delivery is
+best-effort and never changes a successful Release or merge result.
+
+`revisor secret set webhook.<name> <url>` encrypts named Discord or Slack URLs.
+The legacy instance-wide `discordWebhookUrl` remains readable as `webhook.discord`
+for compatibility. Slack delivery accepts only `hooks.slack.com/services` URLs,
+uses `{text}`, neutralizes channel/user mentions, and times out after three seconds.
+
 ## Authentication and data boundary
 
 The GitHub App id and PEM private key are encrypted in `revisor.config.json`.

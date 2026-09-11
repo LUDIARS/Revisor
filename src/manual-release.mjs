@@ -12,6 +12,7 @@ import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 import { composeManualReleaseNotes } from "./release-notes.mjs";
 import { latestReleaseTag, nextManualReleaseTag } from "./release-version.mjs";
 import { git } from "./workspace.mjs";
+import { notifyRepositoryEvent } from "./repository-notification.mjs";
 
 export async function publishManualRelease({
   repository,
@@ -30,6 +31,7 @@ export async function publishManualRelease({
   writeVersion = writeLocalVersion,
   runGit = git,
   scan = scanTextForLeaks,
+  notify = notifyRepositoryEvent,
 }) {
   const branch = await runGit(repository.rootPath, ["symbolic-ref", "--short", "HEAD"]);
   if (branch !== repository.baseRef) {
@@ -112,7 +114,7 @@ export async function publishManualRelease({
     });
   }
   await writeVersion(repository.rootPath, tag);
-  return {
+  const result = {
     repository: repository.repository,
     previousVersion: currentVersion,
     version: tag.slice(1),
@@ -124,4 +126,19 @@ export async function publishManualRelease({
       ? release.html_url
       : null,
   };
+  // GitHub Release creation is the transaction boundary. Webhook observability
+  // follows it and never rolls the Release back when a destination is offline.
+  try {
+    await notify({
+      repository,
+      event: "release",
+      text: [`[${repository.repository}] Release ${tag}`, title, releaseNotes.slice(0, 800), result.releaseUrl]
+        .filter(Boolean).join("\n"),
+      env,
+    });
+  } catch {
+    // Notification is observability after the Release transaction, never a
+    // reason to report a successfully created Release as failed.
+  }
+  return result;
 }

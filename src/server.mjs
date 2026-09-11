@@ -18,6 +18,9 @@ import {
   unreachableRepositories,
 } from "./repository-access.mjs";
 import { ReleaseService } from "./release-service.mjs";
+import { collectRepositoryChanges } from "./repository-changes.mjs";
+import { git } from "./workspace.mjs";
+import { listLocalReleaseTags } from "./git-publication.mjs";
 import { createReviewContext } from "./review-context.mjs";
 import {
   createUiRequestHandler,
@@ -31,6 +34,7 @@ import { readWorkerState } from "./worker-state.mjs";
 
 function isLocalApi(pathname) {
   return pathname === "/v1/repositories"
+    || /^\/v1\/repositories\/[^/]+\/changes$/.test(pathname)
     || pathname === "/v1/local-prs"
     || pathname.startsWith("/v1/local-prs/")
     || pathname === "/v1/test-workflow"
@@ -105,6 +109,26 @@ export function createRequestHandler({
       }
       if (request.method === "GET" && url.pathname === "/v1/repositories") {
         sendJson(response, 200, { repositories: localPrService.listRepositories() });
+        return;
+      }
+      const changes = /^\/v1\/repositories\/([^/]+)\/changes$/.exec(url.pathname);
+      if (request.method === "GET" && changes) {
+        const id = decodeURIComponent(changes[1]);
+        const repository = localPrService.store?.listRepositories?.().find((entry) => entry.id === id)
+          ?? localPrService.getRepository?.(id);
+        if (!repository) {
+          sendJson(response, 404, { error: "Repository not found." });
+          return;
+        }
+        const body = await collectRepositoryChanges({
+          repository,
+          from: url.searchParams.get("from"),
+          to: url.searchParams.get("to"),
+          store: localPrService.store,
+          runGit: git,
+          listTags: listLocalReleaseTags,
+        });
+        sendJson(response, 200, body);
         return;
       }
       if (request.method === "POST" && url.pathname === "/v1/local-prs") {

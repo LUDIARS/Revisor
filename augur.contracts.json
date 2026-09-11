@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "contractsDir": "contracts",
+  "importFrom": "./contract-runtime.mjs",
+  "contracts": [
+    {
+      "id": "C-1",
+      "criterion": "C-1 collectRepositoryChanges(repository): 範囲内の commit と merged local PR、Markdown、無害化済み通知文を返す",
+      "symbol": "collectRepositoryChanges",
+      "file": "src/repository-changes.mjs",
+      "module": "contracts/collect-repository-changes.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-2",
+      "criterion": "C-2 deliverRepositoryNotifications(targets): 有効な Discord / Slack target のみを best-effort 配送する",
+      "symbol": "deliverRepositoryNotifications",
+      "file": "src/repository-notification.mjs",
+      "module": "contracts/deliver-repository-notifications.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-3",
+      "criterion": "C-3 postSlackWebhook(request): Slack URL、本文、3 秒 timeout、mention 無害化の契約を満たす",
+      "symbol": "postSlackWebhook",
+      "file": "src/slack-webhook.mjs",
+      "module": "contracts/post-slack-webhook.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    }
+  ]
+}

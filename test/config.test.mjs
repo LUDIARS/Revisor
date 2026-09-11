@@ -19,6 +19,8 @@ import {
   removeDiscordWebhookUrl,
   writeDiscordWebhookUrl,
   writeSettings,
+  optionalWebhookSecret,
+  writeWebhookSecret,
 } from "../src/config.mjs";
 import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
@@ -51,6 +53,19 @@ test("encrypts, reads, and removes the Discord webhook URL", () => {
     removeDiscordWebhookUrl(state.env);
     assert.equal(optionalDiscordWebhookUrl(state.env), null);
     assert.equal(hasDiscordWebhookUrl(state.env), false);
+  } finally {
+    removeFixture(state.directory);
+  }
+});
+
+test("encrypts named Discord and Slack webhook secrets and reads legacy Discord as webhook.discord", () => {
+  const state = fixture();
+  try {
+    writeWebhookSecret("webhook.release", "https://hooks.slack.com/services/T/B/X", state.env);
+    assert.equal(optionalWebhookSecret("webhook.release", state.env), "https://hooks.slack.com/services/T/B/X");
+    assert.equal(readFileSync(state.path, "utf8").includes("hooks.slack.com"), false);
+    writeDiscordWebhookUrl("https://discord.com/api/webhooks/123456/abc", state.env);
+    assert.equal(optionalWebhookSecret("webhook.discord", state.env), "https://discord.com/api/webhooks/123456/abc");
   } finally {
     removeFixture(state.directory);
   }

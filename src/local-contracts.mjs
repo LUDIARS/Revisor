@@ -244,7 +244,38 @@ export function validateRepositoryRegistration(body) {
   const workflow = body.workflow === undefined || body.workflow === null
     ? null
     : assertRepositoryWorkflow(body.workflow, "workflow");
-  return { repository, rootPath, baseRef, testCases, ...(workflow ? { workflow } : {}) };
+  const notify = repositoryNotify(body.notify);
+  return {
+    repository,
+    rootPath,
+    baseRef,
+    testCases,
+    ...(workflow ? { workflow } : {}),
+    ...(notify ? { notify } : {}),
+  };
+}
+
+const NOTIFY_EVENTS = ["release", "merged"];
+const NOTIFY_TARGET = /^(discord|slack):[A-Za-z0-9_.-]+$/;
+
+// リポ単位の通知先。 `release` は Releases タブの公開後、 `merged` は local PR の
+// main 反映後 (既定 off = 未指定)。 target は `discord:<name>` / `slack:<name>` で、
+// URL 本体は `revisor secret set webhook.<name>` の暗号化 secret から引く。
+function repositoryNotify(value) {
+  if (value === undefined || value === null) return null;
+  object(value, "notify");
+  const notify = {};
+  for (const key of Object.keys(value)) {
+    if (!NOTIFY_EVENTS.includes(key)) {
+      throw new Error(`notify.${key} is not a supported event (${NOTIFY_EVENTS.join(", ")}).`);
+    }
+    const targets = stringList(value[key], `notify.${key}`);
+    if (targets.some((target) => !NOTIFY_TARGET.test(target))) {
+      throw new Error(`notify.${key} targets must be discord:<name> or slack:<name>.`);
+    }
+    if (targets.length > 0) notify[key] = targets;
+  }
+  return Object.keys(notify).length > 0 ? notify : null;
 }
 
 export function validatePullRequestSubmission(body) {

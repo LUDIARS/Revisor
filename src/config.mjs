@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { decryptString, encryptString, isEncryptedBlob } from "./crypto.mjs";
 import { RevisorError } from "./errors.mjs";
 import { isDiscordWebhookUrl } from "./discord-webhook.mjs";
+import { isSlackWebhookUrl } from "./slack-webhook.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { defaultFastLaneSlots, fastLaneReservation } from "./review-lane.mjs";
 import { isForcedReviewModel } from "./forced-review-model.mjs";
@@ -565,6 +566,43 @@ export function optionalDiscordWebhookUrl(env = process.env) {
 
 export function hasDiscordWebhookUrl(env = process.env) {
   return optionalDiscordWebhookUrl(env) !== null;
+}
+
+function webhookSecretKey(name) {
+  const value = String(name ?? "").trim();
+  if (!/^webhook\.[A-Za-z0-9_.-]+$/.test(value)) {
+    throw new RevisorError("Webhook secret name must be webhook.<name>.");
+  }
+  return value;
+}
+
+export function writeWebhookSecret(name, url, env = process.env) {
+  const key = webhookSecretKey(name);
+  const value = String(url ?? "").trim();
+  if (!isDiscordWebhookUrl(value) && !isSlackWebhookUrl(value)) {
+    throw new RevisorError("Webhook URL must be a supported Discord or Slack HTTPS webhook URL.");
+  }
+  const configPath = resolveConfigPath(env);
+  const config = readConfig(env);
+  config.secrets[key] = encryptString(value, readOrCreateMasterKey(configPath, env));
+  writeConfig(config, env);
+}
+
+export function optionalWebhookSecret(name, env = process.env) {
+  const key = webhookSecretKey(name);
+  const configPath = resolveConfigPath(env);
+  const config = readConfig(env);
+  // The former instance-wide Discord setting is read as webhook.discord so old
+  // installations keep their one configured delivery target after upgrading.
+  const blob = config.secrets[key] ?? (key === "webhook.discord" ? config.secrets.discordWebhookUrl : undefined);
+  if (blob === undefined) return null;
+  try {
+    const value = decryptString(blob, readMasterKey(configPath, env)).trim();
+    if (!isDiscordWebhookUrl(value) && !isSlackWebhookUrl(value)) throw new Error("invalid webhook URL");
+    return value;
+  } catch (error) {
+    throw new RevisorError(`Webhook secret '${key}' could not be decrypted.`, { cause: error });
+  }
 }
 
 export function readGitHubAppCredentials(env = process.env) {

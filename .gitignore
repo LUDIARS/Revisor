@@ -9,3 +9,4 @@ coverage/
 # `.anatomia/*` の形にしてある。
 .anatomia/*
 !.anatomia/layers.json
+.contracts-logs*/

@@ -1,0 +1,6 @@
+{
+  "service": "revisor",
+  "include": ["src/**/*.mjs"],
+  "exclude": [],
+  "importFrom": "./contract-runtime.mjs"
+}

@@ -251,3 +251,30 @@ test("rejects an unknown change kind and a non-boolean flag", () => {
     test_cases: [{ name: "unit", command: "npm", runtime: "yes" }],
   }), /runtime must be a boolean/);
 });
+
+test("keeps validated notify targets at repository registration", () => {
+  const registration = validateRepositoryRegistration({
+    repository: "LUDIARS/Revisor",
+    root_path: "E:/Document/Ars/Revisor",
+    test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
+    notify: { release: ["discord:team", "slack:ops"], merged: [] },
+  });
+  assert.deepEqual(registration.notify, { release: ["discord:team", "slack:ops"] });
+  assert.equal("notify" in validateRepositoryRegistration({
+    repository: "LUDIARS/Revisor",
+    root_path: "E:/Document/Ars/Revisor",
+    test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
+  }), false);
+});
+
+test("rejects notify targets that are not discord:<name> or slack:<name>", () => {
+  const base = {
+    repository: "LUDIARS/Revisor",
+    root_path: "E:/Document/Ars/Revisor",
+    test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
+  };
+  assert.throws(() => validateRepositoryRegistration({ ...base, notify: { release: ["https://hooks.slack.com/x"] } }),
+    /discord:<name> or slack:<name>/);
+  assert.throws(() => validateRepositoryRegistration({ ...base, notify: { deployed: ["discord:team"] } }),
+    /not a supported event/);
+});

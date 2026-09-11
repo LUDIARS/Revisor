@@ -13,6 +13,7 @@ import {
   notifyPullRequestLifecycleWebhook,
 } from "./pr-lifecycle-notice.mjs";
 import { postDiscordWebhook } from "./discord-webhook.mjs";
+import { notifyRepositoryEvent } from "./repository-notification.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
 import { resolveDbPath } from "./revisor-db.mjs";
@@ -34,6 +35,7 @@ export function createReviewContext({
   jobStore,
   startWorker,
   postWebhook = postDiscordWebhook,
+  notifyRepository = notifyRepositoryEvent,
 } = {}) {
   const settings = readSettings(env);
   const statePath = stateStore?.path ?? resolveDbPath(env);
@@ -53,6 +55,15 @@ export function createReviewContext({
     notify: notifyConcordia,
   });
   const announceLifecycle = async (event, pullRequest) => {
+    if (event === "merged" || event === "bypass_merged") {
+      const repository = store.getRepository(pullRequest.repository);
+      await notifyRepository({
+        repository,
+        event: "merged",
+        text: pullRequestLifecycleMessage(event, pullRequest),
+        env,
+      });
+    }
     const webhookUrl = optionalDiscordWebhookUrl(env);
     if (webhookUrl) {
       return notifyPullRequestLifecycleWebhook({

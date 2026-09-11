@@ -8,6 +8,7 @@ import {
   resolveConfigPath,
   writeGitHubAppCredentials,
   writeDiscordWebhookUrl,
+  writeWebhookSecret,
 } from "./config.mjs";
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
@@ -53,6 +54,7 @@ function printHelp(stdout) {
     "  revisor config discord-webhook status",
     "  revisor config discord-webhook set --stdin",
     "  revisor config discord-webhook remove",
+    "  revisor secret set webhook.<name> <url>",
     "  revisor version show --repo <path>",
     "  revisor version set <MAJOR.MINOR.PATCH> --repo <path>",
     "  revisor push [--repo <path>] [--branch <name>] [--remote-branch <name>]",
@@ -146,6 +148,12 @@ export async function main(args, { stdin = process.stdin, stdout = process.stdou
     }
     writeGitHubAppCredentials({ appId, privateKey: await readStdin(stdin) }, process.env);
     stdout.write("GitHub App credentials saved.\n");
+    return 0;
+  }
+  if (args[0] === "secret" && args[1] === "set") {
+    if (!args[2] || !args[3]) throw new Error("secret set requires webhook.<name> and URL.");
+    writeWebhookSecret(args[2], args[3], process.env);
+    stdout.write("Webhook secret saved.\n");
     return 0;
   }
   if (

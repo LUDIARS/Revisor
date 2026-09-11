@@ -769,6 +769,10 @@ export class LocalPrService {
     return pullRequest ? decidePullRequest(pullRequest, this.loadSettings()) : null;
   }
 
+  getRepository(repository) {
+    return this.store.getRepository(repository);
+  }
+
   recordExternalVerification(id, verification) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) {

@@ -44,6 +44,24 @@ test("publishes the current base as an immediate minor GitHub Release", async ()
   assert.match(createdRelease.body, /compare\/v1\.4\.8\.\.\.v1\.5\.0/);
 });
 
+test("keeps a successful Release when its optional notification fails", async () => {
+  let wrote = false;
+  const result = await publishManualRelease({
+    repository: { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main", notify: { release: ["discord:release"] } },
+    kind: "minor", expectedVersion: "1.4.8", title: "Product 1.5", notes: "Guidance.",
+    readCredentials: () => ({}),
+    createClient: () => ({ installationToken: async () => "token", releaseByTag: async () => null,
+      createRelease: async () => ({ html_url: "https://github.example/releases/v1.5.0" }) }),
+    runGit: async (_path, args) => args[0] === "symbolic-ref" ? "main" : "abc123",
+    readVersion: async () => "1.4.8", writeVersion: async () => { wrote = true; },
+    getLocalTags: async () => ["v1.4.8"], getRemoteTags: async () => ["v1.4.8"],
+    createTag: async () => undefined, push: async () => undefined,
+    notify: async () => { throw new Error("offline"); },
+  });
+  assert.equal(result.tag, "v1.5.0");
+  assert.equal(wrote, true);
+});
+
 test("does not move local version when immediate publication fails", async () => {
   let wrote = false;
   await assert.rejects(
