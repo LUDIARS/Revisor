@@ -15,7 +15,7 @@ function text(value, label, maximum) {
 }
 
 function confirmed(body) {
-  if (body.confirm !== true) {
+  if (body.confirm !== true && body.confirmed !== true) {
     throw new Error("The immediate repository operation must be explicitly confirmed.");
   }
 }

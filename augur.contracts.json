@@ -29,6 +29,15 @@
       "module": "contracts/post-slack-webhook.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-4",
+      "criterion": "C-4 release(repository, request): confirmed major/minor request publishes through the shared coordinator and returns a canonical tag",
+      "symbol": "release",
+      "file": "src/release-service.mjs",
+      "module": "contracts/manual-release-local-api.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

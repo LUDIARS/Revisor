@@ -38,4 +38,19 @@ test("requires explicit confirmation for bootstrap and immediate publication", (
       notes: "Breaking changes.",
     },
   );
+  assert.deepEqual(
+    validateManualRelease({
+      kind: "minor",
+      expectedVersion: "1.4.8",
+      title: "1.5",
+      notes: "Additive changes.",
+      confirmed: true,
+    }),
+    {
+      kind: "minor",
+      expectedVersion: "1.4.8",
+      title: "1.5",
+      notes: "Additive changes.",
+    },
+  );
 });

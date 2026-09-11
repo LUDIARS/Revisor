@@ -3,7 +3,12 @@ import {
   inspectLocalVersionState,
 } from "./local-version.mjs";
 import { publishManualRelease } from "./manual-release.mjs";
-import { nextManualReleaseTag } from "./release-version.mjs";
+import { latestReleaseTag, nextManualReleaseTag } from "./release-version.mjs";
+import { contract } from "./contract-runtime.mjs"; /* augur-inject:import:02a82258 */
+import augurContract_02a82258 from "../contracts/manual-release-local-api.contract.mjs"; /* augur-inject:contract-predicate:02a82258 */
+import { listLocalReleaseTags } from "./git-publication.mjs";
+import { collectRepositoryChanges } from "./repository-changes.mjs";
+import { git } from "./workspace.mjs";
 
 function nextVersions(state) {
   if (state.status !== "ready") return { nextMajor: null, nextMinor: null };
@@ -21,6 +26,9 @@ export class ReleaseService {
     initializeVersion = initializeLocalVersion,
     publish = publishManualRelease,
     inspectVersion = inspectLocalVersionState,
+    listTags = listLocalReleaseTags,
+    collectChanges = collectRepositoryChanges,
+    runGit = git,
   }) {
     if (!store || !publicationCoordinator) {
       throw new TypeError("Release service requires a store and publication coordinator.");
@@ -31,6 +39,9 @@ export class ReleaseService {
     this.initializeVersion = initializeVersion;
     this.publish = publish;
     this.inspectVersion = inspectVersion;
+    this.listTags = listTags;
+    this.collectChanges = collectChanges;
+    this.runGit = runGit;
   }
 
   async listProjects() {
@@ -61,13 +72,34 @@ export class ReleaseService {
     });
   }
 
-  async release(repositoryName, release) {
+  async release(repositoryName, request) {
     const repository = this.#repository(repositoryName);
-    return this.publicationCoordinator.run(() => this.publish({
-      repository,
-      ...release,
+    return release(repository, request, {
+      publicationCoordinator: this.publicationCoordinator,
+      publish: this.publish,
       env: this.env,
-    }));
+    });
+  }
+
+  async releaseState(repositoryName) {
+    const repository = this.#repository(repositoryName);
+    const version = await this.inspectVersion(repository.rootPath);
+    const latestTag = latestReleaseTag(await this.listTags(repository.rootPath, repository.baseRef));
+    const changes = await this.collectChanges({
+      repository,
+      store: this.store,
+      runGit: this.runGit,
+      listTags: this.listTags,
+    });
+    return {
+      repository: repository.repository,
+      id: repository.id,
+      version,
+      latestReleaseTag: latestTag,
+      nextMajor: version.status === "ready" ? nextManualReleaseTag(version.version, "major") : null,
+      nextMinor: version.status === "ready" ? nextManualReleaseTag(version.version, "minor") : null,
+      unreleasedCommitCount: changes.commits.length,
+    };
   }
 
   #repository(repositoryName) {
@@ -76,3 +108,21 @@ export class ReleaseService {
     return repository;
   }
 }
+
+export async function release(repository, request, options) {
+  return options.publicationCoordinator.run(() => options.publish({
+    repository,
+    ...request,
+    env: options.env,
+  }));
+}
+
+// @ts-expect-error augur-inject
+release = contract(release, {
+  ...augurContract_02a82258,
+  contractId: "C-4",
+  mode: "observe",
+  sample: 1,
+  where: "src/release-service.mjs:20",
+  id: "02a82258",
+}); /* augur-inject:contract-wrap:02a82258 */

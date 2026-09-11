@@ -111,6 +111,23 @@ The legacy instance-wide `discordWebhookUrl` remains readable as `webhook.discor
 for compatibility. Slack delivery accepts only `hooks.slack.com/services` URLs,
 uses `{text}`, neutralizes channel/user mentions, and times out after three seconds.
 
+## Local API / CLI からの Release
+
+同一ホストの自動化は、loopback 限定の `GET /v1/repositories/:id/release-state`
+で登録 checkout の local version、最新 Release tag、次の major/minor tag、および未公開
+commit 数を読む。`:id` は store record id と `owner/name` のいずれでも指定できる。
+
+`POST /v1/repositories/:id/releases` は `{kind, expectedVersion, title, notes,
+confirmed:true}` を受け、UI と同じ `validateManualRelease` と `ReleaseService.release`
+を経由する。したがって publication coordinator により local PR merge と直列化され、
+patch Release や UI とは異なる公開経路を作らない。期待 version の不一致、未初期化
+version、base 以外の checkout は 409、入力不正は 400 とする。
+
+`revisor release <owner/name> --kind major|minor --title <text> --notes-file <path>
+--expected-version <version> [--json]` はこの local API の HTTP client であり、notes は
+UTF-8 file からだけ読む。CLI は `confirmed:true` を送信し、Release の権限判断・公開処理を
+複製しない。
+
 ## Authentication and data boundary
 
 The GitHub App id and PEM private key are encrypted in `revisor.config.json`.

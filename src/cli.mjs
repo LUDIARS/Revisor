@@ -19,6 +19,7 @@ import { startRevisor } from "./server.mjs";
 import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 import { startRuntimeDiagnostics } from "./runtime-diagnostics.mjs";
 import { serviceLog } from "./service-log.mjs";
+import { runManualReleaseCommand } from "./release-local-command.mjs";
 
 function printHelp(stdout) {
   stdout.write([
@@ -35,6 +36,7 @@ function printHelp(stdout) {
     "  revisor pr merge <number> --defer-push               # merge locally and hold the GitHub publish",
     "  revisor publish-pending [--repository <owner/name>] [--json]  # send the held publishes",
     "  revisor pr bypassed [--all] [--json]                 # bypass merges awaiting follow-up review",
+    "  revisor release <owner/name> --kind major|minor --title <text> --notes-file <path> --expected-version <version> [--json]",
     "  revisor pr unsynced [--repository <owner/name>] [--json]  # merged PRs absent from a checkout",
     "  revisor pr bypass-reviewed <number> [--note <text>]",
     "  revisor repo register --json-file <path>",
@@ -94,11 +96,18 @@ async function readStdin(stream = process.stdin) {
  * node:test 自身がレポータ用に書く V8 直列化フレームまで一緒に拾ってしまい、
  * 出力比較が実行順に依存して落ちる (test:enqueue のバイト列が混ざる実害があった)。
  */
-export async function main(args, { stdin = process.stdin, stdout = process.stdout } = {}) {
+export async function main(args, {
+  stdin = process.stdin,
+  stdout = process.stdout,
+  cwd = process.cwd(),
+  fetchImpl = fetch,
+} = {}) {
   if (args.length === 0 || args[0] === "help" || args[0] === "--help") {
     printHelp(stdout);
     return 0;
   }
+  const releaseHandled = await runManualReleaseCommand(args, { cwd, stdout, fetchImpl });
+  if (releaseHandled !== null) return releaseHandled;
   // 審査キューは記録なので、投入も参照もマージも常駐プロセス無しで完結する。
   const handled = await runLocalPrCommand(args, { stdin, stdout });
   if (handled !== null) return handled;
@@ -236,15 +245,15 @@ export async function main(args, { stdin = process.stdin, stdout = process.stdou
   if ((args[0] !== "serve" && args[0] !== "ui") || args.length !== 1) {
     throw new Error(`Unknown command '${args.join(" ")}'.`);
   }
-  const cwd = process.cwd();
+  const serviceCwd = cwd;
   // 起動より先に据える。 起動そのものが失敗した回も 「いつ、 どう終わったか」 を残す。
   startRuntimeDiagnostics({ env: process.env, command: args[0] });
   let service;
   try {
     service = await startRevisor({
-      cwd,
+      cwd: serviceCwd,
       env: process.env,
-      port: resolveManagedServicePort(cwd, process.env),
+      port: resolveManagedServicePort(serviceCwd, process.env),
     });
   } catch (error) {
     serviceLog("service_start_failed", {

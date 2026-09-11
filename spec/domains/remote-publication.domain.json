@@ -26,7 +26,13 @@
       "pathPattern": "(^|/)src/(?:manual\\-release|repository\\-changes|repository\\-notification)\\.mjs$"
     },
     {
+      "pathPattern": "(^|/)src/(?:server|cli|release\\-local\\-command|release\\-service)\\.mjs$"
+    },
+    {
       "pathPattern": "(^|/)test/(?:manual\\-release|repository\\-changes|repository\\-notification)\\.test\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:server|cli\\-release)\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)spec/feature/remote\\-publication\\.md$"
@@ -52,6 +58,7 @@
   ],
   "specRefs": [
     "remote-publication — reviewed main and human-selected Release publication",
+    "remote-publication — local API / CLI からの Release",
     "spec/plan/branch-push-design.md — authorized working-branch push"
   ],
   "rationale": "The same transaction owns recovery of the prepared squash, remote base/tag consistency, Release metadata, and local completion. Review admission and generic workspace primitives remain separate domains."

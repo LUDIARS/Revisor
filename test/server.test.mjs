@@ -614,6 +614,103 @@ test("serves version state and confirmed release actions through the UI session"
   ]);
 });
 
+test("publishes a confirmed manual release through the loopback API by record id", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const calls = [];
+  const repository = { id: "repo-7", repository: "LUDIARS/Product", rootPath: state.directory, baseRef: "main" };
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: { store: { listRepositories: () => [repository] } },
+    releaseService: {
+      release: async (name, input) => {
+        calls.push([name, input]);
+        return { repository: name, tag: "v2.0.0" };
+      },
+    },
+  });
+  try {
+    const output = response();
+    await handler(request({
+      method: "POST",
+      url: "/v1/repositories/repo-7/releases",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({
+        kind: "major", expectedVersion: "1.4.8", title: "Product 2", notes: "Breaking changes.", confirmed: true,
+      }),
+    }), output);
+    assert.equal(output.status, 200);
+    assert.deepEqual(JSON.parse(output.body).release, { repository: "LUDIARS/Product", tag: "v2.0.0" });
+    assert.deepEqual(calls, [["LUDIARS/Product", {
+      kind: "major", expectedVersion: "1.4.8", title: "Product 2", notes: "Breaking changes.",
+    }]]);
+  } finally {
+    removeFixture(state.directory);
+  }
+});
+
+test("serves release state through the loopback API by owner/name", async () => {
+  const state = fixture();
+  const repository = { id: "repo-7", repository: "LUDIARS/Product", rootPath: state.directory, baseRef: "main" };
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: { store: { listRepositories: () => [repository] } },
+    releaseService: {
+      releaseState: async (name) => ({
+        repository: name, id: "repo-7", version: { status: "ready", version: "1.4.8" },
+        latestReleaseTag: "v1.4.0", nextMajor: "v2.0.0", nextMinor: "v1.5.0", unreleasedCommitCount: 3,
+      }),
+    },
+  });
+  try {
+    const output = response();
+    await handler(request({ method: "GET", url: "/v1/repositories/LUDIARS%2FProduct/release-state" }), output);
+    assert.equal(output.status, 200);
+    assert.deepEqual(JSON.parse(output.body).releaseState, {
+      repository: "LUDIARS/Product", id: "repo-7", version: { status: "ready", version: "1.4.8" },
+      latestReleaseTag: "v1.4.0", nextMajor: "v2.0.0", nextMinor: "v1.5.0", unreleasedCommitCount: 3,
+    });
+  } finally {
+    removeFixture(state.directory);
+  }
+});
+
+test("keeps release conflicts distinct from invalid local API input", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  const repository = { id: "repo-7", repository: "LUDIARS/Product", rootPath: state.directory, baseRef: "main" };
+  const handler = createRequestHandler({
+    env: state.env,
+    sessionToken: "ui-token",
+    queue: { state: () => ({}) },
+    localPrService: { store: { listRepositories: () => [repository] } },
+    releaseService: { release: async () => { throw new Error("Version changed from '1.4.8' to '1.4.9'."); } },
+  });
+  try {
+    const conflict = response();
+    await handler(request({
+      method: "POST", url: "/v1/repositories/LUDIARS%2FProduct/releases",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({ kind: "minor", expectedVersion: "1.4.8", title: "Product 1.5", notes: "Changes.", confirmed: true }),
+    }), conflict);
+    assert.equal(conflict.status, 409);
+
+    const invalid = response();
+    await handler(request({
+      method: "POST", url: "/v1/repositories/LUDIARS%2FProduct/releases",
+      headers: { authorization: "Bearer workflow-token" },
+      body: JSON.stringify({ kind: "patch", expectedVersion: "1.4.8", title: "Product 1.4.9", notes: "Changes.", confirmed: true }),
+    }), invalid);
+    assert.equal(invalid.status, 400);
+  } finally {
+    removeFixture(state.directory);
+  }
+});
+
 test("rejects non-loopback clients before reading credentials", async () => {
   const handler = createRequestHandler({
     env: {},

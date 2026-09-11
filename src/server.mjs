@@ -8,6 +8,8 @@ import {
   validateRepositoryRegistration,
   validateReviewRetry,
 } from "./local-contracts.mjs";
+import { validateManualRelease } from "./release-contracts.mjs";
+import { RevisorError } from "./errors.mjs";
 import { isLoopbackAddress, isLoopbackHost } from "./host-policy.mjs";
 import { PrEventStream } from "./pr-event-stream.mjs";
 import { attachPrWebSocket } from "./pr-websocket.mjs";
@@ -19,7 +21,6 @@ import {
 } from "./repository-access.mjs";
 import { ReleaseService } from "./release-service.mjs";
 import { collectRepositoryChanges } from "./repository-changes.mjs";
-import { git } from "./workspace.mjs";
 import { listLocalReleaseTags } from "./git-publication.mjs";
 import { createReviewContext } from "./review-context.mjs";
 import {
@@ -35,10 +36,25 @@ import { readWorkerState } from "./worker-state.mjs";
 function isLocalApi(pathname) {
   return pathname === "/v1/repositories"
     || /^\/v1\/repositories\/[^/]+\/changes$/.test(pathname)
+    || /^\/v1\/repositories\/[^/]+\/(?:releases|release-state)$/.test(pathname)
     || pathname === "/v1/local-prs"
     || pathname.startsWith("/v1/local-prs/")
     || pathname === "/v1/test-workflow"
     || pathname === "/v1/review-work";
+}
+
+function registeredRepository(localPrService, identifier) {
+  const repositories = localPrService.store?.listRepositories?.() ?? [];
+  return repositories.find((entry) => entry.id === identifier || entry.repository === identifier)
+    ?? localPrService.getRepository?.(identifier)
+    ?? null;
+}
+
+function releaseConflict(error) {
+  return error instanceof RevisorError
+    || /Version changed|uninitialized|checked out|must be committed|not managed/.test(
+      error instanceof Error ? error.message : "",
+    );
 }
 
 export function createRequestHandler({
@@ -114,8 +130,7 @@ export function createRequestHandler({
       const changes = /^\/v1\/repositories\/([^/]+)\/changes$/.exec(url.pathname);
       if (request.method === "GET" && changes) {
         const id = decodeURIComponent(changes[1]);
-        const repository = localPrService.store?.listRepositories?.().find((entry) => entry.id === id)
-          ?? localPrService.getRepository?.(id);
+        const repository = registeredRepository(localPrService, id);
         if (!repository) {
           sendJson(response, 404, { error: "Repository not found." });
           return;
@@ -129,6 +144,39 @@ export function createRequestHandler({
           listTags: listLocalReleaseTags,
         });
         sendJson(response, 200, body);
+        return;
+      }
+      const state = /^\/v1\/repositories\/([^/]+)\/release-state$/.exec(url.pathname);
+      if (request.method === "GET" && state) {
+        const repository = registeredRepository(localPrService, decodeURIComponent(state[1]));
+        if (!repository) {
+          sendJson(response, 404, { error: "Repository not found." });
+          return;
+        }
+        sendJson(response, 200, {
+          releaseState: await releaseService.releaseState(repository.repository),
+        });
+        return;
+      }
+      const release = /^\/v1\/repositories\/([^/]+)\/releases$/.exec(url.pathname);
+      if (request.method === "POST" && release) {
+        const repository = registeredRepository(localPrService, decodeURIComponent(release[1]));
+        if (!repository) {
+          sendJson(response, 404, { error: "Repository not found." });
+          return;
+        }
+        try {
+          sendJson(response, 200, {
+            release: await releaseService.release(
+              repository.repository,
+              validateManualRelease(await readJsonBody(request)),
+            ),
+          });
+        } catch (error) {
+          sendJson(response, releaseConflict(error) ? 409 : 400, {
+            error: error instanceof Error ? error.message : "Release failed.",
+          });
+        }
         return;
       }
       if (request.method === "POST" && url.pathname === "/v1/local-prs") {
