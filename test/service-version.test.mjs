@@ -175,7 +175,8 @@ test("answers the published release even when the version file is uninitialized"
       }),
     });
     const [service] = alpha.services;
-    assert.equal(service.version, "2.4.0");
+    // 公開済みの版に、 そこからの距離を build metadata として添える。
+    assert.equal(service.version, "2.4.0+333");
     assert.equal(service.latestReleaseTag, "v2.4.0");
     assert.equal(service.releaseVersion, null);
     assert.equal(service.releaseStatus, "uninitialized");
@@ -190,8 +191,8 @@ test("answers the published release even when the version file is uninitialized"
   }
 });
 
-// タグは「最後に公開した版」、 版ファイルは「いまこのリポジトリが名乗る版」。 Concordia を
-// 2.4.335 に初期化した直後にタグ優先のままだと 2.4.0 と答え、 初期化した値が出なかった。
+// タグは「最後に公開した版」、 版ファイルは「いまこのリポジトリが名乗る版」。 版ファイルが
+// 次の minor を宣言しているなら、 答えるべきはそちら。
 test("prefers the version file over the last published tag", async () => {
   const root = workspace();
   try {
@@ -199,13 +200,13 @@ test("prefers the version file over the last published tag", async () => {
       cwd: root,
       fetchImpl: healthResponder({}),
       ...withRelease(root, {
-        version: { status: "ready", version: "2.4.335" },
+        version: { status: "ready", version: "2.5.0" },
         latestReleaseTag: "v2.4.0",
         unreleasedCommitCount: 335,
       }),
     });
     const [service] = alpha.services;
-    assert.equal(service.version, "2.4.335");
+    assert.equal(service.version, "2.5.0+335");
     assert.equal(service.latestReleaseTag, "v2.4.0");
   } finally {
     removeFixture(root);
@@ -268,6 +269,63 @@ test("falls back to the version file when the release state cannot be read", asy
     const [service] = alpha.services;
     assert.equal(service.latestReleaseTag, null);
     assert.equal(service.version, "1.2.3");
+  } finally {
+    removeFixture(root);
+  }
+});
+
+// 距離は公開済みタグからの進み具合。 進んでいなければ何も添えない。
+test("adds no build metadata when nothing is unreleased", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({}),
+      ...withRelease(root, {
+        version: { status: "ready", version: "1.2.3" },
+        latestReleaseTag: "v1.2.3",
+        unreleasedCommitCount: 0,
+      }),
+    });
+    assert.equal(alpha.services[0].version, "1.2.3");
+  } finally {
+    removeFixture(root);
+  }
+});
+
+// 距離が取れないときに推測で +0 を付けない。
+test("adds no build metadata when the distance is unavailable", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({}),
+      ...withRelease(root, {
+        version: { status: "ready", version: "1.2.3" },
+        latestReleaseTag: "v1.2.3",
+        unreleasedCommitCount: null,
+      }),
+    });
+    assert.equal(alpha.services[0].version, "1.2.3");
+  } finally {
+    removeFixture(root);
+  }
+});
+
+// 走行版や package.json に落ちた場合の距離は「何からの距離か」が言えない。
+test("adds no build metadata to a fallback version", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({}),
+      ...withRelease(root, {
+        version: { status: "uninitialized", version: "uninitialized" },
+        latestReleaseTag: null,
+        unreleasedCommitCount: 57,
+      }),
+    });
+    assert.equal(alpha.services[0].version, "1.2.3");
   } finally {
     removeFixture(root);
   }

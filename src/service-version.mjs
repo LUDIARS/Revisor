@@ -173,6 +173,29 @@ function withoutTagPrefix(tag) {
 }
 
 /**
+ * 公開済みの版に「そこからどれだけ進んでいるか」を添える。
+ *
+ * 進み具合を `.revisor-version` の patch として持たせることはできない。 あのファイルは
+ * 追跡されてはいるが `skip-worktree` で中身の変更は commit されず (`local-version.mjs`)、
+ * origin には `uninitialized` が載ったままになる。 patch を積むと別マシンの checkout で
+ * 消え、 同じ commit を指していても版が食い違う。 だから状態には持たず、 公開済み
+ * タグからの距離として毎回導出する — その数は release state が既に数えている。
+ *
+ * `2.4.336` ではなく `2.4.0+336` (semver の build metadata) にするのは、 前者が
+ * 「2.4.0 の 336 個目の patch リリース」を意味するから。 patch Release は 1 つも出して
+ * いない (`release-version.mjs` が作らせない)。 build metadata なら比較では無視され、
+ * 「2.4.0 系である」ことが保たれる。
+ *
+ * 距離が取れないとき (タグが無い / release state を読めない) は素の版を返す。
+ * 推測で `+0` を付けない。
+ */
+function withDistance(released, unreleasedCommits) {
+  if (!released) return released;
+  if (!Number.isInteger(unreleasedCommits) || unreleasedCommits <= 0) return released;
+  return `${released}+${unreleasedCommits}`;
+}
+
+/**
  * 食い違いを名前で残す。 表示側が「どれとどれが違うか」を組み立て直さずに済ませる
  * ためで、 数値そのものは各欄に残したままにする。
  *
@@ -202,14 +225,19 @@ async function describeService(definition, { repositories, releaseState, fetchIm
   // 版ファイルをタグより先に見るのは、 タグが「最後に公開した版」なのに対し、 版ファイルは
   // 「いまこのリポジトリが名乗る版」だから。 Concordia を 2.4.335 に初期化した直後に
   // タグ優先のままだと 2.4.0 と答えてしまい、 初期化した値がどこにも出なかった。
+  //
+  // 公開済みの版が分かるときだけ距離を添える。 走行版や `package.json` に落ちた場合の
+  // 距離は「何からの距離か」が言えないので付けない。
   const released = release.version ?? withoutTagPrefix(release.latestReleaseTag);
+  const representative = withDistance(released, release.unreleasedCommits)
+    ?? running.version ?? packageVersion;
   return {
     service: definition.code,
     name: definition.name,
     repository: release.repository,
     cwd: definition.cwd,
     port: definition.port,
-    version: released ?? running.version ?? packageVersion,
+    version: representative,
     running,
     packageVersion,
     releaseVersion: release.version,
