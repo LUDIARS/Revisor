@@ -8,6 +8,7 @@
  */
 
 import { createReviewContext } from "./review-context.mjs";
+import { ReleaseService } from "./release-service.mjs";
 import { collectServiceVersions, formatServiceVersionLine } from "./service-version.mjs";
 
 function selectors(args) {
@@ -28,10 +29,16 @@ export async function runServiceVersionCommand(args, {
   fetchImpl = fetch,
 } = {}) {
   if (args[0] !== "version" || args[1] !== "services") return null;
-  const { store } = createContext({ cwd, env });
+  const context = createContext({ cwd, env });
+  const releases = new ReleaseService({
+    store: context.store,
+    env,
+    publicationCoordinator: context.publicationCoordinator,
+  });
   const results = await collectServiceVersions(selectors(args), {
     cwd,
-    repositories: store.listRepositories(),
+    repositories: context.store.listRepositories(),
+    releaseState: (repository) => releases.releaseState(repository),
     fetchImpl,
   });
   stdout.write(args.includes("--json")

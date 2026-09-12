@@ -231,6 +231,7 @@ export function createRequestHandler({
           versions = await collectServiceVersions(url.searchParams.getAll("service"), {
             cwd,
             repositories: localPrService.store?.listRepositories?.() ?? [],
+            releaseState: (repository) => releaseService.releaseState(repository),
           });
         } catch (error) {
           sendJson(response, 400, {

@@ -101,47 +101,116 @@ function normalizePath(value) {
   return String(value ?? "").replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
 }
 
+const EMPTY_RELEASE = {
+  repository: null,
+  version: null,
+  status: null,
+  latestReleaseTag: null,
+  unreleasedCommits: null,
+};
+
 /**
- * Revisor が所有するリリース版。 catalog の `cwd` はサービスの作業ディレクトリで、
- * 登録 checkout の root とは限らない (Memoria は `<repo>/server`) ので、 前方一致で
- * 一番長く一致した登録リポジトリを採る。
+ * catalog の `cwd` はサービスの作業ディレクトリで、 登録 checkout の root とは限らない
+ * (Memoria は `<repo>/server`) ので、 前方一致で一番長く一致した登録リポジトリを採る。
  */
-async function readReleaseVersion(definition, repositories) {
+function matchRepository(definition, repositories) {
   const cwd = normalizePath(definition.cwd);
-  if (!cwd) return { repository: null, version: null, status: null };
-  const match = (repositories ?? [])
+  if (!cwd) return null;
+  return (repositories ?? [])
     .filter((repository) => {
       const root = normalizePath(repository.rootPath);
       return root !== "" && (cwd === root || cwd.startsWith(`${root}/`));
     })
     .sort((left, right) =>
-      normalizePath(right.rootPath).length - normalizePath(left.rootPath).length)[0];
-  if (!match) return { repository: null, version: null, status: null };
-  const state = await inspectLocalVersionState(match.rootPath);
+      normalizePath(right.rootPath).length - normalizePath(left.rootPath).length)[0] ?? null;
+}
+
+/**
+ * 公開済みの版は **Revisor の release state** から取る。
+ *
+ * `.revisor-version` だけを見ていると、 版管理を初期化していないリポジトリで答えを
+ * 見失う。 Concordia は実際に v2.4.0 を公開済みなのに `.revisor-version` は
+ * `uninitialized` で、 `package.json` も 0.1.0 のまま — 3 つとも 0.1.0 と答えてしまい、
+ * 公開されている 2.4.0 がどこにも出なかった。 release state は最新リリースタグと
+ * 未公開コミット数を持つので、 そこを正本にする。
+ */
+async function readRelease(definition, repositories, releaseState) {
+  const match = matchRepository(definition, repositories);
+  if (!match) return EMPTY_RELEASE;
+  const base = { ...EMPTY_RELEASE, repository: match.repository };
+  if (releaseState) {
+    try {
+      const state = await releaseState(match.repository);
+      if (state) {
+        return {
+          ...base,
+          version: state.version?.status === "ready" ? state.version.version : null,
+          status: state.version?.status ?? null,
+          latestReleaseTag: state.latestReleaseTag ?? null,
+          unreleasedCommits: Number.isInteger(state.unreleasedCommitCount)
+            ? state.unreleasedCommitCount
+            : null,
+        };
+      }
+    } catch {
+      // release state は履歴を辿るので、 checkout の状態しだいで失敗する。 版ファイル
+      // だけでも答えられるので、 1 リポジトリの失敗で全体を落とさない。
+    }
+  }
+  const file = await inspectLocalVersionState(match.rootPath);
   return {
-    repository: match.repository,
-    version: state.status === "ready" ? state.version : null,
-    status: state.status,
+    ...base,
+    version: file.status === "ready" ? file.version : null,
+    status: file.status,
   };
 }
 
-async function describeService(definition, { repositories, fetchImpl, timeoutMs }) {
+function withoutTagPrefix(tag) {
+  return typeof tag === "string" ? tag.replace(/^v/, "") : null;
+}
+
+/**
+ * 食い違いを名前で残す。 表示側が「どれとどれが違うか」を組み立て直さずに済ませる
+ * ためで、 数値そのものは各欄に残したままにする。
+ */
+function driftKinds({ released, runningVersion, packageVersion, unreleasedCommits }) {
+  const kinds = [];
+  if (released && runningVersion && runningVersion !== released) kinds.push("running_differs_from_release");
+  if (released && packageVersion && packageVersion !== released) kinds.push("package_differs_from_release");
+  if (runningVersion && packageVersion && runningVersion !== packageVersion) kinds.push("running_differs_from_package");
+  if (Number.isInteger(unreleasedCommits) && unreleasedCommits > 0) kinds.push("unreleased_commits");
+  return kinds;
+}
+
+async function describeService(definition, { repositories, releaseState, fetchImpl, timeoutMs }) {
   const [running, packageVersion, release] = await Promise.all([
     probeRunningVersion(definition, { fetchImpl, timeoutMs }),
     readPackageVersion(definition),
-    readReleaseVersion(definition, repositories),
+    readRelease(definition, repositories, releaseState),
   ]);
+  // 代表値は **公開済みの版**。 走っている版を代表にすると、 版管理を初期化していない
+  // リポジトリで `package.json` の置き去りの値がそのまま答えになる (Concordia が
+  // v2.4.0 公開済みで 0.1.0 と答えていた)。 走行版とのズレは drift に残す。
+  const released = withoutTagPrefix(release.latestReleaseTag) ?? release.version;
   return {
     service: definition.code,
     name: definition.name,
     repository: release.repository,
     cwd: definition.cwd,
     port: definition.port,
-    version: running.version ?? release.version ?? packageVersion,
+    version: released ?? running.version ?? packageVersion,
     running,
     packageVersion,
     releaseVersion: release.version,
     releaseStatus: release.status,
+    latestReleaseTag: release.latestReleaseTag,
+    unreleasedCommits: release.unreleasedCommits,
+    drift: driftKinds({
+      released,
+      runningVersion: running.version,
+      packageVersion,
+      unreleasedCommits: release.unreleasedCommits,
+    }),
   };
 }
 
@@ -154,6 +223,7 @@ async function describeService(definition, { repositories, fetchImpl, timeoutMs 
 export async function collectServiceVersions(selectors, {
   cwd = process.cwd(),
   repositories = [],
+  releaseState = null,
   fetchImpl = fetch,
   timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
 } = {}) {
@@ -164,7 +234,7 @@ export async function collectServiceVersions(selectors, {
       requested,
       found: matches.length > 0,
       services: await Promise.all(matches.map((definition) =>
-        describeService(definition, { repositories, fetchImpl, timeoutMs }))),
+        describeService(definition, { repositories, releaseState, fetchImpl, timeoutMs }))),
     };
   }));
 }
@@ -174,7 +244,11 @@ export function formatServiceVersionLine(service) {
   const running = service.running.reachable
     ? `running ${service.running.version ?? "(unreported)"}`
     : "not running";
+  const unreleased = Number.isInteger(service.unreleasedCommits) && service.unreleasedCommits > 0
+    ? `, ${service.unreleasedCommits} unreleased commit(s)`
+    : "";
   return `${service.service}: ${service.version ?? "unknown"} (${running}`
     + `, package ${service.packageVersion ?? "-"}`
-    + `, release ${service.releaseVersion ?? "-"})`;
+    + `, tag ${service.latestReleaseTag ?? "-"}`
+    + `, version file ${service.releaseVersion ?? "-"}${unreleased})`;
 }

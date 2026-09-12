@@ -80,8 +80,8 @@ test("reports the running version alongside the version on disk", async () => {
     assert.equal(service.running.reachable, true);
     assert.equal(service.running.version, "1.2.2");
     assert.equal(service.packageVersion, "1.2.3");
-    // 走っている版を代表値に採る。 ディスクとのズレ自体が知りたい情報なので、
-    // 両方残したまま表示用の 1 つだけを決める。
+    // 公開済みの版が分からないときだけ走行版が代表値になる。 ディスクとのズレ自体が
+    // 知りたい情報なので、 両方残したまま表示用の 1 つだけを決める。
     assert.equal(service.version, "1.2.2");
   } finally {
     removeFixture(root);
@@ -145,8 +145,85 @@ test("renders one line per service", async () => {
     });
     assert.equal(
       formatServiceVersionLine(alpha.services[0]),
-      "alpha: 1.2.2 (running 1.2.2, package 1.2.3, release -)",
+      "alpha: 1.2.2 (running 1.2.2, package 1.2.3, tag -, version file -)",
     );
+  } finally {
+    removeFixture(root);
+  }
+});
+
+/** Alpha を登録済みリポジトリとして見せ、 その release state を固定で返す。 */
+function withRelease(root, state) {
+  return {
+    repositories: [{ repository: "LUDIARS/Alpha", rootPath: join(root, "Alpha") }],
+    releaseState: async () => state,
+  };
+}
+
+// 版管理を初期化していないリポジトリでは `.revisor-version` も `package.json` も
+// 公開済みの版を知らない。 Concordia は v2.4.0 公開済みで両方 0.1.0 のままだった。
+test("answers the published release even when the version file is uninitialized", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({ "http://127.0.0.1:5001/health": "1.2.3" }),
+      ...withRelease(root, {
+        version: { status: "uninitialized", version: "uninitialized" },
+        latestReleaseTag: "v2.4.0",
+        unreleasedCommitCount: 333,
+      }),
+    });
+    const [service] = alpha.services;
+    assert.equal(service.version, "2.4.0");
+    assert.equal(service.latestReleaseTag, "v2.4.0");
+    assert.equal(service.releaseVersion, null);
+    assert.equal(service.releaseStatus, "uninitialized");
+    assert.equal(service.unreleasedCommits, 333);
+    assert.deepEqual(service.drift.sort(), [
+      "package_differs_from_release",
+      "running_differs_from_release",
+      "unreleased_commits",
+    ]);
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test("reports no drift when every source agrees", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({ "http://127.0.0.1:5001/health": "1.2.3" }),
+      ...withRelease(root, {
+        version: { status: "ready", version: "1.2.3" },
+        latestReleaseTag: "v1.2.3",
+        unreleasedCommitCount: 0,
+      }),
+    });
+    const [service] = alpha.services;
+    assert.equal(service.version, "1.2.3");
+    assert.deepEqual(service.drift, []);
+  } finally {
+    removeFixture(root);
+  }
+});
+
+// release state は履歴を辿るので checkout の状態しだいで失敗する。 版ファイルだけでも
+// 答えられるので、 1 リポジトリの失敗で全体を落とさない。
+test("falls back to the version file when the release state cannot be read", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({}),
+      repositories: [{ repository: "LUDIARS/Alpha", rootPath: join(root, "Alpha") }],
+      releaseState: async () => { throw new Error("not a git repository"); },
+    });
+    const [service] = alpha.services;
+    assert.equal(service.latestReleaseTag, null);
+    assert.equal(service.version, "1.2.3");
   } finally {
     removeFixture(root);
   }
