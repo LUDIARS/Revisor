@@ -20,6 +20,7 @@ import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 import { startRuntimeDiagnostics } from "./runtime-diagnostics.mjs";
 import { serviceLog } from "./service-log.mjs";
 import { runManualReleaseCommand } from "./release-local-command.mjs";
+import { runRepositoryNotifyCommand } from "./repository-notify-command.mjs";
 
 function printHelp(stdout) {
   stdout.write([
@@ -40,6 +41,7 @@ function printHelp(stdout) {
     "  revisor pr unsynced [--repository <owner/name>] [--json]  # merged PRs absent from a checkout",
     "  revisor pr bypass-reviewed <number> [--note <text>]",
     "  revisor repo register --json-file <path>",
+    "  revisor repo notify <owner/name> --release <json-array> [--merged <json-array>] [--json]",
     "  revisor repo list [--json]",
     "  revisor repo divergence [--repository <owner/name>] [--all] [--json]  # compare base with origin",
     "  revisor repo set-workflow <owner/name> <revisor|github>  # publish via GitHub App, or plain push",
@@ -108,6 +110,8 @@ export async function main(args, {
   }
   const releaseHandled = await runManualReleaseCommand(args, { cwd, stdout, fetchImpl });
   if (releaseHandled !== null) return releaseHandled;
+  const notifyHandled = await runRepositoryNotifyCommand(args, { cwd, stdout, fetchImpl });
+  if (notifyHandled !== null) return notifyHandled;
   // 審査キューは記録なので、投入も参照もマージも常駐プロセス無しで完結する。
   const handled = await runLocalPrCommand(args, { stdin, stdout });
   if (handled !== null) return handled;

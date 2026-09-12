@@ -293,6 +293,17 @@ export class LocalPrStore {
     });
   }
 
+  updateRepositoryNotify(repository, notify) {
+    return this.#mutate((database) => {
+      const existing = this.#findRepositoryRecord(database, repository);
+      if (!existing) return null;
+      existing.notify = notify;
+      existing.updatedAt = this.now();
+      this.#saveRepository(database, existing);
+      return existing;
+    });
+  }
+
   getRepository(repository) {
     return this.#findRepositoryRecord(this.#db(), repository);
   }

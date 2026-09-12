@@ -26,6 +26,12 @@
       "pathPattern": "(^|/)src/(?:manual\\-release|repository\\-changes|repository\\-notification)\\.mjs$"
     },
     {
+      "pathPattern": "(^|/)src/(?:repository\\-notify\\-command|local\\-pr\\-service|local\\-contracts|state\\-store|server|cli)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:push\\-guard|local\\-pr\\-service|server|repository\\-notify\\-command)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
+    },
+    {
       "pathPattern": "(^|/)src/(?:server|cli|release\\-local\\-command|release\\-service)\\.mjs$"
     },
     {

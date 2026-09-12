@@ -175,6 +175,14 @@ reuses the same `Revisor-Local-PR` commit and completes publication idempotently
 The managed pre-push guard scans the remote base update. A tag ref is allowed
 during a Release but never substitutes for the base scan.
 
+## 元 hook の解決
+
+登録時は環境から注入された `GIT_CONFIG_*` を除いて hook 設定を読み、Revisor 管理
+directory が repo-local `core.hooksPath` の場合は global `core.hooksPath` を元として使う。
+一時directory または `concordia-session-hooks` は元 hook として拒否する。実体かつ実行可能な
+元 hook だけを proxy し、再導入時には元にない proxy を削除する。`repo notify` と
+`PATCH /v1/repositories/:id/notify` は hook を変更せず通知先だけを更新する。
+
 Missing App credentials, installation access, permissions, remote divergence,
 tag collision, push failure, and Release failure fail explicitly. The error
 remains visible until publication succeeds. There is no PAT, anonymous, or

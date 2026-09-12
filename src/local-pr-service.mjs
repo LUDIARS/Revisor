@@ -5,7 +5,8 @@ import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { withFileLock, withFileLockSync } from "./file-lock.mjs";
 import { serviceLog } from "./service-log.mjs";
-import { installPushGuard } from "./push-guard.mjs";
+import { installPushGuard, pushGuardNeedsInstall } from "./push-guard.mjs";
+import { repositoryNotify } from "./local-contracts.mjs";
 import { pendingReviewProjection } from "./local-reporter.mjs";
 import {
   pullRequestLifecycleMessage,
@@ -111,6 +112,7 @@ export class LocalPrService {
     queue,
     jobs = null,
     installGuard = installPushGuard,
+    guardNeedsInstall = pushGuardNeedsInstall,
     merge = squashMergeLocalPullRequest,
     prepareMerge = prepareMergeRepository,
     probeMergeability = probeBaseMergeability,
@@ -137,6 +139,7 @@ export class LocalPrService {
     this.queue = queue;
     this.jobs = jobs ?? queue.jobs ?? null;
     this.installGuard = installGuard;
+    this.guardNeedsInstall = guardNeedsInstall;
     this.merge = merge;
     this.prepareMerge = prepareMerge;
     this.probeMergeability = probeMergeability;
@@ -187,12 +190,21 @@ export class LocalPrService {
       `refs/heads/${registration.baseRef}`,
     ]);
     await this.prepareVersionFile(registration.rootPath);
-    const hookPath = await this.installGuard({
+    const guardOptions = {
       repoPath: registration.rootPath,
       cliPath: this.cliPath,
       statePath: this.store.path,
-    });
+    };
+    const hookPath = await this.guardNeedsInstall(guardOptions)
+      ? await this.installGuard(guardOptions)
+      : await git(registration.rootPath, ["rev-parse", "--git-path", "hooks/pre-push"]);
     return this.store.registerRepository({ ...registration, hookPath });
+  }
+
+  async updateRepositoryNotify(repository, notify) {
+    const existing = this.store.getRepository(repository);
+    if (!existing) return null;
+    return this.store.updateRepositoryNotify(repository, repositoryNotify(notify));
   }
 
   listRepositories() {

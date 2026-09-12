@@ -4,13 +4,18 @@ import {
   mkdir,
   readdir,
   readFile,
+  stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
+import { constants } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { BRANCH_PUSH_ENV_FLAG } from "./branch-push-flag.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { LocalPrStore, redirectLegacyStorePath } from "./state-store.mjs";
 import { git } from "./workspace.mjs";
+import { runProcess } from "./process.mjs";
 
 const MANAGED_MARKER = "# LUDIARS Revisor managed pre-push hook";
 const ZERO_SHA = /^0+$/;
@@ -19,13 +24,46 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
 }
 
+function gitEnvironment() {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    key !== "GIT_CONFIG_COUNT" && !/^GIT_CONFIG_(?:KEY|VALUE)_\d+$/.test(key)));
+}
+
+async function unconfiguredGit(repoPath, args) {
+  const result = await runProcess({ command: "git", args, cwd: repoPath, env: gitEnvironment() });
+  if (!result.ok) throw new Error(`git ${args[0]} failed: ${result.stderr.trim() || result.stdout.trim()}`);
+  return result.stdout.trim();
+}
+
+function unsafeOriginalHookDirectory(directory) {
+  const normalized = resolve(directory).toLowerCase();
+  return normalized.startsWith(resolve(tmpdir()).toLowerCase()) || normalized.includes("concordia-session-hooks");
+}
+
+async function existingFile(path) {
+  try { return (await stat(path)).isFile(); } catch (error) { if (error?.code === "ENOENT") return false; throw error; }
+}
+
+export async function pushGuardNeedsInstall(options) {
+  const commonDirectory = resolve(options.repoPath, await git(options.repoPath, ["rev-parse", "--git-common-dir"]));
+  const hookPath = resolve(commonDirectory, "revisor-hooks", "pre-push");
+  try {
+    const content = await readFile(hookPath, "utf8");
+    return !content.includes(MANAGED_MARKER)
+      || !content.includes(shellQuote(options.cliPath))
+      || !content.includes(shellQuote(options.statePath))
+      || !content.includes(shellQuote(options.repoPath))
+      || !content.includes(shellQuote(options.nodePath ?? process.execPath));
+  } catch (error) { if (error?.code === "ENOENT") return true; throw error; }
+}
+
 export async function installPushGuard({
   repoPath,
   cliPath,
   statePath,
   nodePath = process.execPath,
 }) {
-  const configuredPath = await git(repoPath, ["rev-parse", "--git-path", "hooks/pre-push"]);
+  const configuredPath = await unconfiguredGit(repoPath, ["rev-parse", "--git-path", "hooks/pre-push"]);
   const existingHookPath = resolve(repoPath, configuredPath);
   let existing = "";
   try {
@@ -52,25 +90,27 @@ export async function installPushGuard({
       nodePath,
     });
   }
-  const commonDirectory = resolve(
-    repoPath,
-    await git(repoPath, ["rev-parse", "--git-common-dir"]),
-  );
+  const commonDirectory = resolve(repoPath, await git(repoPath, ["rev-parse", "--git-common-dir"]));
   const managedDirectory = resolve(commonDirectory, "revisor-hooks");
   const hookPath = resolve(managedDirectory, "pre-push");
   await mkdir(managedDirectory, { recursive: true });
-  const sourceDirectory = dirname(existingHookPath);
-  if (
-    existing
-    && sourceDirectory.toLowerCase() === managedDirectory.toLowerCase()
-  ) {
+  let sourceDirectory = dirname(existingHookPath);
+  if (sourceDirectory.toLowerCase() === managedDirectory.toLowerCase()) {
+    const globalPath = await unconfiguredGit(repoPath, ["config", "--global", "--get", "core.hooksPath"])
+      .catch((error) => error.exitCode === 1 ? "" : Promise.reject(error));
+    sourceDirectory = globalPath ? resolve(repoPath, globalPath) : null;
+  }
+  if (sourceDirectory && unsafeOriginalHookDirectory(sourceDirectory)) {
+    throw new Error(`Refusing temporary or Concordia-injected original hooks directory: ${sourceDirectory}`);
+  }
+  if (existing && !sourceDirectory) {
     throw new Error(
       `A non-Revisor pre-push hook already exists and was not overwritten: ${
         existingHookPath
       }`,
     );
   }
-  if (sourceDirectory.toLowerCase() !== managedDirectory.toLowerCase()) {
+  if (sourceDirectory && sourceDirectory.toLowerCase() !== managedDirectory.toLowerCase()) {
     let entries = [];
     try {
       entries = await readdir(sourceDirectory, { withFileTypes: true });
@@ -79,18 +119,27 @@ export async function installPushGuard({
     }
     for (const entry of entries) {
       if (!entry.isFile() || entry.name === "pre-push") continue;
+      const originalPath = resolve(sourceDirectory, entry.name);
+      try { await access(originalPath, constants.X_OK); } catch { continue; }
       const proxyPath = resolve(managedDirectory, entry.name);
       await writeFile(proxyPath, [
         "#!/bin/sh",
-        `exec ${shellQuote(resolve(sourceDirectory, entry.name))} "$@"`,
+        `if [ -x ${shellQuote(originalPath)} ]; then exec ${shellQuote(originalPath)} "$@"; fi`,
         "",
       ].join("\n"), { encoding: "utf8", mode: 0o755 });
       await chmod(proxyPath, 0o755);
     }
   }
+  for (const entry of await readdir(managedDirectory, { withFileTypes: true })) {
+    if (!entry.isFile() || entry.name === "pre-push" || entry.name.includes(".bak-")) continue;
+    if (!sourceDirectory || !(await existingFile(resolve(sourceDirectory, entry.name)))) {
+      await unlink(resolve(managedDirectory, entry.name));
+    }
+  }
   await writeManagedHook({
     hookPath,
-    originalHookPath: existing ? existingHookPath : null,
+    originalHookPath: sourceDirectory && await existingFile(resolve(sourceDirectory, "pre-push"))
+      ? resolve(sourceDirectory, "pre-push") : null,
     cliPath,
     statePath,
     repoPath,

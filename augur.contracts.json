@@ -38,6 +38,24 @@
       "module": "contracts/manual-release-local-api.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-5",
+      "criterion": "C-5 installPushGuard(options): 注入された Git config を除外し、安全な元 hook だけを連鎖する",
+      "symbol": "installPushGuard",
+      "file": "src/push-guard.mjs",
+      "module": "contracts/install-push-guard.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-6",
+      "criterion": "C-6 updateRepositoryNotify(repository, notify): hook を再導入せず通知先だけを検証・更新する",
+      "symbol": "updateRepositoryNotify",
+      "file": "src/local-pr-service.mjs",
+      "module": "contracts/update-repository-notify.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

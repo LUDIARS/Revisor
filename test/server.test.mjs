@@ -87,6 +87,23 @@ test("authenticates and creates a local PR without a GitHub head", async () => {
   }
 });
 
+test("updates repository notifications through the loopback API without installing hooks", async () => {
+  const state = fixture();
+  writeWorkflowToken("workflow-token", state.env);
+  let notified;
+  const handler = createRequestHandler({ env: state.env, sessionToken: "ui-token", queue: { state: () => ({}) }, localPrService: {
+    store: { listRepositories: () => [{ id: "repo-1", repository: "LUDIARS/Product" }] },
+    getRepository: () => null,
+    async updateRepositoryNotify(repository, notify) { notified = { repository, notify }; return { repository, notify }; },
+  } });
+  try {
+    const output = response();
+    await handler(request({ method: "PATCH", url: "/v1/repositories/repo-1/notify", headers: { authorization: "Bearer workflow-token" }, body: JSON.stringify({ notify: { release: ["concordia"] } }) }), output);
+    assert.equal(output.status, 200);
+    assert.deepEqual(notified, { repository: "LUDIARS/Product", notify: { release: ["concordia"] } });
+  } finally { removeFixture(state.directory); }
+});
+
 test("accepts an explicit fast-lane submission and authenticated queued promotion", async () => {
   const state = fixture();
   writeWorkflowToken("workflow-token", state.env);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -160,6 +161,32 @@ test("installs a managed pre-push hook without overwriting an existing hook", as
       statePath: "state.json",
     }), /was not overwritten/);
   } finally {
+    removeFixture(state.directory);
+  }
+});
+
+test("resolves executable global hooks without injected config and removes stale proxies", async () => {
+  const state = fixture();
+  const globalHooks = join(state.directory, "global-hooks");
+  const oldEnv = { ...process.env };
+  try {
+    mkdirSync(globalHooks);
+    process.env.GIT_CONFIG_GLOBAL = join(state.directory, "global.gitconfig");
+    writeFileSync(join(globalHooks, "post-commit"), "#!/bin/sh\nexit 0\n", { encoding: "utf8", mode: 0o755 });
+    git(state.repoPath, "config", "--global", "core.hooksPath", globalHooks);
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
+    process.env.GIT_CONFIG_VALUE_0 = join(state.directory, "concordia-session-hooks");
+    const hookPath = await installPushGuard({ repoPath: state.repoPath, cliPath: "cli.mjs", statePath: join(state.directory, "state.json") });
+    const managed = join(state.repoPath, ".git", "revisor-hooks");
+    assert.match(readFileSync(join(managed, "post-commit"), "utf8"), /if \[ -x/);
+    writeFileSync(join(managed, "stale-hook"), "#!/bin/sh\n", "utf8");
+    await installPushGuard({ repoPath: state.repoPath, cliPath: "cli.mjs", statePath: join(state.directory, "state.json") });
+    assert.throws(() => readFileSync(join(managed, "stale-hook"), "utf8"));
+    assert.match(readFileSync(hookPath, "utf8"), /Revisor original pre-push: null/);
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in oldEnv)) delete process.env[key];
+    Object.assign(process.env, oldEnv);
     removeFixture(state.directory);
   }
 });

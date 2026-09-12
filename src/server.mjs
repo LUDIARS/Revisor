@@ -6,6 +6,7 @@ import {
   validateFastLanePromotion,
   validatePullRequestSubmission,
   validateRepositoryRegistration,
+  repositoryNotify,
   validateReviewRetry,
 } from "./local-contracts.mjs";
 import { validateManualRelease } from "./release-contracts.mjs";
@@ -36,7 +37,7 @@ import { readWorkerState } from "./worker-state.mjs";
 function isLocalApi(pathname) {
   return pathname === "/v1/repositories"
     || /^\/v1\/repositories\/[^/]+\/changes$/.test(pathname)
-    || /^\/v1\/repositories\/[^/]+\/(?:releases|release-state)$/.test(pathname)
+    || /^\/v1\/repositories\/[^/]+\/(?:releases|release-state|notify)$/.test(pathname)
     || pathname === "/v1/local-prs"
     || pathname.startsWith("/v1/local-prs/")
     || pathname === "/v1/test-workflow"
@@ -159,6 +160,18 @@ export function createRequestHandler({
         return;
       }
       const release = /^\/v1\/repositories\/([^/]+)\/releases$/.exec(url.pathname);
+      const notify = /^\/v1\/repositories\/([^/]+)\/notify$/.exec(url.pathname);
+      if (request.method === "PATCH" && notify) {
+        const repository = registeredRepository(localPrService, decodeURIComponent(notify[1]));
+        if (!repository) { sendJson(response, 404, { error: "Repository not found." }); return; }
+        const body = await readJsonBody(request);
+        const updated = await localPrService.updateRepositoryNotify(
+          repository.repository,
+          repositoryNotify(body.notify),
+        );
+        sendJson(response, 200, { repository: updated });
+        return;
+      }
       if (request.method === "POST" && release) {
         const repository = registeredRepository(localPrService, decodeURIComponent(release[1]));
         if (!repository) {

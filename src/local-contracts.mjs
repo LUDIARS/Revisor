@@ -262,7 +262,7 @@ const NOTIFY_TARGET = /^(?:(?:discord|slack):[A-Za-z0-9_.-]+|concordia)$/;
 // main 反映後 (既定 off = 未指定)。 target は `discord:<name>` / `slack:<name>` /
 // `concordia` で、
 // URL 本体は `revisor secret set webhook.<name>` の暗号化 secret から引く。
-function repositoryNotify(value) {
+export function repositoryNotify(value) {
   if (value === undefined || value === null) return null;
   object(value, "notify");
   const notify = {};
