@@ -22,6 +22,7 @@ import {
 } from "./repository-access.mjs";
 import { ReleaseService } from "./release-service.mjs";
 import { collectRepositoryChanges } from "./repository-changes.mjs";
+import { collectServiceVersions } from "./service-version.mjs";
 import { listLocalReleaseTags } from "./git-publication.mjs";
 import { createReviewContext } from "./review-context.mjs";
 import {
@@ -41,7 +42,8 @@ function isLocalApi(pathname) {
     || pathname === "/v1/local-prs"
     || pathname.startsWith("/v1/local-prs/")
     || pathname === "/v1/test-workflow"
-    || pathname === "/v1/review-work";
+    || pathname === "/v1/review-work"
+    || pathname === "/v1/service-versions";
 }
 
 function registeredRepository(localPrService, identifier) {
@@ -60,6 +62,7 @@ function releaseConflict(error) {
 
 export function createRequestHandler({
   env = process.env,
+  cwd = process.cwd(),
   sessionToken,
   queue,
   reviewWorkers = null,
@@ -220,6 +223,24 @@ export function createRequestHandler({
         sendJson(response, 200, { products: localPrService.testWorkflowProducts() });
         return;
       }
+      // 版は「いま何が走っているか」の問い合わせなので読み取り (GET) だけ。 service を
+      // 1 つも指定しない呼び出しは 400 — 既定で全サービスを舐めさせない。
+      if (request.method === "GET" && url.pathname === "/v1/service-versions") {
+        let versions;
+        try {
+          versions = await collectServiceVersions(url.searchParams.getAll("service"), {
+            cwd,
+            repositories: localPrService.store?.listRepositories?.() ?? [],
+          });
+        } catch (error) {
+          sendJson(response, 400, {
+            error: error instanceof Error ? error.message : "Service versions are unavailable.",
+          });
+          return;
+        }
+        sendJson(response, 200, { versions });
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/v1/review-work") {
         sendJson(response, 200, {
           reviewQueue: queue.state(),
@@ -329,6 +350,7 @@ export async function startRevisor({
   const sessionToken = randomBytes(24).toString("base64url");
   const server = createServer(createRequestHandler({
     env,
+    cwd,
     sessionToken,
     queue,
     reviewWorkers,

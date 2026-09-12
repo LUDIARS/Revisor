@@ -11,6 +11,7 @@ import {
   writeSettings,
 } from "./config.mjs";
 import { resolveAnatomiaCli } from "./anatomia.mjs";
+import { resolveOwnVersion } from "./own-version.mjs";
 import { deferredPublications } from "./publication-state.mjs";
 import {
   validateExternalVerification,
@@ -94,8 +95,13 @@ export function createUiRequestHandler({
     }
     const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
     if (request.method === "GET" && url.pathname === "/health") {
+      // `status` は既存の消費者が読んでいるので残し、 AIFormat RULE_SRE §2 の
+      // `ok` / `service` / `version` を足す。 version が無いと Excubitor も Revisor 自身も
+      // 「走っている版」 を突き合わせられない。
+      const contract = { ok: true, service: "revisor", version: resolveOwnVersion(env) };
       try {
         sendJson(response, 200, {
+          ...contract,
           status: "ok",
           configured: Boolean(readSettings(env).anatomiaFolder)
             && hasWorkflowToken(env)
@@ -103,6 +109,8 @@ export function createUiRequestHandler({
         });
       } catch (error) {
         sendJson(response, 503, {
+          ...contract,
+          ok: false,
           status: "error",
           configured: false,
           error: error instanceof Error ? error.message : "Configuration is unreadable.",

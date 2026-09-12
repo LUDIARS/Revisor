@@ -20,6 +20,7 @@ import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 import { startRuntimeDiagnostics } from "./runtime-diagnostics.mjs";
 import { serviceLog } from "./service-log.mjs";
 import { runManualReleaseCommand } from "./release-local-command.mjs";
+import { runServiceVersionCommand } from "./service-version-command.mjs";
 import { runRepositoryNotifyCommand } from "./repository-notify-command.mjs";
 
 function printHelp(stdout) {
@@ -59,6 +60,7 @@ function printHelp(stdout) {
     "  revisor config discord-webhook set --stdin",
     "  revisor config discord-webhook remove",
     "  revisor secret set webhook.<name> <url>",
+    "  revisor version services <service...> [--json]  # 走っている版 / ディスクの版 / リリース版",
     "  revisor version show --repo <path>",
     "  revisor version set <MAJOR.MINOR.PATCH> --repo <path>",
     "  revisor push [--repo <path>] [--branch <name>] [--remote-branch <name>]",
@@ -110,6 +112,8 @@ export async function main(args, {
   }
   const releaseHandled = await runManualReleaseCommand(args, { cwd, stdout, fetchImpl });
   if (releaseHandled !== null) return releaseHandled;
+  const versionsHandled = await runServiceVersionCommand(args, { cwd, stdout, fetchImpl });
+  if (versionsHandled !== null) return versionsHandled;
   const notifyHandled = await runRepositoryNotifyCommand(args, { cwd, stdout, fetchImpl });
   if (notifyHandled !== null) return notifyHandled;
   // 審査キューは記録なので、投入も参照もマージも常駐プロセス無しで完結する。
