@@ -22,6 +22,10 @@ updated: 2026-08-23
 ## Responsibility
 
 Revisor is the only owner of publishing reviewed repository refs and Releases.
+An explicitly approved history replacement is handled by
+[Approved push handoff](approved-push-handoff.md), through the existing push CLI,
+fresh Cc WARNING approval and an immutable single-attempt ledger. Ordinary PR merge
+and Release publication retain their fast-forward and tag-collision protections.
 An ordinary local-PR merge:
 
 1. creates the reviewed squash commit;

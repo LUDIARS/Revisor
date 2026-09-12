@@ -13,6 +13,7 @@ import {
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
 import { pushBranch } from "./branch-push.mjs";
+import { runPushHandoffCommand } from "./push-handoff-command.mjs";
 import { option, runLocalPrCommand } from "./local-pr-commands.mjs";
 import { runReviewWorker } from "./worker-command.mjs";
 import { startRevisor } from "./server.mjs";
@@ -65,6 +66,7 @@ function printHelp(stdout) {
     "  revisor version show --repo <path>",
     "  revisor version set <MAJOR.MINOR.PATCH> --repo <path>",
     "  revisor push [--repo <path>] [--branch <name>] [--remote-branch <name>]",
+    "  revisor push --handoff <json-file> --session-id <Cc session> [--reconcile] [--json]",
     "               [--force-with-lease] [--actor <label>]  # 作業ブランチだけを GitHub へ送る",
     "  revisor guard-push --repo <path> --state <path>  # managed hook only",
     "",
@@ -199,6 +201,8 @@ export async function main(args, {
     return 0;
   }
   if (args[0] === "push") {
+    const handoffExit = await runPushHandoffCommand(args, { stdout });
+    if (handoffExit !== null) return handoffExit;
     const result = await pushBranch({
       cwd: option(args, "--repo") ?? process.cwd(),
       branch: option(args, "--branch"),
@@ -226,7 +230,8 @@ export async function main(args, {
     if (!result.allowed) {
       if (result.publicationRequired) {
         process.stderr.write(
-          "Revisor blocked a direct main push. Merge and publish the reviewed local PR through Revisor.\n",
+          "Revisor blocked a direct main push. Merge and publish the reviewed local PR through Revisor.\n"
+          + "For an explicitly approved history replacement, use revisor push --handoff <json-file> --session-id <Cc session>.\n",
         );
         return 1;
       }

@@ -4,6 +4,8 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
+    { "pathPattern": "(^|/)src/push-handoff(?:-[a-z-]+)?\\.mjs$" },
+    { "pathPattern": "(^|/)test/push-handoff(?:-[a-z-]+)?\\.test\\.mjs$" },
     {
       "pathPattern": "(^|/)src/(?:git-publication|local-merge|prepared-merge|release-notes|release-publisher|release-version)\\.mjs$"
     },
@@ -63,6 +65,7 @@
     "authorized-branch-push"
   ],
   "specRefs": [
+    "spec/feature/approved-push-handoff.md",
     "remote-publication — reviewed main and human-selected Release publication",
     "remote-publication — local API / CLI からの Release",
     "spec/plan/branch-push-design.md — authorized working-branch push"

@@ -109,6 +109,12 @@ export class LocalPrStore {
   #database = null;
   #writes = 0;
 
+  /** Release the connection owned by short-lived CLI operations. */
+  close() {
+    this.#database?.close();
+    this.#database = null;
+  }
+
   constructor({
     path = resolveDbPath(),
     legacyPath,
