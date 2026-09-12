@@ -71,30 +71,24 @@ export async function installPushGuard({
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
-  if (existing.includes(MANAGED_MARKER)) {
-    const originalLine = /^# Revisor original pre-push: (.+)$/m.exec(existing);
-    let originalHookPath = null;
-    if (originalLine) {
-      try {
-        originalHookPath = JSON.parse(originalLine[1]);
-      } catch {
-        throw new Error(`Managed pre-push hook metadata is invalid: ${existingHookPath}`);
-      }
-    }
-    return writeManagedHook({
-      hookPath: existingHookPath,
-      originalHookPath,
-      cliPath,
-      statePath,
-      repoPath,
-      nodePath,
-    });
-  }
+  // 既に managed hook が入っている再導入でも、記録済みの「元 hook」メタデータは使わない。
+  // 元 hook は毎回グローバル core.hooksPath から解決し直す (以前の導入で一時ディレクトリを
+  // 捕獲していても、この再導入で正常形に戻る)。プロキシの同期と stale 削除も同じ経路で行う。
+  const managedExisting = existing.includes(MANAGED_MARKER);
   const commonDirectory = resolve(repoPath, await git(repoPath, ["rev-parse", "--git-common-dir"]));
   const managedDirectory = resolve(commonDirectory, "revisor-hooks");
   const hookPath = resolve(managedDirectory, "pre-push");
   await mkdir(managedDirectory, { recursive: true });
   let sourceDirectory = dirname(existingHookPath);
+  if (existing && !managedExisting && sourceDirectory.toLowerCase() === managedDirectory.toLowerCase()) {
+    // managed directory に Revisor 印の無い pre-push がある = 誰かが手で差し替えた hook。
+    // グローバル hook の有無に関わらず黙って上書きしない (元 hook の解決より先に判定する)。
+    throw new Error(
+      `A non-Revisor pre-push hook already exists and was not overwritten: ${
+        existingHookPath
+      }`,
+    );
+  }
   if (sourceDirectory.toLowerCase() === managedDirectory.toLowerCase()) {
     const globalPath = await unconfiguredGit(repoPath, ["config", "--global", "--get", "core.hooksPath"])
       .catch((error) => error.exitCode === 1 ? "" : Promise.reject(error));
@@ -103,7 +97,7 @@ export async function installPushGuard({
   if (sourceDirectory && unsafeOriginalHookDirectory(sourceDirectory)) {
     throw new Error(`Refusing temporary or Concordia-injected original hooks directory: ${sourceDirectory}`);
   }
-  if (existing && !sourceDirectory) {
+  if (existing && !managedExisting && !sourceDirectory) {
     throw new Error(
       `A non-Revisor pre-push hook already exists and was not overwritten: ${
         existingHookPath

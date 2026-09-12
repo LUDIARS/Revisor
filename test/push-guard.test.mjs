@@ -167,10 +167,11 @@ test("installs a managed pre-push hook without overwriting an existing hook", as
 
 test("resolves executable global hooks without injected config and removes stale proxies", async () => {
   const state = fixture();
-  const globalHooks = join(state.directory, "global-hooks");
+  // installPushGuard は一時ディレクトリ配下の元 hook を拒否するので、fixture (tmpdir) の外に置く
+  const globalHooks = join(process.cwd(), "test", `.scratch-global-hooks-${process.pid}`);
   const oldEnv = { ...process.env };
   try {
-    mkdirSync(globalHooks);
+    mkdirSync(globalHooks, { recursive: true });
     process.env.GIT_CONFIG_GLOBAL = join(state.directory, "global.gitconfig");
     writeFileSync(join(globalHooks, "post-commit"), "#!/bin/sh\nexit 0\n", { encoding: "utf8", mode: 0o755 });
     git(state.repoPath, "config", "--global", "core.hooksPath", globalHooks);
