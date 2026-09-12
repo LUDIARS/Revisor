@@ -190,6 +190,50 @@ test("answers the published release even when the version file is uninitialized"
   }
 });
 
+// タグは「最後に公開した版」、 版ファイルは「いまこのリポジトリが名乗る版」。 Concordia を
+// 2.4.335 に初期化した直後にタグ優先のままだと 2.4.0 と答え、 初期化した値が出なかった。
+test("prefers the version file over the last published tag", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({}),
+      ...withRelease(root, {
+        version: { status: "ready", version: "2.4.335" },
+        latestReleaseTag: "v2.4.0",
+        unreleasedCommitCount: 335,
+      }),
+    });
+    const [service] = alpha.services;
+    assert.equal(service.version, "2.4.335");
+    assert.equal(service.latestReleaseTag, "v2.4.0");
+  } finally {
+    removeFixture(root);
+  }
+});
+
+// package.json を持たないサービス (Unity / Rust など) があるので正本にはできない。
+// 最後の手段としてだけ使い、 欄としては返し続ける。
+test("uses package.json only when no Revisor-owned version exists", async () => {
+  const root = workspace();
+  try {
+    const [alpha] = await collectServiceVersions(["alpha"], {
+      cwd: root,
+      fetchImpl: healthResponder({}),
+      ...withRelease(root, {
+        version: { status: "uninitialized", version: "uninitialized" },
+        latestReleaseTag: null,
+        unreleasedCommitCount: 0,
+      }),
+    });
+    const [service] = alpha.services;
+    assert.equal(service.version, "1.2.3");
+    assert.equal(service.packageVersion, "1.2.3");
+  } finally {
+    removeFixture(root);
+  }
+});
+
 test("reports no drift when every source agrees", async () => {
   const root = workspace();
   try {
