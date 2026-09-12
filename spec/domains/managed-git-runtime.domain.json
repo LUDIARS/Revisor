@@ -12,6 +12,12 @@
     },
     {
       "pathPattern": "src/(?:git-runtime|git-trust)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)src/session-hook-env\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/session-hook-env\\.test\\.mjs$"
     }
   ],
   "cardTemplate": "Summarise the managed-git-runtime domain: verified Git executable selection, command-scoped cwd trust, and exact registered-source trust inherited by local transport without wildcard scope.",
@@ -20,7 +26,8 @@
     "sourcetree-runtime-rejection",
     "command-scoped-cwd-trust",
     "registered-source-protected-config",
-    "concurrent-trust-scope-isolation"
+    "concurrent-trust-scope-isolation",
+    "session-hook-injection-strip"
   ],
   "specRefs": [
     "managed-git-runtime — deterministic Git for review operations",

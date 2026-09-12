@@ -183,6 +183,12 @@ directory が repo-local `core.hooksPath` の場合は global `core.hooksPath` �
 元 hook だけを proxy し、再導入時には元にない proxy を削除する。`repo notify` と
 `PATCH /v1/repositories/:id/notify` は hook を変更せず通知先だけを更新する。
 
+CLI (`src/cli.mjs`) は起動時に、Concordia セッションが shell へ注入した hook 設定
+(`GIT_CONFIG_*` の `core.hooksPath` が `concordia-session-hooks` を指すスロットと
+`CONCORDIA_SESSION_HOOK_*`) を `process.env` から外す (`src/session-hook-env.mjs`)。他の
+`GIT_CONFIG_*` スロットは詰め直して保つ。これにより CLI 自身の git、hook 導入、CLI が起動する
+ワーカーがセッション用ラッパーを経由しなくなる。
+
 Missing App credentials, installation access, permissions, remote divergence,
 tag collision, push failure, and Release failure fail explicitly. The error
 remains visible until publication succeeds. There is no PAT, anonymous, or

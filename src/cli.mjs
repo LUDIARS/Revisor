@@ -18,6 +18,7 @@ import { runReviewWorker } from "./worker-command.mjs";
 import { startRevisor } from "./server.mjs";
 import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 import { startRuntimeDiagnostics } from "./runtime-diagnostics.mjs";
+import { applySessionHookInjectionStrip } from "./session-hook-env.mjs";
 import { serviceLog } from "./service-log.mjs";
 import { runManualReleaseCommand } from "./release-local-command.mjs";
 import { runServiceVersionCommand } from "./service-version-command.mjs";
@@ -276,6 +277,9 @@ export async function main(args, {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // Cc セッションの shell から起動されたとき、セッション用 git hook 注入 (core.hooksPath →
+  // concordia-session-hooks) を CLI と派生する git / ワーカーへ持ち込まない。
+  applySessionHookInjectionStrip(process.env);
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (error) {
