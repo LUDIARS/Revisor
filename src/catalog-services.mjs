@@ -144,6 +144,7 @@ const ALIAS_TIERS = [
  * 1 つだけ答えると、 残りが古いまま走っていても見えないため。
  *
  * @returns {ServiceDefinition[]}
+ * @implements SPEC-SERVICE-VERSION-SELECTOR
  */
 export function findServiceDefinitions(definitions, identifier) {
   const needle = lower(String(identifier ?? "").trim());

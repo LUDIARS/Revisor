@@ -20,10 +20,11 @@
     "version-drift-classification"
   ],
   "specRefs": [
-    "service-version — 版は 1 か所になく、4 つの情報源の食い違いが答えになる",
-    "service-version — 代表値の正本は版ファイル、package.json は最後の手段",
-    "service-version — サービスは code / repository / project code のどれでも名指しできる",
-    "service-version — サービスを 1 つも名指ししない照会は受け付けない"
+    "service-version — 版は 1 か所になく、食い違いが答えになる",
+    "SPEC-SERVICE-VERSION-SOURCES",
+    "SPEC-SERVICE-VERSION-REPRESENTATIVE",
+    "SPEC-SERVICE-VERSION-SELECTOR",
+    "SPEC-SERVICE-VERSION-EXPLICIT-TARGET"
   ],
   "rationale": "版の照会は読み取りだけで、リリース (remote-publication) でも起動境界 (service-bootstrap) でもない。公開処理と同じドメインに置くと「答えるために公開する」経路が生まれ、起動境界に置くと listener 解決とサービス横断の問い合わせが混ざる。catalog の読み取りを service-bootstrap と共有せず専用モジュールに分けているのも同じ理由で、あちらは自分の listen 先 1 つを決める責務、こちらは他サービスを横断して素性を集める責務にある。"
 }

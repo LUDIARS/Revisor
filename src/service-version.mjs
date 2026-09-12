@@ -1,14 +1,16 @@
 /**
  * 「いまそのサービスは何版か」 を 1 つの答えにまとめる。
  *
- * 版は 1 か所にはない。 走っているプロセスが名乗る版 (health の `version`、 AIFormat
- * `RULE_SRE.md` §2) と、 ディスクに置かれている版 (`package.json`)、 そして Revisor が
- * 所有するリリース版 (`.revisor-version`) は別物で、 食い違っていること自体が
- * 「ビルドしたが再起動していない」 「マージしたが公開していない」 の証拠になる。
- * どれか 1 つに丸めると、 まさに知りたかったズレが消える。
+ * 版は 1 か所にはない。 Revisor が所有する版ファイル (`.revisor-version`)、 最後に公開した
+ * リリースタグ、 走っているプロセスが名乗る版 (health の `version`、 AIFormat
+ * `RULE_SRE.md` §2)、 ディスクに置かれている版 (`package.json`) は別物で、 食い違って
+ * いること自体が 「ビルドしたが再起動していない」 「マージしたが公開していない」 の
+ * 証拠になる。 どれか 1 つに丸めると、 まさに知りたかったズレが消える。
  *
- * だから 3 つとも返し、 表示用の代表値 (`version`) だけを「走っている版 → リリース版
- * → ディスク版」 の順で決める。
+ * だから 4 つとも返し、 表示用の代表値 (`version`) だけを「版ファイル → リリースタグ →
+ * 走行版 → ディスク版」 の順で決める。
+ *
+ * @implements spec/feature/service-version.md
  */
 
 import { readFile } from "node:fs/promises";
@@ -46,6 +48,7 @@ function sanitizeVersion(value) {
  *
  * @param {unknown} values
  * @returns {string[]}
+ * @implements SPEC-SERVICE-VERSION-EXPLICIT-TARGET
  */
 export function parseServiceSelectors(values) {
   const selectors = (Array.isArray(values) ? values : [values])
@@ -172,6 +175,8 @@ function withoutTagPrefix(tag) {
 /**
  * 食い違いを名前で残す。 表示側が「どれとどれが違うか」を組み立て直さずに済ませる
  * ためで、 数値そのものは各欄に残したままにする。
+ *
+ * @implements SPEC-SERVICE-VERSION-SOURCES
  */
 function driftKinds({ released, runningVersion, packageVersion, unreleasedCommits }) {
   const kinds = [];
@@ -182,6 +187,7 @@ function driftKinds({ released, runningVersion, packageVersion, unreleasedCommit
   return kinds;
 }
 
+/** @implements SPEC-SERVICE-VERSION-REPRESENTATIVE */
 async function describeService(definition, { repositories, releaseState, fetchImpl, timeoutMs }) {
   const [running, packageVersion, release] = await Promise.all([
     probeRunningVersion(definition, { fetchImpl, timeoutMs }),
@@ -225,6 +231,7 @@ async function describeService(definition, { repositories, releaseState, fetchIm
  *   要求 1 件につき 1 要素。 解決できなかった要求も `found: false` で残す — 黙って
  *   落とすと「聞いたサービスが答えに無い」ことに呼び出し側が気付けない。
  */
+/** @implements SPEC-SERVICE-VERSION-SOURCES */
 export async function collectServiceVersions(selectors, {
   cwd = process.cwd(),
   repositories = [],
