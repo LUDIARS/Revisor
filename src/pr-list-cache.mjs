@@ -38,6 +38,7 @@ export function summaryProjection(pullRequest) {
     checkStatus: pullRequest.checkStatus,
     reviewLane: pullRequest.reviewLane ?? null,
     headSha: pullRequest.headSha,
+    reviewReport: pullRequest.reviewReport ?? null,
     // 決着済み PR の終局投稿 (Concordia Test Forum) がマージ先を示すのに使う。
     mergeCommitSha: pullRequest.mergeCommitSha ?? null,
     externalVerification: pullRequest.externalVerification ?? null,

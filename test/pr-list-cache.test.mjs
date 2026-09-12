@@ -55,7 +55,7 @@ test("projects only the fields needed by PR cards", () => {
   });
   assert.deepEqual(Object.keys(summary), [
     "id", "number", "repository", "title", "status", "checkStatus", "reviewLane",
-    "headSha", "mergeCommitSha", "externalVerification", "createdAt", "updatedAt", "decision",
+    "headSha", "reviewReport", "mergeCommitSha", "externalVerification", "createdAt", "updatedAt", "decision",
   ]);
   for (const field of ["anatomia", "body", "ci", "lifecycleEvents", "reviewPlan", "mergeRisk"]) {
     assert.equal(field in summary, false);
@@ -82,7 +82,7 @@ test("serializes summary projections and preserves full all records", () => {
     pullRequests: [{
       id: "pr-1", number: 1, repository: "LUDIARS/Revisor", title: "一覧を軽量化する",
       status: "open", checkStatus: "queued", reviewLane: "standard",
-      headSha: "a".repeat(40), mergeCommitSha: null, externalVerification: null,
+      headSha: "a".repeat(40), reviewReport: null, mergeCommitSha: null, externalVerification: null,
       createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:01:00.000Z",
       decision: { state: "needs_human" },
     }],

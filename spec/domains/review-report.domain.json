@@ -1,0 +1,15 @@
+{
+  "name": "review-report",
+  "description": "ローカル PR 審査の人間向け完全報告を attempt 単位で正規化・永続化し、API 投影へ渡す境界。段階開始・完了・再利用/スキップ・最終結果を安定 id で置換記録し、公開前に秘密情報を無害化する。審査実行、判定、Discord 配送は持たない。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/review-report\\.mjs$" },
+    { "pathPattern": "(^|/)test/review-report\\.test\\.mjs$" },
+    { "namePattern": "^(?:createReviewReport|updateReviewReport|reviewReportEntry)$" }
+  ],
+  "cardTemplate": "Summarise the review-report domain: attempt-scoped, secret-sanitized, stable-id review progress entries projected through local PR API records.",
+  "mechanics": ["attempt-scoped-history", "stable-entry-replacement", "secret-safe-report-projection"],
+  "specRefs": ["complete-discord-review-report — 完全な Discord 向けレビュー報告"],
+  "rationale": "進捗報告の整形・秘匿化・同一段階の置換を review runner や外部通知から分離し、速い段階も durable PR record に残す。"
+}

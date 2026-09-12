@@ -78,6 +78,8 @@ test("a stage checkpoint records the stage and its outcome without settling the 
   assert.equal(store.record.reviewStages.tests.completed, true);
   assert.equal(store.record.ci[0].name, "unit");
   assert.ok(store.record.anatomia.domain);
+  assert.equal(store.record.reviewReport.version, 1);
+  assert.equal(store.record.reviewReport.entries.find((entry) => entry.id === "stage:tests").status, "passed");
   // 審査は終わっていない。 ここで test_ok にすると通っていない段階が通ったように見える。
   assert.equal(store.record.checkStatus, "running");
   // 審査を通り切ったヘッドはマージ判定が読む別の状態で、段階の通過では書かない。

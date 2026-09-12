@@ -8,6 +8,12 @@ import {
   stageProgressRecord,
   withCompletedStage,
 } from "./review-stage-progress.mjs";
+import {
+  createReviewReport,
+  finalReviewReportEntry,
+  reviewReportEntry,
+  updateReviewReport,
+} from "./review-report.mjs";
 
 function analysisProjection(result) {
   const analysis = result?.analysis;
@@ -178,13 +184,43 @@ export class LocalPrReporter {
       jobId: job.id,
       checkStatus: "queued",
       reviewLane: job.request.reviewLane ?? "standard",
+      reviewReport: createReviewReport({
+        attemptId: job.id,
+        headSha: job.request.headSha,
+        at: this.now(),
+        content: "Review queued.",
+      }),
     });
   }
 
   async running(job) {
     if (!this.#isCurrent(job)) return;
+    const pullRequest = this.store.getPullRequest(job.request.localPrId);
+    let reviewReport = pullRequest.reviewReport;
+    const at = this.now();
+    reviewReport = updateReviewReport(reviewReport, {
+      id: "review-start", kind: "review", label: "Review started", status: "running", at,
+      content: "Review worker started.",
+    }, { attemptId: job.id, headSha: job.request.headSha });
+    const planned = [...new Set([
+      ...(job.request.verificationTargets ?? ["anatomia", "tests", "security"]),
+      ...(job.request.reviewMode === "full" ? ["review"] : []),
+    ])];
+    for (const stage of planned) {
+      reviewReport = updateReviewReport(reviewReport, {
+        id: `stage:${stage}`, kind: "check", label: `${stage} check`, status: "running", at,
+        content: "Check started.",
+      });
+    }
+    for (const stage of job.request.reusedStages ?? []) {
+      reviewReport = updateReviewReport(reviewReport, {
+        id: `stage:${stage}`, kind: "check", label: `${stage} check`, status: "skipped", at,
+        content: "Reused from an equivalent completed review stage.",
+      });
+    }
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: "running",
+      reviewReport,
     });
   }
 
@@ -210,6 +246,7 @@ export class LocalPrReporter {
     ) {
       return;
     }
+    const detail = reviewReportEntry(stage, payload);
     this.store.updatePullRequest(localPrId, {
       ...stageOutcomeProjection(stage, payload),
       // `reviewedHeadSha` はここでは書かない。あれはマージ時の陳腐化判定が読む
@@ -221,6 +258,17 @@ export class LocalPrReporter {
         headSha,
         this.now(),
       ),
+      reviewReport: updateReviewReport(pullRequest.reviewReport, {
+        id: `stage:${stage}`,
+        ...detail,
+        status: "passed",
+        at: this.now(),
+      }, {
+        // Older direct callers predate reviewReport. Keep their checkpoint
+        // durable without treating a missing job id as the current job.
+        attemptId: pullRequest.jobId ?? jobId ?? `legacy:${headSha}`,
+        headSha,
+      }),
     });
   }
 
@@ -268,6 +316,7 @@ export class LocalPrReporter {
     // マージを走らせない。
     if (!this.#isCurrent(job)) return;
     const passed = job.result?.conclusion === "success";
+    const pullRequest = this.store.getPullRequest(job.request.localPrId);
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: passed ? "test_ok" : "action_required",
       reviewedHeadSha: job.result?.reviewedHeadSha ?? job.request.headSha,
@@ -293,6 +342,11 @@ export class LocalPrReporter {
       mergeRisk: job.result?.mergeRisk ?? null,
       runtimeVerification: job.result?.runtimeVerification ?? null,
       geniusGuidance: job.result?.geniusGuidance ?? null,
+      reviewReport: updateReviewReport(pullRequest.reviewReport, {
+        id: "final",
+        ...finalReviewReportEntry(job.result),
+        at: this.now(),
+      }, { attemptId: job.id, headSha: job.request.headSha }),
     });
     if (job.result?.anatomiaGate && typeof this.store.appendPullRequestEvent === "function") {
       this.store.appendPullRequestEvent(job.request.localPrId, {
@@ -326,9 +380,15 @@ export class LocalPrReporter {
     // 追い越された job の失敗で現在の審査を `failed` に落とすと、投稿元には
     // 古いヘッドの失敗通知が届き、board 上も進行中の審査が失敗に見える。
     if (!this.#isCurrent(job)) return;
+    const pullRequest = this.store.getPullRequest(job.request.localPrId);
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: "failed",
       error: job.error || "The local review worker failed.",
+      reviewReport: updateReviewReport(pullRequest.reviewReport, {
+        id: "final",
+        ...finalReviewReportEntry(null, job.error || "The local review worker failed."),
+        at: this.now(),
+      }, { attemptId: job.id, headSha: job.request.headSha }),
     });
     await this.#announceReviewStatus("review_failed", job.request.localPrId);
     // 失敗も終局状態。ここで黙ると投稿側は running のまま待ち続ける。

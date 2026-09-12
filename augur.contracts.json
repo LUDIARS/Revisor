@@ -56,6 +56,15 @@
       "module": "contracts/update-repository-notify.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-7",
+      "criterion": "C-7 updateReviewReport(report, entry): attempt ごとに安定 id の安全なレビュー報告を置換記録する",
+      "symbol": "updateReviewReport",
+      "file": "src/review-report.mjs",
+      "module": "contracts/update-review-report.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

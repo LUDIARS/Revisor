@@ -110,3 +110,10 @@ token を一切保持しない。
 - `test/review-completion-notice.test.mjs`: `review_passed` → auto-merge → 終局通知の
   順序、action_required と worker 失敗の両方が `review_failed` になること、
   レビュー runner が Concordia 通知を持たない (途中経過で 2 通目を出さない) こと
+
+> ### SPEC-COMPLETE-DISCORD-REVIEW-REPORT: attempt 単位の完全レビュー報告
+>
+> local PR の詳細および open 一覧は、`{version:1, attemptId, headSha, entries}` の
+> `reviewReport` を任意で投影する。entry は安定した attempt 内 id で置換し、開始・段階・
+> 再利用/skip・最終結果を ISO UTC 時刻と秘密情報を無害化した本文で残す。通知 event は
+> identifier-only の invalidation のままとし、consumer は fresh projection を読む。
