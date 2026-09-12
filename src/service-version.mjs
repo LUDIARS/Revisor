@@ -188,10 +188,15 @@ async function describeService(definition, { repositories, releaseState, fetchIm
     readPackageVersion(definition),
     readRelease(definition, repositories, releaseState),
   ]);
-  // 代表値は **公開済みの版**。 走っている版を代表にすると、 版管理を初期化していない
-  // リポジトリで `package.json` の置き去りの値がそのまま答えになる (Concordia が
-  // v2.4.0 公開済みで 0.1.0 と答えていた)。 走行版とのズレは drift に残す。
-  const released = withoutTagPrefix(release.latestReleaseTag) ?? release.version;
+  // 代表値の正本は **Revisor が持つ版ファイル**。 次がリリースタグで、 `package.json` は
+  // 最後の手段にとどめる — package.json を持たないサービス (Unity / Rust など) があり、
+  // 版を持つ前提を敷けないため、 正本にはできない。 それでも欄としては返し続ける
+  // (追従だけはする): ディスクとのズレは反映漏れの証拠になる。
+  //
+  // 版ファイルをタグより先に見るのは、 タグが「最後に公開した版」なのに対し、 版ファイルは
+  // 「いまこのリポジトリが名乗る版」だから。 Concordia を 2.4.335 に初期化した直後に
+  // タグ優先のままだと 2.4.0 と答えてしまい、 初期化した値がどこにも出なかった。
+  const released = release.version ?? withoutTagPrefix(release.latestReleaseTag);
   return {
     service: definition.code,
     name: definition.name,

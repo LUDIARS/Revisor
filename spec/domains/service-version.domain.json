@@ -1,0 +1,29 @@
+{
+  "name": "service-version",
+  "description": "名指しされた LUDIARS サービスが「いま何版か」を答える読み取り専用ドメイン。版は 1 か所になく、Revisor 所有の版ファイル (.revisor-version) と公開済みリリースタグ、走っているプロセスが health で名乗る版 (AIFormat RULE_SRE.md §2)、ディスクの package.json が別々に存在する。4 つを集めて代表値を 1 つ決め、食い違いを drift として名前で残す。代表値の正本は版ファイルで、package.json は持たないサービスがあるため最後の手段にとどめる。サービス定義の解決は Excubitor catalog (中央 services.yaml + 各リポの断片) から行う。状態は一切変えない。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    {
+      "pathPattern": "(^|/)src/(?:service-version|service-version-command|catalog-services|own-version)\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/(?:service-version|catalog-services|server-service-versions|ui-server-health)\\.test\\.mjs$"
+    }
+  ],
+  "cardTemplate": "Summarise the service-version domain: resolve named services from the Excubitor catalog, gather the Revisor-owned version file, the published release tag, the version the running process reports over health, and the package.json on disk, then pick one representative version and name the drift between them without changing any state.",
+  "mechanics": [
+    "catalog-service-resolution",
+    "health-reported-version-probe",
+    "release-state-version-lookup",
+    "representative-version-selection",
+    "version-drift-classification"
+  ],
+  "specRefs": [
+    "service-version — 版は 1 か所になく、4 つの情報源の食い違いが答えになる",
+    "service-version — 代表値の正本は版ファイル、package.json は最後の手段",
+    "service-version — サービスは code / repository / project code のどれでも名指しできる",
+    "service-version — サービスを 1 つも名指ししない照会は受け付けない"
+  ],
+  "rationale": "版の照会は読み取りだけで、リリース (remote-publication) でも起動境界 (service-bootstrap) でもない。公開処理と同じドメインに置くと「答えるために公開する」経路が生まれ、起動境界に置くと listener 解決とサービス横断の問い合わせが混ざる。catalog の読み取りを service-bootstrap と共有せず専用モジュールに分けているのも同じ理由で、あちらは自分の listen 先 1 つを決める責務、こちらは他サービスを横断して素性を集める責務にある。"
+}
