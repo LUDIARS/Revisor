@@ -127,3 +127,104 @@ test("rejects a stale immediate release before creating remote state", async () 
   );
   assert.equal(createdTag, false);
 });
+
+// package.json は版の正本ではないが追従はする。 tag を打つ前に commit しておくと、
+// 公開が base と tag を atomic に push するのでツリーも origin も一致したままになる。
+test("bumps package.json before tagging so the release carries it", async () => {
+  const calls = [];
+  let headMoved = false;
+  const result = await publishManualRelease({
+    repository: { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main" },
+    kind: "minor",
+    expectedVersion: "1.4.8",
+    title: "Product 1.5",
+    notes: "Guidance.",
+    readCredentials: () => ({}),
+    createClient: () => ({
+      installationToken: async () => "token",
+      releaseByTag: async () => null,
+      createRelease: async () => ({ html_url: "https://github.example/releases/v1.5.0" }),
+    }),
+    runGit: async (_path, args) => {
+      if (args[0] === "symbolic-ref") return "main";
+      return headMoved ? "bumped1" : "before1";
+    },
+    readVersion: async () => "1.4.8",
+    writeVersion: async () => {},
+    getLocalTags: async () => ["v1.4.8"],
+    getRemoteTags: async () => ["v1.4.8"],
+    syncPackage: async ({ version }) => {
+      calls.push(["sync", version]);
+      headMoved = true;
+      return { synced: true, from: "1.4.8", to: version };
+    },
+    createTag: async (value) => calls.push(["tag", value.tag, value.mergeCommitSha]),
+    push: async (value) => calls.push(["push", value.tag, value.mergeCommitSha]),
+  });
+  // 追従が先、 tag と push はその commit を指す。
+  assert.deepEqual(calls, [
+    ["sync", "1.5.0"],
+    ["tag", "v1.5.0", "bumped1"],
+    ["push", "v1.5.0", "bumped1"],
+  ]);
+  assert.deepEqual(result.packageVersionSync, { synced: true, from: "1.4.8", to: "1.5.0" });
+});
+
+// 公開していないのに版が上がった commit を base へ残さない。
+test("rolls the package.json bump back when publication fails", async () => {
+  const gitCalls = [];
+  let headMoved = false;
+  await assert.rejects(publishManualRelease({
+    repository: { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main" },
+    kind: "minor",
+    expectedVersion: "1.4.8",
+    title: "Product 1.5",
+    notes: "Guidance.",
+    readCredentials: () => ({}),
+    createClient: () => ({ installationToken: async () => "token" }),
+    runGit: async (_path, args) => {
+      gitCalls.push(args);
+      if (args[0] === "symbolic-ref") return "main";
+      if (args[0] === "reset") return "";
+      return headMoved ? "bumped1" : "before1";
+    },
+    readVersion: async () => "1.4.8",
+    writeVersion: async () => {},
+    getLocalTags: async () => ["v1.4.8"],
+    getRemoteTags: async () => ["v1.4.8"],
+    syncPackage: async () => {
+      headMoved = true;
+      return { synced: true, from: "1.4.8", to: "1.5.0" };
+    },
+    createTag: async () => {},
+    push: async () => { throw new Error("remote rejected"); },
+  }), /remote rejected/);
+  const reset = gitCalls.find((args) => args[0] === "reset");
+  assert.deepEqual(reset, ["reset", "--hard", "before1"]);
+});
+
+// 追従しなかった公開では何も戻さない。
+test("does not reset when there was no package.json to follow", async () => {
+  const gitCalls = [];
+  await assert.rejects(publishManualRelease({
+    repository: { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main" },
+    kind: "minor",
+    expectedVersion: "1.4.8",
+    title: "Product 1.5",
+    notes: "Guidance.",
+    readCredentials: () => ({}),
+    createClient: () => ({ installationToken: async () => "token" }),
+    runGit: async (_path, args) => {
+      gitCalls.push(args);
+      return args[0] === "symbolic-ref" ? "main" : "abc123";
+    },
+    readVersion: async () => "1.4.8",
+    writeVersion: async () => {},
+    getLocalTags: async () => ["v1.4.8"],
+    getRemoteTags: async () => ["v1.4.8"],
+    syncPackage: async () => ({ synced: false, reason: "no package.json" }),
+    createTag: async () => {},
+    push: async () => { throw new Error("remote rejected"); },
+  }), /remote rejected/);
+  assert.equal(gitCalls.some((args) => args[0] === "reset"), false);
+});

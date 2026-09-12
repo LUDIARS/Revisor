@@ -12,6 +12,7 @@ import { readLocalVersion, writeLocalVersion } from "./local-version.mjs";
 import { composeManualReleaseNotes } from "./release-notes.mjs";
 import { latestReleaseTag, nextManualReleaseTag } from "./release-version.mjs";
 import { git } from "./workspace.mjs";
+import { syncPackageVersion } from "./package-version.mjs";
 import { notifyRepositoryEvent } from "./repository-notification.mjs";
 
 export async function publishManualRelease({
@@ -32,6 +33,7 @@ export async function publishManualRelease({
   runGit = git,
   scan = scanTextForLeaks,
   notify = notifyRepositoryEvent,
+  syncPackage = syncPackageVersion,
 }) {
   const branch = await runGit(repository.rootPath, ["symbolic-ref", "--short", "HEAD"]);
   if (branch !== repository.baseRef) {
@@ -47,11 +49,12 @@ export async function publishManualRelease({
   }
   const currentTag = `v${currentVersion}`;
   const tag = nextManualReleaseTag(currentVersion, kind);
-  const baseSha = await runGit(repository.rootPath, [
+  const headSha = () => runGit(repository.rootPath, [
     "rev-parse",
     "--verify",
     `refs/heads/${repository.baseRef}`,
   ]);
+  const preSyncSha = await headSha();
   const client = createClient(readCredentials(env));
   const token = await client.installationToken(repository.repository);
   const releasedTags = [
@@ -70,6 +73,25 @@ export async function publishManualRelease({
     );
   }
   const previousTag = latestReleaseTag(releasedTags.filter((candidate) => candidate !== tag));
+  // `package.json` の追従は tag を打つ前に済ませる。 後ろに置くと push されない commit が
+  // base に残り、 merge パイプラインの分岐検出を誤爆させる。 ここで commit すれば公開が
+  // base と tag を atomic に push するので、 ツリーも origin も一致したままになる。
+  // 版の食い違い検査を通してから積む — 弾かれる公開で base を動かさないため。
+  const packageSync = await syncPackage({
+    rootPath: repository.rootPath,
+    version: tag.slice(1),
+    runGit,
+  });
+  const baseSha = await headSha();
+  // 追従 commit を積んだあとで公開が失敗したら、 その commit だけを巻き戻す。 残すと
+  // 「公開していないのに版が上がった commit」 が base に居座る。 自分が積んだ 1 本で
+  // あることを HEAD で確かめてからでないと戻さない。 push が通ったあとは origin にも
+  // 載っているので、 二度と戻さない。
+  const rollbackPackageSync = async () => {
+    if (!packageSync.synced) return;
+    if (await headSha().catch(() => null) !== baseSha) return;
+    await runGit(repository.rootPath, ["reset", "--hard", preSyncSha]).catch(() => undefined);
+  };
   const releaseNotes = composeManualReleaseNotes({
     title,
     body: notes,
@@ -80,28 +102,33 @@ export async function publishManualRelease({
     kind,
     commitSha: baseSha,
   });
-  const leakage = scan(releaseNotes, "release-notes");
-  if (leakage.totalFindings > 0) {
-    throw new RevisorError(
-      `Release Notes contain ${leakage.totalFindings} potential information leakage finding(s).`,
-    );
+  try {
+    const leakage = scan(releaseNotes, "release-notes");
+    if (leakage.totalFindings > 0) {
+      throw new RevisorError(
+        `Release Notes contain ${leakage.totalFindings} potential information leakage finding(s).`,
+      );
+    }
+    await createTag({
+      rootPath: repository.rootPath,
+      mergeCommitSha: baseSha,
+      tag,
+      message: `${tag}: ${title}`,
+    });
+    await push({
+      repository: repository.repository,
+      rootPath: repository.rootPath,
+      baseRef: repository.baseRef,
+      expectedBaseSha: baseSha,
+      mergeCommitSha: baseSha,
+      tag,
+      token,
+      env,
+    });
+  } catch (error) {
+    await rollbackPackageSync();
+    throw error;
   }
-  await createTag({
-    rootPath: repository.rootPath,
-    mergeCommitSha: baseSha,
-    tag,
-    message: `${tag}: ${title}`,
-  });
-  await push({
-    repository: repository.repository,
-    rootPath: repository.rootPath,
-    baseRef: repository.baseRef,
-    expectedBaseSha: baseSha,
-    mergeCommitSha: baseSha,
-    tag,
-    token,
-    env,
-  });
   let release = await client.releaseByTag(repository.repository, tag);
   if (!release) {
     release = await client.createRelease(repository.repository, {
@@ -120,6 +147,7 @@ export async function publishManualRelease({
     version: tag.slice(1),
     tag,
     commitSha: baseSha,
+    packageVersionSync: packageSync,
     // The UI turns this into an href. Only an absolute GitHub-scheme URL may
     // reach the DOM, so a malformed API response cannot become a script URL.
     releaseUrl: typeof release.html_url === "string" && release.html_url.startsWith("https://")

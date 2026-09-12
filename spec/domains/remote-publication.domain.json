@@ -14,10 +14,10 @@
       "pathPattern": "src/(?:git-publication|local-merge|prepared-merge|release-notes|release-publisher|release-version)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)src/(?:authenticated\\-git|base\\-reconcile|base\\-relanding|deferred\\-publication|github\\-app|github\\-reachability|github\\-workflow\\-publication|manual\\-release|pending\\-publish|plain\\-git\\-publication|publication\\-coordinator|publication\\-state|publish\\-pending|push\\-guard|release\\-contracts|release\\-preparation|release\\-service|repository\\-workflow|version\\-root)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:authenticated\\-git|base\\-reconcile|base\\-relanding|deferred\\-publication|github\\-app|github\\-reachability|github\\-workflow\\-publication|manual\\-release|package\\-version|pending\\-publish|plain\\-git\\-publication|publication\\-coordinator|publication\\-state|publish\\-pending|push\\-guard|release\\-contracts|release\\-preparation|release\\-service|repository\\-workflow|version\\-root)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:authenticated\\-git|base\\-reconcile|base\\-relanding|deferred\\-publication|github\\-app|github\\-reachability|github\\-workflow\\-publication|manual\\-release|pending\\-publish|plain\\-git\\-publication|publication\\-coordinator|publication\\-state|publish\\-pending|push\\-guard|release\\-contracts|release\\-preparation|release\\-service|repository\\-workflow|version\\-root)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:authenticated\\-git|base\\-reconcile|base\\-relanding|deferred\\-publication|github\\-app|github\\-reachability|github\\-workflow\\-publication|manual\\-release|package\\-version|pending\\-publish|plain\\-git\\-publication|publication\\-coordinator|publication\\-state|publish\\-pending|push\\-guard|release\\-contracts|release\\-preparation|release\\-service|repository\\-workflow|version\\-root)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)src/(?:branch\\-push|branch\\-push\\-flag)\\.mjs$"
@@ -35,7 +35,7 @@
       "pathPattern": "(^|/)src/(?:server|cli|release\\-local\\-command|release\\-service)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:manual\\-release|repository\\-changes|repository\\-notification)\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:manual\\-release|package\\-version|repository\\-changes|repository\\-notification)\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/(?:server|cli\\-release)\\.test\\.mjs$"
