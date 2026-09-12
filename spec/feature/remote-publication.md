@@ -100,11 +100,18 @@ commit range, merged local PR metadata, release-note-shaped Markdown, and a
 sanitized notification summary. Omitting `from` selects the latest local Release
 tag. The API never returns webhook secrets, raw local paths, or unsafe mentions.
 
-Repository registration may declare `notify: { release: ["discord:name"], merged:
-["slack:name"] }`; both lists default to empty. `release` is sent only after a
-GitHub Release was created. `merged` is optional and off by default, for owners
-who want to know that the repository changed before deployment. Delivery is
-best-effort and never changes a successful Release or merge result.
+Repository registration may declare `notify: { release: ["discord:name",
+"concordia"], merged: ["slack:name"] }`; both lists default to empty. `release`
+is sent only after a GitHub Release was created. A `concordia` release target
+resolves the optional Concordia loopback URL from the Excubitor catalog and
+POSTs `/v1/events/release-published` with `{repository, kind, tag, previousTag,
+version, title, notice, releaseUrl, publishedAt}`. It uses a three-second
+timeout; unavailable Concordia is recorded as an unsent target and never
+changes the completed Release result. `concordia` is deliberately ignored for
+`merged`: merged notices remain Discord/Slack webhook-only. `merged` is optional
+and off by default, for owners who want to know that the repository changed
+before deployment. Delivery is best-effort and never changes a successful
+Release or merge result.
 
 `revisor secret set webhook.<name> <url>` encrypts named Discord or Slack URLs.
 The legacy instance-wide `discordWebhookUrl` remains readable as `webhook.discord`

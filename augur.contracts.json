@@ -14,7 +14,7 @@
     },
     {
       "id": "C-2",
-      "criterion": "C-2 deliverRepositoryNotifications(targets): 有効な Discord / Slack target のみを best-effort 配送する",
+      "criterion": "C-2 deliverRepositoryNotifications(targets): 有効な Discord / Slack / Concordia target を best-effort 配送する",
       "symbol": "deliverRepositoryNotifications",
       "file": "src/repository-notification.mjs",
       "module": "contracts/deliver-repository-notifications.contract.mjs",

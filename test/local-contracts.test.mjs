@@ -257,9 +257,9 @@ test("keeps validated notify targets at repository registration", () => {
     repository: "LUDIARS/Revisor",
     root_path: "E:/Document/Ars/Revisor",
     test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
-    notify: { release: ["discord:team", "slack:ops"], merged: [] },
+    notify: { release: ["discord:team", "slack:ops", "concordia"], merged: [] },
   });
-  assert.deepEqual(registration.notify, { release: ["discord:team", "slack:ops"] });
+  assert.deepEqual(registration.notify, { release: ["discord:team", "slack:ops", "concordia"] });
   assert.equal("notify" in validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
     root_path: "E:/Document/Ars/Revisor",
@@ -267,14 +267,14 @@ test("keeps validated notify targets at repository registration", () => {
   }), false);
 });
 
-test("rejects notify targets that are not discord:<name> or slack:<name>", () => {
+test("rejects notify targets that are not discord:<name>, slack:<name>, or concordia", () => {
   const base = {
     repository: "LUDIARS/Revisor",
     root_path: "E:/Document/Ars/Revisor",
     test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
   };
   assert.throws(() => validateRepositoryRegistration({ ...base, notify: { release: ["https://hooks.slack.com/x"] } }),
-    /discord:<name> or slack:<name>/);
+    /discord:<name>, slack:<name>, or concordia/);
   assert.throws(() => validateRepositoryRegistration({ ...base, notify: { deployed: ["discord:team"] } }),
     /not a supported event/);
 });

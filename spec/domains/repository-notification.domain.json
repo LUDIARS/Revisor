@@ -4,11 +4,12 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
-    { "pathPattern": "(^|/)src/(?:repository\\-changes|repository\\-notification|slack\\-webhook|contract\\-runtime|config|cli|local\\-pr\\-commands|review\\-context)\\.mjs$" },
+    { "pathPattern": "(^|/)src/(?:concordia\\-context|repository\\-changes|repository\\-notification|slack\\-webhook|contract\\-runtime|config|cli|local\\-pr\\-commands|review\\-context)\\.mjs$" },
     { "pathPattern": "(^|/)test/(?:repository\\-changes|repository\\-notification|slack\\-webhook|config|manual\\-release)\\.test\\.mjs$" },
     { "pathPattern": "(^|/)contracts/.*\\.contract\\.mjs$" },
     { "pathPattern": "(^|/)augur\\.(?:contracts|inject)\\.json$" },
-    { "pathPattern": "(^|/)spec/tasks/2026\\-09\\-11\\-release\\-notify\\-webhooks\\.md$" }
+    { "pathPattern": "(^|/)spec/tasks/2026\\-09\\-11\\-release\\-notify\\-webhooks\\.md$" },
+    { "pathPattern": "(^|/)spec/tasks/2026\\-09\\-12\\-release\\-notify\\-concordia\\.md$" }
   ],
   "specRefs": ["spec/feature/remote-publication.md", "spec/plan/2026-09-11-release-deploy-notification-rv-cc.md"]
 }

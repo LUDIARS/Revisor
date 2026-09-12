@@ -62,6 +62,30 @@ test("keeps a successful Release when its optional notification fails", async ()
   assert.equal(wrote, true);
 });
 
+test("passes structured release fields alongside its human-readable notice", async () => {
+  let notification;
+  await publishManualRelease({
+    repository: { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main", notify: { release: ["concordia"] } },
+    kind: "minor", expectedVersion: "1.4.8", title: "Product 1.5", notes: "Guidance.",
+    readCredentials: () => ({}),
+    createClient: () => ({ installationToken: async () => "token", releaseByTag: async () => null,
+      createRelease: async () => ({ html_url: "https://github.example/releases/v1.5.0" }) }),
+    runGit: async (_path, args) => args[0] === "symbolic-ref" ? "main" : "abc123",
+    readVersion: async () => "1.4.8", writeVersion: async () => undefined,
+    getLocalTags: async () => ["v1.4.8"], getRemoteTags: async () => ["v1.4.8"],
+    createTag: async () => undefined, push: async () => undefined,
+    notify: async (value) => { notification = value; },
+  });
+  assert.equal(notification.tag, "v1.5.0");
+  assert.equal(notification.previousTag, "v1.4.8");
+  assert.equal(notification.version, "1.5.0");
+  assert.equal(notification.kind, "minor");
+  assert.equal(notification.title, "Product 1.5");
+  assert.match(notification.notice, /Guidance/);
+  assert.equal(notification.releaseUrl, "https://github.example/releases/v1.5.0");
+  assert.match(notification.publishedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
 test("does not move local version when immediate publication fails", async () => {
   let wrote = false;
   await assert.rejects(

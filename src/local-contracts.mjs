@@ -256,10 +256,11 @@ export function validateRepositoryRegistration(body) {
 }
 
 const NOTIFY_EVENTS = ["release", "merged"];
-const NOTIFY_TARGET = /^(discord|slack):[A-Za-z0-9_.-]+$/;
+const NOTIFY_TARGET = /^(?:(?:discord|slack):[A-Za-z0-9_.-]+|concordia)$/;
 
 // リポ単位の通知先。 `release` は Releases タブの公開後、 `merged` は local PR の
-// main 反映後 (既定 off = 未指定)。 target は `discord:<name>` / `slack:<name>` で、
+// main 反映後 (既定 off = 未指定)。 target は `discord:<name>` / `slack:<name>` /
+// `concordia` で、
 // URL 本体は `revisor secret set webhook.<name>` の暗号化 secret から引く。
 function repositoryNotify(value) {
   if (value === undefined || value === null) return null;
@@ -271,7 +272,7 @@ function repositoryNotify(value) {
     }
     const targets = stringList(value[key], `notify.${key}`);
     if (targets.some((target) => !NOTIFY_TARGET.test(target))) {
-      throw new Error(`notify.${key} targets must be discord:<name> or slack:<name>.`);
+      throw new Error(`notify.${key} targets must be discord:<name>, slack:<name>, or concordia.`);
     }
     if (targets.length > 0) notify[key] = targets;
   }

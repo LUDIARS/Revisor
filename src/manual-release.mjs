@@ -129,11 +129,20 @@ export async function publishManualRelease({
   // GitHub Release creation is the transaction boundary. Webhook observability
   // follows it and never rolls the Release back when a destination is offline.
   try {
+    const text = [`[${repository.repository}] Release ${tag}`, title, releaseNotes.slice(0, 800), result.releaseUrl]
+      .filter(Boolean).join("\n");
     await notify({
       repository,
       event: "release",
-      text: [`[${repository.repository}] Release ${tag}`, title, releaseNotes.slice(0, 800), result.releaseUrl]
-        .filter(Boolean).join("\n"),
+      text,
+      kind,
+      tag,
+      previousTag,
+      version: result.version,
+      title,
+      notice: text,
+      releaseUrl: result.releaseUrl,
+      publishedAt: new Date().toISOString(),
       env,
     });
   } catch {
