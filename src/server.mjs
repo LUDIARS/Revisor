@@ -22,6 +22,7 @@ import {
 } from "./repository-access.mjs";
 import { ReleaseService } from "./release-service.mjs";
 import { collectRepositoryChanges } from "./repository-changes.mjs";
+import { git } from "./workspace.mjs";
 import { collectServiceVersions } from "./service-version.mjs";
 import { listLocalReleaseTags } from "./git-publication.mjs";
 import { createReviewContext } from "./review-context.mjs";
