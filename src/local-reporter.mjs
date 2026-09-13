@@ -62,6 +62,8 @@ function stageOutcomeProjection(stage, payload) {
   return {
     reviewer: payload?.reviewer ?? null,
     reviewPlan: payload?.plan ?? null,
+    // 再検証がモデルレビューを引き継ぐとき、判定の根拠になった本文も一緒に読めるようにする。
+    reviewerOutput: payload?.reviewerOutput ?? null,
   };
 }
 
@@ -91,6 +93,8 @@ export function pendingReviewProjection() {
     advisories: [],
     humanQuestion: null,
     reviewPlan: null,
+    // 再審査で前回のレビュー本文を今回の根拠として読ませない。
+    reviewerOutput: null,
     mergeRisk: null,
     runtimeVerification: null,
     geniusGuidance: null,
@@ -339,6 +343,7 @@ export class LocalPrReporter {
       advisories: job.result?.advisories ?? [],
       humanQuestion: job.result?.humanQuestion ?? null,
       reviewPlan: job.result?.plan ?? null,
+      reviewerOutput: job.result?.reviewerOutput ?? null,
       mergeRisk: job.result?.mergeRisk ?? null,
       runtimeVerification: job.result?.runtimeVerification ?? null,
       geniusGuidance: job.result?.geniusGuidance ?? null,

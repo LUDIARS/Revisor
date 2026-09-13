@@ -147,6 +147,7 @@ export function retainedStageProjection(pullRequest, reusedStages) {
       ? {
           reviewer: pullRequest?.reviewer ?? null,
           reviewPlan: pullRequest?.reviewPlan ?? null,
+          reviewerOutput: pullRequest?.reviewerOutput ?? null,
         }
       : {}),
   };

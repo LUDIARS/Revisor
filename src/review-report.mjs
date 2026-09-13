@@ -2,9 +2,34 @@ import { redactSecretLines } from "./leakage.mjs";
 
 export const REVIEW_REPORT_VERSION = 1;
 
+/**
+ * Masks every string before a structured record is serialized. Serialized JSON is a single
+ * line, so masking the finished document would drop the whole entry for one secret-looking
+ * fragment, and a masked line inside JSON can no longer be turned back into readable text.
+ * @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT
+ */
+function redactStrings(value) {
+  if (typeof value === "string") return redactSecretLines(value);
+  if (Array.isArray(value)) return value.map(redactStrings);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactStrings(item)]));
+  }
+  return value;
+}
+
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 function safeText(value) {
-  return redactSecretLines(typeof value === "string" ? value : JSON.stringify(value ?? null));
+  if (typeof value === "string") return redactSecretLines(value);
+  return JSON.stringify(redactStrings(value ?? null));
+}
+
+/**
+ * The reviewer's own review text, masked line by line. Empty output is recorded as null so
+ * a consumer can tell "no review text" apart from a record written before it was kept.
+ * @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT
+ */
+export function redactedReviewerOutput(value) {
+  return typeof value === "string" && value.trim() ? redactSecretLines(value) : null;
 }
 
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
@@ -87,7 +112,11 @@ export function reviewReportEntry(stage, payload) {
   return {
     kind: "review",
     label: "Reviewer assessment",
-    content: { reviewer: payload?.reviewer ?? null, plan: payload?.plan ?? null },
+    content: {
+      reviewer: payload?.reviewer ?? null,
+      plan: payload?.plan ?? null,
+      reviewerOutput: payload?.reviewerOutput ?? null,
+    },
   };
 }
 
@@ -106,6 +135,8 @@ export function finalReviewReportEntry(result, error = null) {
       reasons: result?.reasons ?? [],
       advisories: result?.advisories ?? [],
       reviewer: result?.reviewer ?? null,
+      reviewerOutput: result?.reviewerOutput ?? null,
+      reusedStages: result?.reusedStages ?? [],
       security: result?.security ?? null,
       ci: result?.ci ?? [],
       anatomiaGate: result?.anatomiaGate ?? null,
