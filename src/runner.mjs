@@ -15,6 +15,7 @@ import { readSettings } from "./config.mjs";
 import { reconcileNarrativeForReview } from "./pr-narrative.mjs";
 import { runPlannedTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
+import { redactedReviewerOutput } from "./review-report.mjs";
 import { configuredConfidentialTermsAdvisory } from "./confidential-terms.mjs";
 import { assessMergeRisk, assessRuntimeVerification } from "./merge-risk.mjs";
 import { forcedReviewerFor } from "./forced-review-model.mjs";
@@ -316,6 +317,8 @@ function buildGateResult({
     conclusion: reasons.length === 0 ? "success" : "action_required",
     reviewMode: request.reviewMode,
     reviewer,
+    // 判定に使ったレビュー本文そのもの。 通過した審査でも内容を読めるよう、秘匿行を伏せて残す。
+    reviewerOutput: redactedReviewerOutput(reviewerOutput),
     intentReviewCompleted,
     contextSource,
     analysisSource,
@@ -662,6 +665,11 @@ export async function runPartialVerification({
     // 飛ばした段階を判定と一緒に残す。 黙って飛ばすと、通っていない段階が通ったように
     // 見える事故になる。
     reusedStages: actuallyReusedStages,
+    // モデルレビューを引き継いだ再検証は、判定の根拠になったそのレビューの本文も引き継ぐ。
+    // 引き継いでいない再検証へ古い本文を残すと、今回の審査のレビューに見えてしまう。
+    reviewerOutput: actuallyReusedStages.includes("review") || previous.intentReviewCompleted === true
+      ? (previous.reviewerOutput ?? null)
+      : null,
     humanQuestion: autofixFailed
       ? testAutofixHumanQuestion(autofixStatus)
       : needsTargetDomain(
@@ -1224,7 +1232,7 @@ export function createPrReviewRunner({
       // this point is cheap to repeat; this is not. Recording it here is what
       // lets an interrupted review resume in verification mode instead of
       // paying for the model review again after every restart.
-      await checkpoint("review", { reviewer, plan });
+      await checkpoint("review", { reviewer, plan, reviewerOutput: redactedReviewerOutput(reviewResult.stdout) });
       // レビュアーは worktree を書き換えられる。 ここから先の段階の通過は
       // request.headSha の内容が通ったことにならないので記録しない。
       worktreeMatchesHead = false;
