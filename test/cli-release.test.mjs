@@ -57,3 +57,28 @@ test("release CLI surfaces local API conflict and validation messages", async ()
     removeFixture(directory);
   }
 });
+
+test("release CLI sends githubRelease=false for --no-github-release", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-cli-release-"));
+  const notesFile = join(directory, "notes.md");
+  writeFileSync(notesFile, "Release notes.", "utf8");
+  let body;
+  let output = "";
+  try {
+    assert.equal(await main([
+      "release", "MELPOT/Game", "--kind", "minor", "--title", "Game 0.9",
+      "--notes-file", notesFile, "--expected-version", "0.8.0", "--no-github-release",
+    ], {
+      cwd: process.cwd(),
+      stdout: { write: (value) => { output += value; return true; } },
+      fetchImpl: async (_url, options) => {
+        body = JSON.parse(options.body);
+        return response(200, { release: { repository: "MELPOT/Game", tag: "v0.9.0", githubRelease: false } });
+      },
+    }), 0);
+    assert.equal(body.githubRelease, false);
+    assert.match(output, /tag only, no GitHub Release/);
+  } finally {
+    removeFixture(directory);
+  }
+});

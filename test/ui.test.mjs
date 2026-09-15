@@ -267,6 +267,8 @@ test("the Releases tab exposes deferred, initialized, and immediate publication"
   assert.match(page, /href="\/releases" class="active"/);
   assert.match(page, /初期version登録/);
   assert.match(page, /major \/ minor 即時release/);
+  assert.match(page, /id="release-github" type="checkbox"/);
+  assert.match(page, /githubRelease: releaseGitHub.checked/);
   assert.match(page, /現在のbase HEADをGitHubへ即時公開することを確認しました/);
   assert.match(page, /id="pending-publish-section" hidden/);
   assert.match(page, /GitHub 未送出のマージ/);

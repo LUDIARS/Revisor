@@ -44,8 +44,17 @@ currently checked-out registered base HEAD:
 3. require confirmation and the version observed when the form was opened;
 4. scan the operator-authored Release Notes for credential leakage;
 5. create an annotated tag on current base HEAD;
-6. atomically push base plus tag through the GitHub App;
-7. create the GitHub Release and only then update local version state.
+6. atomically push base plus tag through the repository's publication path
+   (GitHub App for `workflow: revisor`, the registered checkout's own Git
+   credentials for `workflow: github`);
+7. when requested, create the GitHub Release; only then update local version state.
+
+Creating the GitHub Release is the operator's choice (`githubRelease`). When it
+is omitted, a `revisor` repository creates one and a `github` repository does
+not. A `github` repository has no App channel, so an explicit
+`githubRelease: true` is rejected before any ref moves instead of silently
+publishing only the tag. A tag-only Release still advances local version state
+and returns `githubRelease: false` with `releaseUrl: null`.
 
 公開先の base ブランチは既に GitHub 側に存在していることが前提で、Revisor は base
 を早送りするだけで作らない。例外は **ref を 1 つも持たない空のリポジトリ**への初回公開
@@ -106,7 +115,8 @@ tag. The API never returns webhook secrets, raw local paths, or unsafe mentions.
 
 Repository registration may declare `notify: { release: ["discord:name",
 "concordia"], merged: ["slack:name"] }`; both lists default to empty. `release`
-is sent only after a GitHub Release was created. A `concordia` release target
+is sent only after the Release tag was published (with `releaseUrl: null` when no
+GitHub Release was requested). A `concordia` release target
 resolves the optional Concordia loopback URL from the Excubitor catalog and
 POSTs `/v1/events/release-published` with `{repository, kind, tag, previousTag,
 version, title, notice, releaseUrl, publishedAt}`. It uses a three-second
@@ -128,14 +138,17 @@ uses `{text}`, neutralizes channel/user mentions, and times out after three seco
 で登録 checkout の local version、最新 Release tag、次の major/minor tag、および未公開
 commit 数を読む。`:id` は store record id と `owner/name` のいずれでも指定できる。
 
+`release-state` と UI の `/api/releases` は `workflow` と `githubReleaseAvailable` も返し、
+画面は GitHub workflow のリポで「GitHub Releaseを作成する」を外して無効にする。
+
 `POST /v1/repositories/:id/releases` は `{kind, expectedVersion, title, notes,
-confirmed:true}` を受け、UI と同じ `validateManualRelease` と `ReleaseService.release`
+githubRelease?, confirmed:true}` を受け、UI と同じ `validateManualRelease` と `ReleaseService.release`
 を経由する。したがって publication coordinator により local PR merge と直列化され、
 patch Release や UI とは異なる公開経路を作らない。期待 version の不一致、未初期化
 version、base 以外の checkout は 409、入力不正は 400 とする。
 
 `revisor release <owner/name> --kind major|minor --title <text> --notes-file <path>
---expected-version <version> [--json]` はこの local API の HTTP client であり、notes は
+--expected-version <version> [--github-release|--no-github-release] [--json]` はこの local API の HTTP client であり、notes は
 UTF-8 file からだけ読む。CLI は `confirmed:true` を送信し、Release の権限判断・公開処理を
 複製しない。
 

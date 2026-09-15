@@ -4,7 +4,7 @@ import { renderPage } from "./ui-layout.mjs";
 const BODY = `
   <section>
     <h2>リリース</h2>
-    <p class="note">登録プロジェクトのローカルversionを表示します。major/minor releaseは現在のbase HEADをGitHubへ即時公開し、tagとRelease Notesを作成します。</p>
+    <p class="note">登録プロジェクトのローカルversionを表示します。major/minor releaseは現在のbase HEADとtagをGitHubへ即時公開します。GitHub Releaseを作るかは公開時に選べます (GitHub workflowのリポはApp経路を持たないためtagのみ)。</p>
     <div class="table-scroll">
       <table>
         <thead><tr><th>repository</th><th>base</th><th>version</th><th>状態</th><th>次major</th><th>次minor</th></tr></thead>
@@ -46,6 +46,8 @@ const BODY = `
         <div class="field"><label for="release-kind">version increment</label><select id="release-kind"><option value="minor">minor</option><option value="major">major</option></select></div>
         <div class="field"><label for="release-title">Release title</label><input id="release-title" required maxlength="256"></div>
         <div class="field"><label for="release-notes">Release Notes</label><textarea id="release-notes" required maxlength="60000"></textarea></div>
+        <label class="check"><input id="release-github" type="checkbox" checked>GitHub Releaseを作成する</label>
+        <p id="release-github-note" class="note" hidden>このリポはGitHub workflow (App無し) のため、tagのみ公開します。</p>
         <label class="check"><input id="release-confirm" type="checkbox" required>現在のbase HEADをGitHubへ即時公開することを確認しました</label>
         <button type="submit">GitHubへ即時release</button>
         <p id="release-message" role="status"></p>
@@ -61,6 +63,8 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
   const initializeSelect = document.querySelector('#initialize-repository');
   const releaseSelect = document.querySelector('#release-repository');
   const releaseKind = document.querySelector('#release-kind');
+  const releaseGitHub = document.querySelector('#release-github');
+  let releaseGitHubProject = null;
   const initializeMessage = document.querySelector('#initialize-message');
   const releaseMessage = document.querySelector('#release-message');
 
@@ -94,6 +98,13 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
 
   function refreshPreview() {
     const project = selectedReleaseProject();
+    const available = project ? project.githubReleaseAvailable !== false : true;
+    // 選択リポが変わった時だけ既定へ戻す。 同じリポの再描画で操作者の選択を消さない。
+    if (!available) releaseGitHub.checked = false;
+    else if (project?.repository !== releaseGitHubProject) releaseGitHub.checked = true;
+    releaseGitHubProject = project?.repository ?? null;
+    releaseGitHub.disabled = !available;
+    document.querySelector('#release-github-note').hidden = available;
     document.querySelector('#release-current').textContent = project?.version.version || '—';
     document.querySelector('#release-next').textContent = !project
       ? '—'
@@ -198,10 +209,13 @@ const SCRIPT = `${CLIENT_REQUEST_SOURCE}
           expectedVersion: project.version.version,
           title: document.querySelector('#release-title').value,
           notes: document.querySelector('#release-notes').value,
+          githubRelease: releaseGitHub.checked,
           confirm: document.querySelector('#release-confirm').checked,
         }),
       });
-      if (result.release.releaseUrl) {
+      if (result.release.githubRelease === false) {
+        releaseMessage.textContent = result.release.tag + ' を公開しました (tagのみ、GitHub Releaseなし)。';
+      } else if (result.release.releaseUrl) {
         const link = document.createElement('a');
         link.href = result.release.releaseUrl;
         link.textContent = result.release.tag + ' を公開しました。';

@@ -26,6 +26,8 @@ test("projects registered before versioning stay visible and can be initialized"
     version: { status: "missing", version: null, managed: false },
     nextMajor: null,
     nextMinor: null,
+    workflow: "revisor",
+    githubReleaseAvailable: true,
   }]);
   assert.deepEqual(await service.initialize("LUDIARS/Product", "0.8.0"), {
     repository: "LUDIARS/Product",
@@ -61,4 +63,16 @@ test("ready projects expose major and minor targets and publish through the coor
   );
   assert.equal(published[0].repository.repository, "LUDIARS/Product");
   assert.equal(published[0].env.TEST_ENV, "yes");
+});
+
+test("GitHub-workflow projects report that a GitHub Release is unavailable", async () => {
+  const repository = { repository: "MELPOT/Game", rootPath: "E:/Game", baseRef: "main", workflow: "github" };
+  const service = new ReleaseService({
+    store: { listRepositories: () => [repository], getRepository: () => repository },
+    publicationCoordinator: { run: (operation) => operation() },
+    inspectVersion: async () => ({ status: "ready", version: "0.8.0", managed: true }),
+  });
+  const [project] = await service.listProjects();
+  assert.equal(project.workflow, "github");
+  assert.equal(project.githubReleaseAvailable, false);
 });

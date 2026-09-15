@@ -228,3 +228,71 @@ test("does not reset when there was no package.json to follow", async () => {
   }), /remote rejected/);
   assert.equal(gitCalls.some((args) => args[0] === "reset"), false);
 });
+
+// GitHub Release は操作者が選べる。 作らない場合も tag と version は公開する。
+test("publishes only the tag when the operator opts out of a GitHub Release", async () => {
+  const calls = [];
+  const result = await publishManualRelease({
+    repository: { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main" },
+    kind: "minor", expectedVersion: "1.4.8", title: "Product 1.5", notes: "Guidance.",
+    githubRelease: false,
+    readCredentials: () => ({}),
+    createClient: () => ({
+      installationToken: async () => "token",
+      releaseByTag: async () => { calls.push("releaseByTag"); return null; },
+      createRelease: async () => { calls.push("createRelease"); return {}; },
+    }),
+    runGit: async (_path, args) => args[0] === "symbolic-ref" ? "main" : "abc123",
+    readVersion: async () => "1.4.8",
+    writeVersion: async (_path, tag) => calls.push(["write", tag]),
+    getLocalTags: async () => ["v1.4.8"], getRemoteTags: async () => ["v1.4.8"],
+    createTag: async (value) => calls.push(["tag", value.tag]),
+    push: async (value) => calls.push(["push", value.tag]),
+    notify: async () => undefined,
+  });
+  assert.deepEqual(calls, [["tag", "v1.5.0"], ["push", "v1.5.0"], ["write", "v1.5.0"]]);
+  assert.equal(result.githubRelease, false);
+  assert.equal(result.releaseUrl, null);
+  assert.equal(result.workflow, "revisor");
+});
+
+// GitHub Workflow (MELPOT 等) は App を組み立てず、 登録 checkout の資格情報で tag を送る。
+test("publishes a GitHub-workflow release by plain push without the App", async () => {
+  const calls = [];
+  const result = await publishManualRelease({
+    repository: { repository: "MELPOT/Game", rootPath: "E:/Game", baseRef: "main", workflow: "github" },
+    kind: "minor", expectedVersion: "0.8.0", title: "Game 0.9", notes: "Guidance.",
+    readCredentials: () => { throw new Error("App credentials must not be read"); },
+    createClient: () => { throw new Error("App client must not be created"); },
+    runGit: async (_path, args) => args[0] === "symbolic-ref" ? "main" : "abc123",
+    readVersion: async () => "0.8.0",
+    writeVersion: async (_path, tag) => calls.push(["write", tag]),
+    getLocalTags: async () => ["v0.8.0"],
+    getRemoteTags: async () => { throw new Error("remote tags must not be queried"); },
+    createTag: async (value) => calls.push(["tag", value.tag]),
+    push: async () => { throw new Error("App push must not be used"); },
+    pushPlain: async (value) => calls.push(["plain", value.tag, value.mergeCommitSha, value.registeredRootPath]),
+    notify: async () => undefined,
+  });
+  assert.deepEqual(calls, [
+    ["tag", "v0.9.0"],
+    ["plain", "v0.9.0", "abc123", "E:/Game"],
+    ["write", "v0.9.0"],
+  ]);
+  assert.equal(result.tag, "v0.9.0");
+  assert.equal(result.githubRelease, false);
+  assert.equal(result.workflow, "github");
+});
+
+test("refuses a GitHub Release for a GitHub-workflow repository before touching refs", async () => {
+  let tagged = false;
+  await assert.rejects(publishManualRelease({
+    repository: { repository: "MELPOT/Game", rootPath: "E:/Game", baseRef: "main", workflow: "github" },
+    kind: "minor", expectedVersion: "0.8.0", title: "Game 0.9", notes: "Guidance.",
+    githubRelease: true,
+    runGit: async () => "main",
+    readVersion: async () => "0.8.0",
+    createTag: async () => { tagged = true; },
+  }), /GitHub Release cannot be created/);
+  assert.equal(tagged, false);
+});

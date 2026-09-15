@@ -32,10 +32,15 @@ export function validateManualRelease(value) {
   if (body.kind !== "major" && body.kind !== "minor") {
     throw new Error("kind must be 'major' or 'minor'.");
   }
+  if (body.githubRelease !== undefined && typeof body.githubRelease !== "boolean") {
+    throw new Error("githubRelease must be a boolean.");
+  }
   return {
     kind: body.kind,
     expectedVersion: normalizeLocalVersion(body.expectedVersion),
     title: text(body.title, "title", 256),
     notes: text(body.notes, "notes", 60_000),
+    // 未指定は workflow の既定に任せる (`manual-release-channel.mjs`)。
+    ...(body.githubRelease === undefined ? {} : { githubRelease: body.githubRelease }),
   };
 }

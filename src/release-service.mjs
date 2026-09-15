@@ -3,6 +3,7 @@ import {
   inspectLocalVersionState,
 } from "./local-version.mjs";
 import { publishManualRelease } from "./manual-release.mjs";
+import { resolveManualReleaseChannel } from "./manual-release-channel.mjs";
 import { latestReleaseTag, nextManualReleaseTag } from "./release-version.mjs";
 import { contract } from "./contract-runtime.mjs"; /* augur-inject:import:02a82258 */
 import augurContract_02a82258 from "../contracts/manual-release-local-api.contract.mjs"; /* augur-inject:contract-predicate:02a82258 */
@@ -53,8 +54,18 @@ export class ReleaseService {
         baseRef: repository.baseRef,
         version,
         ...nextVersions(version),
+        ...this.#releaseChannel(repository),
       };
     }));
+  }
+
+  // 画面と自動化が「GitHub Release を作れるか・既定で作るか」を公開前に知るため。
+  #releaseChannel(repository) {
+    const channel = resolveManualReleaseChannel({ repository, env: this.env });
+    return {
+      workflow: channel.workflow,
+      githubReleaseAvailable: channel.githubReleaseAvailable,
+    };
   }
 
   async initialize(repositoryName, version) {
@@ -99,6 +110,7 @@ export class ReleaseService {
       nextMajor: version.status === "ready" ? nextManualReleaseTag(version.version, "major") : null,
       nextMinor: version.status === "ready" ? nextManualReleaseTag(version.version, "minor") : null,
       unreleasedCommitCount: changes.commits.length,
+      ...this.#releaseChannel(repository),
     };
   }
 

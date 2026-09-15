@@ -54,3 +54,11 @@ test("requires explicit confirmation for bootstrap and immediate publication", (
     },
   );
 });
+
+test("passes an explicit githubRelease choice and rejects non-boolean values", () => {
+  const base = { kind: "minor", expectedVersion: "1.4.8", title: "1.5", notes: "Notes", confirm: true };
+  assert.equal(validateManualRelease({ ...base, githubRelease: false }).githubRelease, false);
+  assert.equal(validateManualRelease({ ...base, githubRelease: true }).githubRelease, true);
+  assert.equal("githubRelease" in validateManualRelease(base), false);
+  assert.throws(() => validateManualRelease({ ...base, githubRelease: "no" }), /githubRelease must be a boolean/);
+});

@@ -19,6 +19,9 @@ function requestBody(args) {
     title: required(option(args, "--title"), "release requires --title."),
     notes: readFileSync(notesFile, "utf8"),
     confirmed: true,
+    // 指定しなければ workflow の既定 (App 経路なら作る、 GitHub Workflow なら作らない)。
+    ...(args.includes("--no-github-release") ? { githubRelease: false } : {}),
+    ...(args.includes("--github-release") ? { githubRelease: true } : {}),
   };
 }
 
@@ -40,6 +43,8 @@ export async function runManualReleaseCommand(args, {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error ?? `Release API returned HTTP ${response.status}.`);
   if (args.includes("--json")) stdout.write(`${JSON.stringify(body.release, null, 2)}\n`);
-  else stdout.write(`Published ${body.release.tag} for ${body.release.repository}.\n`);
+  else if (body.release.githubRelease === false) {
+    stdout.write(`Published ${body.release.tag} for ${body.release.repository} (tag only, no GitHub Release).\n`);
+  } else stdout.write(`Published ${body.release.tag} for ${body.release.repository}.\n`);
   return 0;
 }
