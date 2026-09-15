@@ -127,7 +127,7 @@ revisor repo set-workflow <owner/name> <revisor|github>
 MELPOT の既存登録を移行する例:
 
 ```
-revisor repo set-workflow MELPOT/KuzuSurvivors github
+revisor repo set-workflow MELPOT/PrivateGame github
 ```
 
 ## 入力の形

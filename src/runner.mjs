@@ -16,7 +16,7 @@ import { reconcileNarrativeForReview } from "./pr-narrative.mjs";
 import { runPlannedTests, testsPassed } from "./ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { redactedReviewerOutput } from "./review-report.mjs";
-import { configuredConfidentialTermsAdvisory } from "./confidential-terms.mjs";
+import { configuredConfidentialTermsOutcome } from "./confidential-terms.mjs";
 import { assessMergeRisk, assessRuntimeVerification } from "./merge-risk.mjs";
 import { forcedReviewerFor } from "./forced-review-model.mjs";
 import { advisePlan } from "./plan-advisor.mjs";
@@ -263,9 +263,12 @@ function buildGateResult({
 }) {
   const complexityComparison = compareComplexity(baseline?.quality, finalAnalysis.quality);
   const complexityScoreDelta = complexityComparison.delta;
-  const confidentialAdvisory = configuredConfidentialTermsAdvisory({
+  // 件名・本文は squash commit の本文として公開面に出るので、差分と同じ検査にかける。
+  const confidentialTerms = configuredConfidentialTermsOutcome({
     unifiedDiff,
     changedPaths,
+    pullRequest: request?.pullRequest ?? null,
+    repository: request?.repository ?? null,
     env,
   });
   const { reasons: gateReasons, advisories } = gateOutcome({
@@ -290,7 +293,11 @@ function buildGateResult({
         + `new maximum ${complexityComparison.addedMaximum}`
       : `Complexity comparison uses legacy aggregate: ${complexityComparison.reason}`);
   }
-  const reasons = [...new Set([...gateReasons, ...additionalReasons])];
+  const reasons = [...new Set([
+    ...gateReasons,
+    ...additionalReasons,
+    ...(confidentialTerms.reason ? [confidentialTerms.reason] : []),
+  ])];
   const runtimeVerification = assessRuntimeVerification({
     classification,
     testCases: request.testCases,
@@ -348,9 +355,9 @@ function buildGateResult({
       ...advisories,
       ...additionalAdvisories,
       ...(anatomiaGate?.unavailable === true ? [anatomiaGate.message] : []),
-      // 資格情報しか見ない leakage スキャンでは素通りする面。 まず見えるようにする
-      // (既定は advisory、 詳細は confidential-terms.mjs)。
-      ...(confidentialAdvisory ? [confidentialAdvisory] : []),
+      // 資格情報しか見ない leakage スキャンでは素通りする面。 enforcement 未宣言の
+      // リポジトリでは見えるようにするだけ (詳細は confidential-terms.mjs)。
+      ...(confidentialTerms.advisory ? [confidentialTerms.advisory] : []),
     ],
     runtimeVerification,
     mergeRisk,

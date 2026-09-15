@@ -395,3 +395,35 @@ test("a repaired head scans its final diff with the injected confidential-term c
     assert.equal(JSON.stringify(result.advisories).includes("SecretTitle"), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("an enforced confidential term becomes a blocking reason instead of an advisory", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "terms-"));
+  try {
+    const termsPath = join(dir, "terms.json");
+    writeFileSync(termsPath, JSON.stringify({
+      keywords: [{ id: "product-001", value: "SecretTitle" }],
+      enforcement: { mode: "enforce-except", exceptRepositories: ["private-org/*"] },
+    }));
+    const classification = classifyChange({
+      changedPaths: ["server/src/index.ts"],
+      unifiedDiff: "+SecretTitle",
+    });
+    const result = await verificationFixture({
+      ci: [{ name: "unit", status: "failed" }],
+      env: { REVISOR_CONFIDENTIAL_TERMS_FILE: termsPath },
+      autofixTests: async () => ({
+        ci: [{ name: "unit", status: "passed" }],
+        status: "passed",
+        reviewer: "codex-sol",
+      }),
+      commitAutofix: async () => "c".repeat(40),
+      readProfile: async () => ({
+        classification,
+        unifiedDiff: "+++ b/server/src/index.ts\n@@ -0,0 +1 @@\n+SecretTitle\n",
+      }),
+    });
+    assert.ok(result.reasons.some((reason) => reason.includes("1 箇所 / 1 ファイル")));
+    assert.equal(result.advisories.some((advisory) => advisory.includes("公開できない語")), false);
+    assert.equal(JSON.stringify([result.reasons, result.advisories]).includes("SecretTitle"), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

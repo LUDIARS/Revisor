@@ -15,7 +15,7 @@ memory_links: []
 ## 目的
 
 `spec/plan/deferred-publish-design.md` の実装。 GitHub App が入っていない org
-(MELPOT/KuzuSurvivors) では publish 段の `GET /repos/.../installation → 404` で
+(MELPOT/PrivateGame) では publish 段の `GET /repos/.../installation → 404` で
 マージ全体が止まる。 GitHub へ届かない状況でもローカルのマージは完結させ、
 push / Release 作成だけを保留 (pending) として記録し、 後から一括で送れるようにする。
 

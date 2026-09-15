@@ -4,11 +4,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  assertCommitMessageFreeOfConfidentialTerms,
   confidentialTermsAdvisory,
   confidentialTermsPath,
   configuredConfidentialTermsAdvisory,
+  configuredConfidentialTermsOutcome,
+  isConfidentialTermsEnforced,
+  loadConfidentialPolicy,
   loadConfidentialTerms,
   scanAddedDiffForConfidentialTerms,
+  scanTextForConfidentialTerms,
 } from "../src/confidential-terms.mjs";
 
 const TERMS = [
@@ -190,4 +195,98 @@ test("summarises without naming the term or quoting the line", () => {
   assert.equal(advisory.toLowerCase().includes("secrettitle"), false);
   assert.equal(confidentialTermsAdvisory({ scanned: true, totalFindings: 0, findings: [] }), null);
   assert.equal(confidentialTermsAdvisory({ scanned: false, totalFindings: 0, findings: [] }), null);
+});
+
+// enforcement は語ファイル側に置く。 例外 (非公開リポジトリ) の名前を公開設定へ書かないため。
+function policyFile(policy) {
+  const dir = mkdtempSync(join(tmpdir(), "terms-policy-"));
+  const path = join(dir, "terms.json");
+  writeFileSync(path, JSON.stringify(policy));
+  return { dir, path, env: { REVISOR_CONFIDENTIAL_TERMS_FILE: path } };
+}
+
+const ENFORCED = {
+  keywords: [{ id: "product-001", value: "SecretTitle" }],
+  enforcement: { mode: "enforce-except", exceptRepositories: ["Owner/PrivateRepo", "private-org/*"] },
+};
+const ADDED = diff(["+++ b/docs/a.md", "@@ -0,0 +1 @@", "+SecretTitle notes"]);
+
+test("keeps advisory behaviour when the term file declares no enforcement", () => {
+  const { dir, env } = policyFile({ keywords: [{ id: "product-001", value: "SecretTitle" }] });
+  try {
+    const outcome = configuredConfidentialTermsOutcome({ unifiedDiff: ADDED, repository: "Owner/Public", env });
+    assert.equal(outcome.reason, null);
+    assert.match(outcome.advisory, /1 箇所 \/ 1 ファイル/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("blocks a repository outside the exception list without naming the term", () => {
+  const { dir, env } = policyFile(ENFORCED);
+  try {
+    const outcome = configuredConfidentialTermsOutcome({ unifiedDiff: ADDED, repository: "Owner/Public", env });
+    assert.equal(outcome.advisory, null);
+    assert.match(outcome.reason, /1 箇所 \/ 1 ファイル/);
+    assert.equal(outcome.reason.toLowerCase().includes("secrettitle"), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("keeps exact and owner wildcard exceptions advisory", () => {
+  const { dir, path } = policyFile(ENFORCED);
+  try {
+    const policy = loadConfidentialPolicy(path);
+    assert.equal(isConfidentialTermsEnforced(policy, "owner/privaterepo"), false);
+    assert.equal(isConfidentialTermsEnforced(policy, "Private-Org/anything"), false);
+    assert.equal(isConfidentialTermsEnforced(policy, "Owner/PrivateRepoFork"), true);
+    assert.equal(isConfidentialTermsEnforced(policy, ""), true, "an unknown repository is enforced");
+    assert.equal(isConfidentialTermsEnforced({ terms: [], enforcement: { mode: "advisory" } }, "a/b"), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("counts the pull request title and body as part of the published change", () => {
+  const { dir, env } = policyFile(ENFORCED);
+  try {
+    const outcome = configuredConfidentialTermsOutcome({
+      unifiedDiff: "",
+      repository: "Owner/Public",
+      pullRequest: { title: "Add secrettitle viewer", body: "line one\nSecretTitle again" },
+      env,
+    });
+    assert.match(outcome.reason, /2 箇所 \/ 2 ファイル \(\[pr-title\], \[pr-body\]\)/);
+    assert.deepEqual(
+      scanTextForConfidentialTerms("a\nSecretTitle", [{ id: "product-001", value: "secrettitle" }], "[pr-body]"),
+      [{ termId: "product-001", path: "[pr-body]", line: 2 }],
+    );
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("fails closed on a malformed enforcement declaration without disclosing the path", () => {
+  const { dir, path, env } = policyFile({ ...ENFORCED, enforcement: { mode: "block-some" } });
+  try {
+    const outcome = configuredConfidentialTermsOutcome({ unifiedDiff: ADDED, repository: "Owner/Public", env });
+    assert.equal(outcome.advisory, null);
+    assert.match(outcome.reason, /実行できませんでした/);
+    assert.equal(outcome.reason.includes(path), false);
+    assert.throws(() => loadConfidentialPolicy(policyFile({
+      ...ENFORCED, enforcement: { mode: "enforce-except", exceptRepositories: ["not a repo"] },
+    }).path), /invalid repository pattern/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("refuses a squash commit message with a term only in enforced repositories", () => {
+  const { dir, env } = policyFile(ENFORCED);
+  try {
+    assert.throws(
+      () => assertCommitMessageFreeOfConfidentialTerms({ repository: "Owner/Public", title: "x", body: "SecretTitle", env }),
+      (error) => /product-001/.test(error.message) && !/secrettitle/i.test(error.message),
+    );
+    assert.doesNotThrow(() => assertCommitMessageFreeOfConfidentialTerms({
+      repository: "Owner/PrivateRepo", title: "SecretTitle", body: "", env,
+    }));
+    assert.doesNotThrow(() => assertCommitMessageFreeOfConfidentialTerms({
+      repository: "Owner/Public", title: "clean", body: "clean", env,
+    }));
+    assert.doesNotThrow(() => assertCommitMessageFreeOfConfidentialTerms({
+      repository: "Owner/Public", title: "SecretTitle", body: "", env: {},
+    }), "no configured term file means no check");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

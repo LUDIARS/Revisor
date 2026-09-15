@@ -40,7 +40,7 @@
 
 ### 1.3 初期設定
 
-シード/移行: `MELPOT` org の既存登録 (KuzuSurvivors 等) を `github` workflow へ
+シード/移行: `MELPOT` org の既存登録 (PrivateGame 等) を `github` workflow へ
 移行するための手順 (set-workflow コマンド実行例) を README か報告に明記。
 自動移行はしない (明示コマンドで行う)。
 

@@ -20,12 +20,19 @@ import { isAbsolute } from "node:path";
  * パス自体が一致した場合はパスも伏せる。 審査結果は PR 本文や通知へ流れるので、
  * そこに値を書けば二次的な流出になる。
  *
- * ## 既定は advisory
+ * ## 既定は advisory、 語ファイルが enforcement を宣言したら block
  *
  * 顧客名や組織名が**識別子として機能している**箇所が実在する (関数名・ファイル名・
  * 稼働中の API パス)。 いきなり block にすると、それらを触る PR が一斉に通らなくなる。
  * まず見えるようにして、リポジトリごとに許可を積んでから enforced へ上げる
  * (Anatomia の二層ゲートと同じ順序)。
+ *
+ * 2026-09-15、 公開リポジトリへキャラクター名と素材パスが再流出していた。 advisory は
+ * 設定されていても止めない。 語ファイルに `enforcement: { mode: "enforce-except",
+ * exceptRepositories: [...] }` があれば、 例外に挙げたリポジトリ以外では審査の理由
+ * (マージ不可) にし、 squash commit の件名・本文もマージ直前に検査する。
+ * 例外 (= 語を正当に扱う非公開リポジトリ) の一覧も語ファイル側に置く — 公開される
+ * catalog や設定に非公開リポジトリ名を書かないため。 新しい公開リポジトリは既定で守られる。
  */
 
 const MAX_FINDINGS = 100;
@@ -77,8 +84,7 @@ function normalizeTerms(raw) {
 }
 
 /** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
-export function loadConfidentialTerms(path) {
-  if (!path) return null;
+function readTermsFile(path) {
   if (!isAbsolute(path) || path.startsWith("\\\\") || path.startsWith("//")) {
     throw new Error("The confidential terms file must use an absolute local path.");
   }
@@ -92,18 +98,69 @@ export function loadConfidentialTerms(path) {
     // The path is local configuration and must not be copied into persisted advisories.
     throw new Error("Cannot read the confidential terms file.");
   }
-  let parsed;
   try {
-    parsed = JSON.parse(contents);
+    return JSON.parse(contents);
   } catch {
     // Recent JSON parser errors can quote source fragments, which may be confidential terms.
     throw new Error("The confidential terms file is not valid JSON.");
   }
+}
+
+const REPOSITORY_PATTERN = /^[a-z0-9._-]+\/(?:\*|[a-z0-9._-]+)$/;
+
+/**
+ * 語ファイルの enforcement。 宣言が無ければ advisory のまま (既存運用を壊さない)。
+ * 宣言があるのに形が崩れていたら、 黙って advisory に落とさず読込失敗にする。
+ * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
+ */
+function normalizeEnforcement(raw) {
+  if (raw.enforcement === undefined) return { mode: "advisory", exceptRepositories: [] };
+  const { enforcement } = raw;
+  if (
+    !enforcement
+    || typeof enforcement !== "object"
+    || enforcement.mode !== "enforce-except"
+    || !Array.isArray(enforcement.exceptRepositories)
+  ) {
+    throw new Error("Confidential term enforcement must declare mode enforce-except and exceptRepositories.");
+  }
+  const exceptRepositories = enforcement.exceptRepositories.map((value) =>
+    typeof value === "string" ? value.trim().toLowerCase() : "");
+  if (exceptRepositories.some((value) => !REPOSITORY_PATTERN.test(value))) {
+    throw new Error("Confidential term enforcement lists an invalid repository pattern.");
+  }
+  return { mode: "enforce-except", exceptRepositories };
+}
+
+/** 語と enforcement をまとめて読む。 未設定なら null。
+ * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
+ */
+export function loadConfidentialPolicy(path) {
+  if (!path) return null;
+  const parsed = readTermsFile(path);
   const terms = normalizeTerms(parsed);
   if (terms.length === 0) {
     throw new Error("The confidential terms file must contain at least one valid keyword.");
   }
-  return terms;
+  return { terms, enforcement: normalizeEnforcement(parsed) };
+}
+
+/** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
+export function loadConfidentialTerms(path) {
+  return loadConfidentialPolicy(path)?.terms ?? null;
+}
+
+/**
+ * このリポジトリで公開不可語を block するか。 リポジトリ名が分からないときは
+ * 例外に当たると証明できないので block 側に倒す。
+ * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
+ */
+export function isConfidentialTermsEnforced(policy, repository) {
+  if (policy?.enforcement?.mode !== "enforce-except") return false;
+  const name = typeof repository === "string" ? repository.trim().toLowerCase() : "";
+  if (!name) return true;
+  return !policy.enforcement.exceptRepositories.some((pattern) =>
+    pattern.endsWith("/*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern);
 }
 
 /** 設定された語ファイルの場所。 未設定なら検査しない。
@@ -256,6 +313,92 @@ export function configuredConfidentialTermsAdvisory({
     );
   } catch {
     // Configuration paths and parser diagnostics can themselves disclose private data.
-    return "公開できない語の検査を実行できませんでした。設定を確認してください。";
+    return CONFIGURATION_FAILURE;
   }
+}
+
+const CONFIGURATION_FAILURE = "公開できない語の検査を実行できませんでした。設定を確認してください。";
+
+/**
+ * PR の件名・本文のような 1 本の文字列を検査する。 squash commit の本文になるので、
+ * 追加差分と同じ扱いで公開面に出る。 所見の場所は固定ラベルと行番号だけ。
+ * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
+ */
+export function scanTextForConfidentialTerms(text, terms, label) {
+  if (typeof text !== "string" || !text || !Array.isArray(terms)) return [];
+  const findings = [];
+  text.split(/\r?\n/).forEach((line, index) => {
+    const lower = line.toLowerCase();
+    for (const term of terms) {
+      if (lower.includes(term.value)) findings.push({ termId: term.id, path: label, line: index + 1 });
+    }
+  });
+  return findings;
+}
+
+/** @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT */
+function pullRequestTextFindings(pullRequest, terms) {
+  return [
+    ...scanTextForConfidentialTerms(pullRequest?.title, terms, "[pr-title]"),
+    ...scanTextForConfidentialTerms(pullRequest?.body, terms, "[pr-body]"),
+  ];
+}
+
+/**
+ * 審査結果へ載せる所見。 enforced なリポジトリでは `reason` (マージ不可)、 それ以外は
+ * `advisory`。 設定があるのに読めない場合は、 例外に当たるか判定できないので block する
+ * (無言で素通りさせない)。 どちらの文にも語と一致行の中身は載せない。
+ * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
+ */
+export function configuredConfidentialTermsOutcome({
+  unifiedDiff,
+  changedPaths = [],
+  pullRequest = null,
+  repository = null,
+  env = process.env,
+}) {
+  let policy;
+  try {
+    policy = loadConfidentialPolicy(confidentialTermsPath(env));
+  } catch {
+    return { advisory: null, reason: CONFIGURATION_FAILURE };
+  }
+  if (!policy || typeof unifiedDiff !== "string") return { advisory: null, reason: null };
+  const diffResult = scanAddedDiffForConfidentialTerms(unifiedDiff, policy.terms, { changedPaths });
+  const textFindings = pullRequestTextFindings(pullRequest, policy.terms);
+  const textLabels = new Set(textFindings.map((finding) => finding.path));
+  const combined = {
+    scanned: true,
+    findings: [...diffResult.findings, ...textFindings].slice(0, MAX_FINDINGS),
+    totalFindings: diffResult.totalFindings + textFindings.length,
+    totalFiles: diffResult.totalFiles + textLabels.size,
+  };
+  const summary = confidentialTermsAdvisory(combined);
+  if (!summary) return { advisory: null, reason: null };
+  return isConfidentialTermsEnforced(policy, repository)
+    ? { advisory: null, reason: `${summary} — 公開できない語を消してから再提出してください` }
+    : { advisory: summary, reason: null };
+}
+
+/**
+ * squash commit の件名・本文を、 base を進める前に検査する。 審査の後に件名・本文が
+ * 書き換えられても、 GitHub へ出るのはこの本文なので最後にもう一度見る。
+ * 例外は term id だけを名指し、 語そのものは載せない。
+ * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
+ */
+export function assertCommitMessageFreeOfConfidentialTerms({ repository, title, body, env = process.env }) {
+  let policy;
+  try {
+    policy = loadConfidentialPolicy(confidentialTermsPath(env));
+  } catch {
+    throw new Error("Merge blocked: the confidential term check could not run. Check its configuration.");
+  }
+  if (!policy || !isConfidentialTermsEnforced(policy, repository)) return;
+  const findings = pullRequestTextFindings({ title, body }, policy.terms);
+  if (findings.length === 0) return;
+  const termIds = [...new Set(findings.map((finding) => finding.termId))].join(", ");
+  throw new Error(
+    `Merge blocked: the squash commit message contains ${findings.length} confidential term occurrence(s) `
+    + `(${termIds}). Remove them from the local PR title and body, then merge again.`,
+  );
 }

@@ -323,6 +323,32 @@ test("a human override never bypasses actual security findings", async () => {
   }
 });
 
+test("refuses to publish a squash commit message carrying a confidential term, even with a bypass", async () => {
+  const fixture = repositoryFixture();
+  const termsPath = join(fixture.directory, "terms.json");
+  writeFileSync(termsPath, JSON.stringify({
+    keywords: [{ id: "product-001", value: "SecretTitle" }],
+    enforcement: { mode: "enforce-except", exceptRepositories: [] },
+  }));
+  try {
+    const events = [];
+    const baseBefore = git(fixture.repoPath, "rev-parse", "refs/heads/main");
+    await assert.rejects(
+      squashMergeLocalPullRequest({
+        ...mergeInput(fixture, { body: "Adds the SecretTitle viewer" }),
+        env: { ...process.env, REVISOR_CONFIDENTIAL_TERMS_FILE: termsPath },
+        bypass: { reason: "test" },
+        logEvent: (event) => events.push(event),
+      }),
+      (error) => /confidential term/.test(error.message) && !/secrettitle/i.test(error.message),
+    );
+    assert.deepEqual(events, ["merge_refused_confidential_terms"]);
+    assert.equal(git(fixture.repoPath, "rev-parse", "refs/heads/main"), baseBefore);
+  } finally {
+    removeFixture(fixture.directory);
+  }
+});
+
 test("reuses a tagged prepared merge when publication is retried", async () => {
   const fixture = repositoryFixture();
   try {

@@ -45,6 +45,7 @@
     "review-gate — セキュリティスキャン結果の扱い (findings/error はブロック、skipped は advisory)",
     "review-gate — 解釈できないスキャン結果の fail-closed (既知 status 以外はブロック)",
     "review-gate — SPEC-CONFIDENTIAL-TERM-ADVISORY",
+    "review-gate — SPEC-CONFIDENTIAL-TERM-ENFORCEMENT",
     "refactoring-proposal — SPEC-REFACTORING-PROPOSAL の complexity 非ブロック規則",
     "security-scan — codex-security スキャンの起動と結果の正規化 (終了コード→status、保持は severity/rule/file/line のみ)",
     "security-scan — 環境変数 CODEX_SECURITY_STATE_DIR (スキャンごとの専用 state ディレクトリ / 綴り違いの除去 / 削除失敗を握り潰す)"

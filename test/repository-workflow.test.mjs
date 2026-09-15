@@ -385,8 +385,8 @@ function commandContext(repositories, updates) {
 
 test("repo set-workflow updates one registration and rejects invalid input", async () => {
   const repositories = [{
-    repository: "MELPOT/KuzuSurvivors",
-    rootPath: "E:/Document/MELPOT/KuzuSurvivors",
+    repository: "MELPOT/PrivateGame",
+    rootPath: "E:/Document/MELPOT/PrivateGame",
   }];
   const updates = [];
   const written = [];
@@ -397,18 +397,18 @@ test("repo set-workflow updates one registration and rejects invalid input", asy
   };
 
   assert.equal(
-    await runLocalPrCommand(["repo", "set-workflow", "MELPOT/KuzuSurvivors", "github"], options),
+    await runLocalPrCommand(["repo", "set-workflow", "MELPOT/PrivateGame", "github"], options),
     0,
   );
-  assert.deepEqual(updates, [{ repository: "MELPOT/KuzuSurvivors", workflow: "github" }]);
-  assert.match(written[0], /MELPOT\/KuzuSurvivors now publishes with the github workflow/);
+  assert.deepEqual(updates, [{ repository: "MELPOT/PrivateGame", workflow: "github" }]);
+  assert.match(written[0], /MELPOT\/PrivateGame now publishes with the github workflow/);
 
   await assert.rejects(
-    runLocalPrCommand(["repo", "set-workflow", "MELPOT/KuzuSurvivors", "gitub"], options),
+    runLocalPrCommand(["repo", "set-workflow", "MELPOT/PrivateGame", "gitub"], options),
     /must be one of revisor, github/,
   );
   await assert.rejects(
-    runLocalPrCommand(["repo", "set-workflow", "MELPOT/KuzuSurvivors"], options),
+    runLocalPrCommand(["repo", "set-workflow", "MELPOT/PrivateGame"], options),
     /must be one of revisor, github/,
   );
   await assert.rejects(
@@ -430,7 +430,7 @@ test("repo list shows the resolved workflow of every registration", async () => 
     stdout: { write: (value) => written.push(value) },
     createContext: () => commandContext([
       { repository: "LUDIARS/Revisor", rootPath: "E:/Document/Ars/Revisor" },
-      { repository: "MELPOT/KuzuSurvivors", rootPath: "E:/Document/MELPOT/KuzuSurvivors" },
+      { repository: "MELPOT/PrivateGame", rootPath: "E:/Document/MELPOT/PrivateGame" },
       {
         repository: "MELPOT/Product",
         rootPath: "E:/Document/MELPOT/Product",
@@ -441,7 +441,7 @@ test("repo list shows the resolved workflow of every registration", async () => 
 
   assert.deepEqual(written[0].trim().split("\n"), [
     "LUDIARS/Revisor  revisor  E:/Document/Ars/Revisor",
-    "MELPOT/KuzuSurvivors  github  E:/Document/MELPOT/KuzuSurvivors",
+    "MELPOT/PrivateGame  github  E:/Document/MELPOT/PrivateGame",
     "MELPOT/Product  revisor  E:/Document/MELPOT/Product",
   ]);
 });

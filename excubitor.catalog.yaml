@@ -28,6 +28,10 @@ services:
       # (RPCRT4 0xc0000005 → 強制再起動 2 回) の有力原因。信頼済みローカル
       # リポの審査専用の迂回で、codex 認証は Windows 側の codex login を使う。
       REVISOR_CODEX_SANDBOX: danger-full-access
+      # 公開不可語の語ファイル。 語と例外リポジトリ一覧はワークスペースの gitignore 済み
+      # state にだけ置き、 このリポジトリには場所だけを書く (spec/feature/review-gate.md
+      # SPEC-CONFIDENTIAL-TERM-ENFORCEMENT)。
+      REVISOR_CONFIDENTIAL_TERMS_FILE: ${ARS_ROOT}/.claude/state/confidential-terms.json
     provides:
       # `startRevisor` binds 127.0.0.1 only, so ${host} would hand consumers an
       # address nothing is listening on. The literal IPv4 loopback also matches

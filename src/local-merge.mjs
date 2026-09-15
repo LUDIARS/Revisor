@@ -4,6 +4,7 @@ import { makeScratchDir } from "./scratch-space.mjs";
 import { BaseMovedError, MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { relandHeadOnBase } from "./base-relanding.mjs";
 import { reconcileBaseWithRemote } from "./base-reconcile.mjs";
+import { assertCommitMessageFreeOfConfidentialTerms } from "./confidential-terms.mjs";
 import { redactSecretLines } from "./leakage.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
 import {
@@ -254,6 +255,19 @@ async function attemptSquashMerge({
       checkStatus: pullRequest.checkStatus,
     }, { level: "warn" });
     throw mergeStateRefusal(pullRequest);
+  }
+  // 件名・本文は審査の後にも書き換えられ、 squash commit の本文としてそのまま公開面へ出る。
+  // 公開不可語はセキュリティ finding と同じく、 バイパスマージでも止める。
+  try {
+    assertCommitMessageFreeOfConfidentialTerms({
+      repository: repository.repository,
+      title: pullRequest.title,
+      body: pullRequest.body,
+      env,
+    });
+  } catch (error) {
+    logEvent("merge_refused_confidential_terms", subject, { level: "warn" });
+    throw error;
   }
   // ベースは審査時の SHA に固定しない。 他 PR のマージで base は常に前進するので、
   // 固定すると 1 本マージするたびに残り全部がマージ不能になる。 進んだ base とは

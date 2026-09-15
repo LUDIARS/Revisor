@@ -5,8 +5,8 @@
   (checkout branch `feat/deferred-publish` のまま)。実装完了後は日本語 conventional
   commit。リモート送信・PR 提出は設計側が行う。
 - neco 指示 (2026-08-11): 「push しないで保留できるように」
-- 背景: MELPOT/KuzuSurvivors の local PR #433 マージが publish 段の
-  `GET /repos/MELPOT/KuzuSurvivors/installation → 404` (GitHub App 未インストール org)
+- 背景: MELPOT/PrivateGame の local PR #433 マージが publish 段の
+  `GET /repos/MELPOT/PrivateGame/installation → 404` (GitHub App 未インストール org)
   で失敗する。GitHub へ届かない状況でも**ローカルのマージは完結**させ、GitHub への
   push / Release 作成だけを**保留 (pending)** として記録し、後から一括実行したい。
 
