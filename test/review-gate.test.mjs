@@ -55,8 +55,8 @@ test("reports spec linkage and orphans without blocking the merge", () => {
   }));
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, [
-    "2 changed function(s) are orphaned",
-    "Anatomia gate(s) did not pass: spec_linkage",
+    "2 件の変更関数が孤立しています",
+    "Anatomia ゲートで所見があります: spec_linkage",
   ]);
 });
 
@@ -67,8 +67,8 @@ test("still blocks on gates other than spec linkage", () => {
       { gate: "spec_linkage", pass: false },
     ],
   }));
-  assert.deepEqual(outcome.reasons, ["Anatomia gate(s) did not pass: rule_conformance"]);
-  assert.deepEqual(outcome.advisories, ["Anatomia gate(s) did not pass: spec_linkage"]);
+  assert.deepEqual(outcome.reasons, ["Anatomia ゲートが失敗しました: rule_conformance"]);
+  assert.deepEqual(outcome.advisories, ["Anatomia ゲートで所見があります: spec_linkage"]);
 });
 
 test("reports coupling_delta without blocking the merge (environment-dependent gate)", () => {
@@ -79,7 +79,7 @@ test("reports coupling_delta without blocking the merge (environment-dependent g
     ],
   }));
   assert.deepEqual(outcome.reasons, []);
-  assert.deepEqual(outcome.advisories, ["Anatomia gate(s) did not pass: coupling_delta"]);
+  assert.deepEqual(outcome.advisories, ["Anatomia ゲートで所見があります: coupling_delta"]);
 });
 
 test("reports convention_drift without blocking the merge (Anatomia declares it warn)", () => {
@@ -90,7 +90,7 @@ test("reports convention_drift without blocking the merge (Anatomia declares it 
     ],
   }));
   assert.deepEqual(outcome.reasons, []);
-  assert.deepEqual(outcome.advisories, ["Anatomia gate(s) did not pass: convention_drift"]);
+  assert.deepEqual(outcome.advisories, ["Anatomia ゲートで所見があります: convention_drift"]);
 });
 
 // Anatomia の block 相当ゲートは advisory に落とさない。 warn ゲートを通す変更が
@@ -104,9 +104,9 @@ test("keeps Anatomia block-severity gates blocking alongside the warn ones", () 
       { gate: "spec_linkage", pass: false },
     ],
   }));
-  assert.deepEqual(outcome.reasons, ["Anatomia gate(s) did not pass: duplication"]);
+  assert.deepEqual(outcome.reasons, ["Anatomia ゲートが失敗しました: duplication"]);
   assert.deepEqual(outcome.advisories, [
-    "Anatomia gate(s) did not pass: convention_drift, coupling_delta, spec_linkage",
+    "Anatomia ゲートで所見があります: convention_drift, coupling_delta, spec_linkage",
   ]);
 });
 
@@ -116,7 +116,7 @@ test("blocks on a gate name the advisory set does not know", () => {
   const outcome = evaluate(analysis({
     gates: [{ gate: "some_new_upstream_gate", pass: false }],
   }));
-  assert.deepEqual(outcome.reasons, ["Anatomia gate(s) did not pass: some_new_upstream_gate"]);
+  assert.deepEqual(outcome.reasons, ["Anatomia ゲートが失敗しました: some_new_upstream_gate"]);
   assert.deepEqual(outcome.advisories, []);
 });
 
@@ -124,7 +124,7 @@ test("never turns an unexplained verification failure into a pass", () => {
   const finalAnalysis = analysis();
   finalAnalysis.architecture.verify = { pass: false, gates: [] };
   const outcome = evaluate(finalAnalysis);
-  assert.deepEqual(outcome.reasons, ["Anatomia gate(s) did not pass: unspecified"]);
+  assert.deepEqual(outcome.reasons, ["Anatomia ゲートが失敗しました: unspecified"]);
 });
 
 test("blocks on failed tests, leakage and error violations but only advises complexity drops", () => {
@@ -142,13 +142,13 @@ test("blocks on failed tests, leakage and error violations but only advises comp
     },
   );
   assert.deepEqual(outcome.reasons, [
-    "1 registered test case(s) failed",
-    "1 changed architecture rule violation(s) remain",
-    "1 potential information leakage finding(s) remain",
+    "1 件の登録テストが失敗しました",
+    "1 件の変更アーキテクチャルール違反が残っています",
+    "1 件の情報流出候補が残っています",
   ]);
   assert.deepEqual(outcome.advisories, [
-    "1 non-blocking architecture rule violation(s) remain",
-    "complexity score dropped by 12 points",
+    "1 件の非ブロックのアーキテクチャルール違反が残っています",
+    "複雑度スコアが 12 ポイント低下しました",
   ]);
 });
 
@@ -158,7 +158,7 @@ test("records a skipped domain review without blocking the merge", () => {
   finalAnalysis.domain.targetDomains = [];
   const outcome = evaluate(finalAnalysis, { domainReviewEnabled: false });
   assert.deepEqual(outcome.reasons, []);
-  assert.match(outcome.advisories[0], /domain review was skipped/);
+  assert.match(outcome.advisories[0], /ドメインレビューは.*省略しました/);
   assert.equal(needsTargetDomain(finalAnalysis, false, true, false), false);
 });
 
@@ -174,7 +174,7 @@ test("blocks a code change whose target domain is missing", () => {
   finalAnalysis.domain.targetDomains = [];
   finalAnalysis.domain.unassignedAnchors = ["fn:changed"];
   const outcome = evaluate(finalAnalysis);
-  assert.deepEqual(outcome.reasons, ["target domain is still missing"]);
+  assert.deepEqual(outcome.reasons, ["対象ドメインが未設定です"]);
   assert.deepEqual(outcome.advisories, []);
 });
 
@@ -189,7 +189,7 @@ test("does not demand a function domain when Anatomia reports no changed anchors
   const outcome = evaluate(finalAnalysis);
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, [
-    "target domain is not applicable (no analyzable changed functions)",
+    "対象ドメインは不要です（解析可能な変更関数なし）",
   ]);
   assert.equal(needsTargetDomain(finalAnalysis), false);
 });
@@ -227,7 +227,7 @@ test("the docs-only relaxation is reported ahead of the unanalyzable-surface one
   finalAnalysis.quality.changedFunctions = [];
   const outcome = evaluate(finalAnalysis, { docsOnly: true });
   assert.deepEqual(outcome.advisories, [
-    "target domain is still missing (docs-only change)",
+    "対象ドメインは不要です（ドキュメントのみの変更）",
   ]);
 });
 
@@ -237,7 +237,7 @@ test("relaxes a missing target domain to an advisory for a docs-only change", ()
   const outcome = evaluate(finalAnalysis, { docsOnly: true });
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, [
-    "target domain is still missing (docs-only change)",
+    "対象ドメインは不要です（ドキュメントのみの変更）",
   ]);
 });
 
@@ -250,9 +250,9 @@ test("docs-only relaxation never bypasses the other gates", () => {
     reviewerOutput: "PR_GATE_NEEDS_HUMAN",
   });
   assert.deepEqual(outcome.reasons, [
-    "1 registered test case(s) failed",
-    "Anatomia gate(s) did not pass: rule_conformance",
-    "reviewer reported insufficient information for a safe domain/spec definition",
+    "1 件の登録テストが失敗しました",
+    "Anatomia ゲートが失敗しました: rule_conformance",
+    "レビュアーが安全なドメイン／仕様定義に必要な情報が不足していると報告しました",
   ]);
 });
 
@@ -264,7 +264,7 @@ test("relaxes a missing target domain to an advisory for a config-only change", 
   const outcome = evaluate(finalAnalysis, { docsOrConfigOnly: true });
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, [
-    "target domain is still missing (docs/config-only change)",
+    "対象ドメインは不要です（ドキュメント／設定のみの変更）",
   ]);
 });
 
@@ -277,7 +277,7 @@ test("does not require an application domain for a non-code change with test anc
   const outcome = evaluate(finalAnalysis, { codeDomainRequired: false });
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, [
-    "target domain is not applicable (no production code change)",
+    "対象ドメインは不要です（プロダクションコードの変更なし）",
   ]);
   assert.equal(needsTargetDomain(finalAnalysis, false, false), false);
 });
@@ -294,7 +294,7 @@ test("a docs/config-only change keeps its advisory over the generic non-code one
   });
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, [
-    "target domain is still missing (docs/config-only change)",
+    "対象ドメインは不要です（ドキュメント／設定のみの変更）",
   ]);
 });
 
@@ -310,14 +310,14 @@ test("the config-only relaxation covers the missing domain and nothing else", ()
     security: { status: "findings", totalFindings: 1, failOnSeverity: "high" },
   });
   assert.deepEqual(outcome.reasons, [
-    "1 registered test case(s) failed",
-    "Anatomia gate(s) did not pass: rule_conformance",
-    "reviewer reported insufficient information for a safe domain/spec definition",
-    "2 potential information leakage finding(s) remain",
-    "1 security finding(s) at or above 'high'",
+    "1 件の登録テストが失敗しました",
+    "Anatomia ゲートが失敗しました: rule_conformance",
+    "レビュアーが安全なドメイン／仕様定義に必要な情報が不足していると報告しました",
+    "2 件の情報流出候補が残っています",
+    "1 件の 'high' 以上のセキュリティ所見",
   ]);
   assert.equal(
-    outcome.reasons.includes("target domain is still missing"),
+    outcome.reasons.includes("対象ドメインが未設定です"),
     false,
   );
 });
@@ -371,7 +371,7 @@ test("a plan that drops code analysis downgrades its gates to advisories", () =>
     true,
   );
   assert.equal(
-    relaxed.advisories.some((entry) => entry.includes("architecture rule violation")),
+    relaxed.advisories.some((entry) => entry.includes("アーキテクチャルール違反")),
     true,
   );
 });
@@ -396,7 +396,7 @@ test("a control planner cannot demote a blocking architecture error to an adviso
     true,
   );
   assert.equal(
-    outcome.reasons.some((entry) => entry.includes("architecture rule violation")),
+    outcome.reasons.some((entry) => entry.includes("アーキテクチャルール違反")),
     true,
   );
 });
@@ -404,7 +404,7 @@ test("a control planner cannot demote a blocking architecture error to an adviso
 test("a large complexity regression remains advisory", () => {
   const outcome = evaluate(analysis(), { complexityScoreDelta: -100 });
   assert.deepEqual(outcome.reasons, []);
-  assert.ok(outcome.advisories.includes("complexity score dropped by 100 points"));
+  assert.ok(outcome.advisories.includes("複雑度スコアが 100 ポイント低下しました"));
 });
 
 test("a complexity delta that was never measured cannot block", () => {
@@ -421,36 +421,36 @@ test("a test case the plan did not require is an advisory, not a failure", () =>
   });
   assert.deepEqual(outcome.reasons, []);
   assert.equal(
-    outcome.advisories.some((entry) => entry.includes("not required by the review plan")),
+    outcome.advisories.some((entry) => entry.includes("レビュー計画に不要なため")),
     true,
   );
 });
 
 test("Genius review guidance always leaves the final decision to a human", () => {
   const outcome = evaluate(analysis(), { humanReviewRequired: true });
-  assert.ok(outcome.reasons.includes("Genius judgment cards require a human decision"));
+  assert.ok(outcome.reasons.includes("Genius 判断カードには人間の判断が必要です"));
 });
 
 test("blocks on security findings and on an incomplete security scan", () => {
   const findings = evaluate(analysis(), {
     security: { status: "findings", totalFindings: 3, failOnSeverity: "high" },
   });
-  assert.deepEqual(findings.reasons, ["3 security finding(s) at or above 'high'"]);
+  assert.deepEqual(findings.reasons, ["3 件の 'high' 以上のセキュリティ所見"]);
   const incomplete = evaluate(analysis(), {
     security: { status: "error", reason: "codex-security exited with code 2" },
   });
   assert.deepEqual(incomplete.reasons, [
-    "the security scan did not complete: codex-security exited with code 2",
+    "セキュリティスキャンが完了しませんでした: codex-security exited with code 2",
   ]);
 });
 
 test("treats a skipped security scan as advisory and a disabled one as silent", () => {
   const skipped = evaluate(analysis(), {
-    security: { status: "skipped", reason: "registered tests failed" },
+    security: { status: "skipped", reason: "登録テストが失敗したため" },
   });
   assert.deepEqual(skipped.reasons, []);
   assert.deepEqual(skipped.advisories, [
-    "security scan skipped: registered tests failed",
+    "セキュリティスキャンは省略しました: 登録テストが失敗したため",
   ]);
   const disabled = evaluate(analysis(), {
     security: { status: "skipped", reason: "disabled by settings" },
@@ -468,9 +468,9 @@ test("blocks on a security result the policy cannot read", () => {
   // Same fail-closed rule as the pre-merge check, so a status the gate does not
   // know cannot pass here and then block at merge time.
   const unknown = evaluate(analysis(), { security: { status: "queued" } });
-  assert.deepEqual(unknown.reasons, ["the security scan produced no usable result"]);
+  assert.deepEqual(unknown.reasons, ["セキュリティスキャンの結果を利用できません"]);
   const empty = evaluate(analysis(), { security: {} });
-  assert.deepEqual(empty.reasons, ["the security scan produced no usable result"]);
+  assert.deepEqual(empty.reasons, ["セキュリティスキャンの結果を利用できません"]);
 });
 
 // --- Anatomia dual-layer domain gate (advisory by default, enforced by flag) ---
@@ -514,8 +514,8 @@ test("reports advisory dual-layer findings without blocking the merge", () => {
   })));
   assert.deepEqual(outcome.reasons, []);
   assert.deepEqual(outcome.advisories, [
-    "Anatomia dual-layer (program): 2 changed anchor(s) unclassified",
-    "Anatomia dual-layer (business): 1 spec clause(s) unowned",
+    "Anatomia 二層ドメイン（プログラム）: 2 件の変更アンカーが未分類",
+    "Anatomia 二層ドメイン（業務）: 1 件の仕様条項が未所有",
   ]);
 });
 
@@ -524,7 +524,7 @@ test("promotes dual-layer findings to blocking reasons only when Anatomia ran en
     unclassifiedAnchors: ["fn:a"],
   })));
   assert.deepEqual(outcome.reasons, [
-    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+    "Anatomia 二層ドメイン（プログラム）: 1 件の変更アンカーが未分類",
   ]);
   assert.deepEqual(outcome.advisories, []);
 });
@@ -541,9 +541,9 @@ test("keeps the legacy target-domain verdict alongside the dual-layer advisory",
   const outcome = evaluate(withDualLayer(legacy, dualLayer("advisory", {
     unclassifiedAnchors: ["fn:changed"],
   })));
-  assert.deepEqual(outcome.reasons, ["target domain is still missing"]);
+  assert.deepEqual(outcome.reasons, ["対象ドメインが未設定です"]);
   assert.deepEqual(outcome.advisories, [
-    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+    "Anatomia 二層ドメイン（プログラム）: 1 件の変更アンカーが未分類",
   ]);
 });
 
@@ -560,5 +560,5 @@ test("a skipped domain review also skips the dual-layer verdict", () => {
     { domainReviewEnabled: false },
   );
   assert.deepEqual(outcome.reasons, []);
-  assert.deepEqual(outcome.advisories, ["Anatomia domain review was skipped by cost validation mode"]);
+  assert.deepEqual(outcome.advisories, ["Anatomia ドメインレビューはコスト検証モードのため省略しました"]);
 });

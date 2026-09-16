@@ -76,9 +76,9 @@ test("complexity regressions and their advisory messages cannot increase merge r
   const input = { classification: profile(["src/a.mjs"]), analysis: CLEAN_ANALYSIS };
   const baseline = assessMergeRisk(input);
   const regression = assessMergeRisk({ ...input, complexityScoreDelta: -100, advisories: [
-    "complexity score dropped by 100 points",
-    "Call-graph complexity: 10 matched, 2 added, 0 removed; new maximum 30",
-    "Complexity comparison uses legacy aggregate: Function snapshots unavailable or invalid",
+    "複雑度スコアが 100 ポイント低下しました",
+    "コールグラフ複雑度: 10 件が対応、2 件を追加、0 件を削除; 新しい最大値 30",
+    "複雑度比較は旧集計を使用: Function snapshots unavailable or invalid",
   ] });
   assert.deepEqual(regression, baseline);
   assert.ok(assessMergeRisk({ ...input, advisories: ["another finding"] }).score > baseline.score);
@@ -112,7 +112,7 @@ test("outstanding leakage or a blocking reason saturates the score", () => {
   assert.equal(leaked.band, "critical");
   const blocked = assessMergeRisk({
     classification,
-    reasons: ["target domain is still missing"],
+    reasons: ["対象ドメインが未設定です"],
     analysis: CLEAN_ANALYSIS,
     leakage: { totalFindings: 0 },
     ci: [],

@@ -65,6 +65,15 @@
       "module": "contracts/update-review-report.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-8",
+      "criterion": "C-8 gateOutcome(input): 審査のブロック理由と所見を日本語の表示文で返す",
+      "symbol": "gateOutcome",
+      "file": "src/review-gate.mjs",
+      "module": "contracts/gate-outcome-japanese-messages.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

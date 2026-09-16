@@ -1,10 +1,10 @@
 export const GENIUS_HUMAN_DECISION_REASON =
-  "Genius judgment cards require a human decision";
+  "Genius 判断カードには人間の判断が必要です";
 
 const SYSTEM_REVIEW_REASON_PATTERNS = [
-  /^reviewer reported insufficient information /,
-  /^the security scan did not complete:/,
-  /^the security scan produced no usable result$/,
+  /^レビュアーが安全なドメイン／仕様定義に必要な情報が不足していると報告しました$/,
+  /^セキュリティスキャンが完了しませんでした:/,
+  /^セキュリティスキャンの結果を利用できません$/,
 ];
 
 // A conflict happens after review has passed. It still needs a person to rebase
@@ -21,7 +21,7 @@ const SYSTEM_FAILURE_PATTERN =
 
 function isHumanAttentionReason(reason) {
   return reason === GENIUS_HUMAN_DECISION_REASON
-    || reason === "target domain is still missing"
+    || reason === "対象ドメインが未設定です"
     || MERGE_CONFLICT_REASON_PATTERN.test(reason)
     || SYSTEM_REVIEW_REASON_PATTERNS.some((pattern) => pattern.test(reason));
 }
@@ -41,7 +41,10 @@ export function hasConcreteReviewFailure(pullRequest) {
   const error = typeof pullRequest.error === "string" ? pullRequest.error.trim() : "";
   if (error && HARD_FAILURE_PATTERN.test(error)) return true;
   const reasons = Array.isArray(pullRequest.reasons) ? pullRequest.reasons : [];
-  return reasons.some((reason) => !isHumanAttentionReason(reason));
+  for (const reason of reasons) {
+    if (!isHumanAttentionReason(reason)) return true;
+  }
+  return false;
 }
 
 /**

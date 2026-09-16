@@ -42,7 +42,7 @@ export async function runRegisteredTests({
   now = () => Date.now(),
 }) {
   if (!Array.isArray(testCases) || testCases.length === 0) {
-    throw new Error("The repository has no registered test cases.");
+    throw new Error("リポジトリに登録テストがありません");
   }
   const results = [];
   for (const test of testCases) {
@@ -59,7 +59,7 @@ export async function runRegisteredTests({
       durationMs: Math.max(0, now() - startedAt),
     };
     // A failure keeps its (redacted, tail-truncated) output: "1 registered test
-    // case(s) failed" alone forces whoever reads the PR to re-run the whole suite
+    // の失敗だけでは、PR の読者が原因を知るために全スイートを再実行することになる
     // locally to learn what a machine already knew. A pass keeps nothing.
     if (!result.ok) {
       const output = captureFailedTestOutput(result);
@@ -82,7 +82,7 @@ export async function runPlannedTests({
   now = () => Date.now(),
 }) {
   if (!Array.isArray(testCases) || testCases.length === 0) {
-    throw new Error("The repository has no registered test cases.");
+    throw new Error("リポジトリに登録テストがありません");
   }
   const selected = selectedTestCases(plan, testCases);
   const executed = selected.length > 0

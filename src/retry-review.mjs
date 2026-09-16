@@ -5,7 +5,7 @@ import {
   reviewedHeadShaOf,
 } from "./review-stage-progress.mjs";
 
-const REVIEW_REASON = /reviewer reported|Genius decision/i;
+const REVIEW_REASON = /レビュアーが|Genius 判断/i;
 const REVIEW_ERROR = /(?:opposite-model|reviewer) review(?:er)? failed/i;
 // 出力順を固定する。 `leakage` は段階フラグを持たず常にやり直す (差分から即座に
 // 再計算でき、 worker コストも掛からない)。
@@ -15,10 +15,10 @@ export function failedVerificationTargets(pullRequest) {
   const reasons = Array.isArray(pullRequest?.reasons) ? pullRequest.reasons : [];
   const targets = new Set();
   for (const reason of reasons) {
-    if (/registered test/i.test(reason)) targets.add("tests");
-    if (/information leakage/i.test(reason)) targets.add("leakage");
-    if (/target domain|Anatomia|architecture|complexity/i.test(reason)) targets.add("anatomia");
-    if (/security scan|security finding/i.test(reason)) targets.add("security");
+    if (/登録テスト/.test(reason)) targets.add("tests");
+    if (/情報流出/.test(reason)) targets.add("leakage");
+    if (/対象ドメイン|Anatomia|アーキテクチャ|複雑度/.test(reason)) targets.add("anatomia");
+    if (/セキュリティスキャン|セキュリティ所見/.test(reason)) targets.add("security");
   }
   const error = String(pullRequest?.error ?? "");
   if (/test|npm|pnpm|vitest/i.test(error)) targets.add("tests");
@@ -59,7 +59,7 @@ export function retryReviewScope(pullRequest, currentHeadSha, { reviewedContentU
     headSha: currentHeadSha,
     contentUnchanged,
   });
-  const reviewRejected = reasons.some((reason) => REVIEW_REASON.test(reason))
+  const reviewRejected = reasons.find((reason) => REVIEW_REASON.test(reason)) !== undefined
     || REVIEW_ERROR.test(String(pullRequest?.error ?? ""));
   // 衝突解消のときは head SHA 一致を条件から外して review 段階だけを見る
   // (`contentUnchanged: true` が SHA 照合を飛ばす)。 成果が残っているかの

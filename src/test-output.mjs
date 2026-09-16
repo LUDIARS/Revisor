@@ -1,4 +1,4 @@
-// Keeps the output of a failed registered test case so the PR detail page can say
+// 失敗した登録テストの出力を保持し、PR 詳細ページで原因を表示できるようにする
 // *why* it failed. Only failures are captured: a passing case has nothing to
 // diagnose and storing its log would grow the state file for every review.
 //

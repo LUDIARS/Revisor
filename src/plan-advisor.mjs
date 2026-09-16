@@ -98,7 +98,7 @@ export function parseAdvisorResponse(text) {
 function advisorPrompt(payload) {
   return [
     "You are the control planner for a local pull-request review.",
-    "Decide which review stages and which registered test cases this specific change needs.",
+    "Decide which review stages and which registered checks this specific change needs.",
     "Do not run anything. Answer with one JSON object and nothing else.",
     'Schema: {"stages":[{"id":"<stage id>","run":true|false,"reason":"<why, Japanese>"}],"testCases":["<test case name>"]}',
     "Only the listed stage ids and test case names are valid.",

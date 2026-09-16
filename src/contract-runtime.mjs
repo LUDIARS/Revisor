@@ -21,16 +21,20 @@ function outcome(value) {
 // the wrapped function's result and records no payload values, so the optional
 // observation layer cannot expose webhook URLs or release-note input.
 export function contract(fn, { pre, post, contractId, id, where }) {
-  return async function contracted(...args) {
+  return function contracted(...args) {
     const context = { contract: contractId, id, where, observed_at: new Date().toISOString() };
     try {
       const preReason = outcome(pre?.(...args));
       if (preReason) record("contract violated", { ...context, phase: "pre", reason: preReason });
-      const result = await fn.apply(this, args);
-      const postReason = outcome(post?.(result, ...args));
-      if (postReason) record("contract violated", { ...context, phase: "post", reason: postReason });
-      else if (!preReason) record("contract observed", { ...context, phase: "ok" });
-      return result;
+      const observe = (result) => {
+        const postReason = outcome(post?.(result, ...args));
+        if (postReason) record("contract violated", { ...context, phase: "post", reason: postReason });
+        else if (!preReason) record("contract observed", { ...context, phase: "ok" });
+        return result;
+      };
+      const result = fn.apply(this, args);
+      if (result && typeof result.then === "function") return result.then(observe);
+      return observe(result);
     } catch (error) {
       record("contract predicate threw", { ...context, phase: "predicate", reason: "wrapped operation threw" });
       throw error;

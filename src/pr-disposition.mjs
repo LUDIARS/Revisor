@@ -50,11 +50,8 @@ function blockersOf(pullRequest, thresholds) {
   const failedTestCount = Array.isArray(pullRequest.ci)
     ? pullRequest.ci.filter((entry) => entry?.status === "failed").length
     : 0;
-  if (
-    failedTestCount > 0
-    && !reasons.some((reason) => /registered test case\(s\) failed/.test(String(reason)))
-  ) {
-    blockers.push(`${failedTestCount} registered test case(s) failed`);
+  if (failedTestCount > 0) {
+    blockers.push(`${failedTestCount} 件の登録テストが失敗しました`);
   }
   for (const reason of reasons) blockers.push(reason);
   if (pullRequest.humanQuestion) blockers.push(pullRequest.humanQuestion);
@@ -71,7 +68,7 @@ function blockersOf(pullRequest, thresholds) {
   ) {
     blockers.push("人間による動作確認が必要です");
   }
-  return blockers;
+  return [...new Set(blockers)];
 }
 
 export function decidePullRequest(pullRequest, {

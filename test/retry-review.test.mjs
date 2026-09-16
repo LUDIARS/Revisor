@@ -32,8 +32,8 @@ function reviewedPullRequest(overrides = {}, headSha = HEAD) {
 
 test("rechecks only failed deterministic gates on an unchanged reviewed head", () => {
   assert.deepEqual(retryReviewScope(reviewedPullRequest({
-    reasons: ["1 registered test case(s) failed"],
-    security: { status: "skipped", reason: "registered tests failed" },
+    reasons: ["1 件の登録テストが失敗しました"],
+    security: { status: "skipped", reason: "登録テストが失敗したため" },
   }), HEAD), {
     reviewMode: "verification",
     verificationTargets: ["leakage", "tests", "security"],
@@ -44,13 +44,13 @@ test("rechecks only failed deterministic gates on an unchanged reviewed head", (
 
 test("reruns intent review when the reviewer rejected the prior result", () => {
   assert.equal(retryReviewScope(reviewedPullRequest({
-    reasons: ["reviewer reported insufficient information for a safe domain/spec definition"],
+    reasons: ["レビュアーが安全なドメイン／仕様定義に必要な情報が不足していると報告しました"],
   }), HEAD).reviewMode, "full");
 });
 
 test("reruns intent review after the head changes", () => {
   assert.deepEqual(retryReviewScope(reviewedPullRequest({
-    reasons: ["Anatomia gate(s) did not pass: duplication"],
+    reasons: ["Anatomia ゲートが失敗しました: duplication"],
   }), "b".repeat(40)), {
     reviewMode: "full",
     verificationTargets: [],
@@ -69,7 +69,7 @@ test("keeps every stage that passed for this head and only rescans the leakage g
 test("rechecks every deterministic gate when the previous plan was advised", () => {
   assert.deepEqual(retryReviewScope(reviewedPullRequest({
     reviewPlan: { source: "advised" },
-    reasons: ["1 registered test case(s) failed"],
+    reasons: ["1 件の登録テストが失敗しました"],
   }), HEAD), {
     reviewMode: "verification",
     verificationTargets: ["leakage", "tests", "anatomia", "security"],
@@ -83,7 +83,7 @@ test("reruns intent review when a pre-review test autofix never reached it", () 
     reviewedHeadSha: HEAD,
     reviewStages: { tests: { completed: true, headSha: HEAD } },
     ci: [{ name: "unit", status: "passed" }],
-    reasons: ["1 registered test case(s) failed"],
+    reasons: ["1 件の登録テストが失敗しました"],
   }, HEAD).reviewMode, "full");
 });
 
@@ -111,7 +111,7 @@ test("a stage whose outcome is missing is not treated as passed", () => {
 
 test("a security scan skipped by a failed prerequisite is not treated as passed", () => {
   const scope = retryReviewScope(reviewedPullRequest({
-    security: { status: "skipped", reason: "registered tests failed" },
+    security: { status: "skipped", reason: "登録テストが失敗したため" },
   }), HEAD);
   assert.deepEqual(scope.verificationTargets, ["leakage", "security"]);
   assert.deepEqual(scope.reusedStages, ["anatomia", "tests", "review"]);

@@ -1,6 +1,8 @@
 import { isDocsOnlyChange, isDocsOrConfigOnlyChange } from "./change-classification.mjs";
 import { codeAnalysisGating } from "./review-plan.mjs";
 import { GENIUS_HUMAN_DECISION_REASON } from "./human-decision.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:398caf0c */
+import augurContract_56a3282f from '../contracts/gate-outcome-japanese-messages.contract.mjs'; /* augur-inject:contract-predicate:96346688 */
 
 // Re-exported because the gate, the reviewer prompt and the human question all
 // reach for them through this module; the classification itself lives with the rest
@@ -94,7 +96,7 @@ export function dualLayerFindings(analysis) {
   if (program && program.wouldBlock === true) {
     const count = Array.isArray(program.unclassifiedAnchors) ? program.unclassifiedAnchors.length : 0;
     findings.push({
-      message: `Anatomia dual-layer (program): ${count} changed anchor(s) unclassified`,
+      message: `Anatomia 二層ドメイン（プログラム）: ${count} 件の変更アンカーが未分類`,
       blocking: program.mode === "enforced" && program.blocking === true,
     });
   }
@@ -102,7 +104,7 @@ export function dualLayerFindings(analysis) {
   if (business && business.wouldBlock === true) {
     const count = Array.isArray(business.unownedClauses) ? business.unownedClauses.length : 0;
     findings.push({
-      message: `Anatomia dual-layer (business): ${count} spec clause(s) unowned`,
+      message: `Anatomia 二層ドメイン（業務）: ${count} 件の仕様条項が未所有`,
       blocking: business.mode === "enforced" && business.blocking === true,
     });
   }
@@ -146,20 +148,20 @@ export function gateOutcome({
   const codeAnalysis = codeAnalysisGating(plan);
   const failedTests = ci.filter((test) => test.status === "failed");
   if (failedTests.length > 0) {
-    reasons.push(`${failedTests.length} registered test case(s) failed`);
+    reasons.push(`${failedTests.length} 件の登録テストが失敗しました`);
   }
   const skippedTests = ci.filter((test) => test.status === "skipped");
   if (skippedTests.length > 0) {
     advisories.push(
-      `${skippedTests.length} registered test case(s) were not required by the review plan`,
+      `${skippedTests.length} 件の登録テストはレビュー計画に不要なため省略しました`,
     );
   }
   // needsTargetDomain stays the only place that decides whether the domain is
   // still owed; the gate only chooses where to record it.
   if (!domainReviewEnabled) {
-    advisories.push("Anatomia domain review was skipped by cost validation mode");
+    advisories.push("Anatomia ドメインレビューはコスト検証モードのため省略しました");
   } else if (needsTargetDomain(finalAnalysis, docsOrConfigOnly, codeDomainRequired)) {
-    reasons.push("target domain is still missing");
+    reasons.push("対象ドメインが未設定です");
   } else if (!finalAnalysis.domain.hasTargetDomain) {
     // The relaxations overlap — a docs/config-only change is also a non-code
     // change and also has no analyzable anchors — so the most specific wording
@@ -167,10 +169,10 @@ export function gateOutcome({
     // surface (a code change Anatomia could not parse), which is the narrowest.
     advisories.push(
       docsOrConfigOnly
-        ? `target domain is still missing (${docsOnly ? "docs-only" : "docs/config-only"} change)`
+        ? `対象ドメインは不要です（${docsOnly ? "ドキュメントのみ" : "ドキュメント／設定のみ"}の変更）`
         : !codeDomainRequired
-        ? "target domain is not applicable (no production code change)"
-        : "target domain is not applicable (no analyzable changed functions)",
+        ? "対象ドメインは不要です（プロダクションコードの変更なし）"
+        : "対象ドメインは不要です（解析可能な変更関数なし）",
     );
   }
   // The dual-layer verdict is part of the domain review, so a plan that skips
@@ -182,7 +184,7 @@ export function gateOutcome({
   }
   if (finalAnalysis.quality.changedOrphans.length > 0) {
     advisories.push(
-      `${finalAnalysis.quality.changedOrphans.length} changed function(s) are orphaned`,
+      `${finalAnalysis.quality.changedOrphans.length} 件の変更関数が孤立しています`,
     );
   }
   const failedGates = failedGateNames(finalAnalysis.architecture.verify);
@@ -193,54 +195,56 @@ export function gateOutcome({
     ? failedGates.filter((gate) => ADVISORY_GATES.has(gate))
     : failedGates;
   if (blockingGates.length > 0) {
-    reasons.push(`Anatomia gate(s) did not pass: ${blockingGates.join(", ")}`);
+    reasons.push(`Anatomia ゲートが失敗しました: ${blockingGates.join(", ")}`);
   }
   if (advisoryGates.length > 0) {
-    advisories.push(`Anatomia gate(s) did not pass: ${advisoryGates.join(", ")}`);
+    advisories.push(`Anatomia ゲートで所見があります: ${advisoryGates.join(", ")}`);
   }
   const changedViolations = finalAnalysis.architecture.changedViolations;
   const blockingViolations = changedViolations
     .filter((violation) => violation.severity === "error");
   if (blockingViolations.length > 0 && codeAnalysis) {
-    reasons.push(`${blockingViolations.length} changed architecture rule violation(s) remain`);
+    reasons.push(`${blockingViolations.length} 件の変更アーキテクチャルール違反が残っています`);
   }
   const advisoryViolations = codeAnalysis
     ? changedViolations.length - blockingViolations.length
     : changedViolations.length;
   if (advisoryViolations > 0) {
-    advisories.push(`${advisoryViolations} non-blocking architecture rule violation(s) remain`);
+    advisories.push(`${advisoryViolations} 件の非ブロックのアーキテクチャルール違反が残っています`);
   }
   // Complexity is a refactoring suggestion, never a merge prerequisite.
   if (typeof complexityScoreDelta === "number" && complexityScoreDelta <= -threshold) {
-    advisories.push(`complexity score dropped by ${Math.abs(complexityScoreDelta)} points`);
+    advisories.push(`複雑度スコアが ${Math.abs(complexityScoreDelta)} ポイント低下しました`);
   }
   if (humanReviewRequired) {
     reasons.push(GENIUS_HUMAN_DECISION_REASON);
   } else if (reviewerOutput.includes("PR_GATE_NEEDS_HUMAN")) {
-    reasons.push("reviewer reported insufficient information for a safe domain/spec definition");
+    reasons.push("レビュアーが安全なドメイン／仕様定義に必要な情報が不足していると報告しました");
   }
   if (leakage.totalFindings > 0) {
-    reasons.push(`${leakage.totalFindings} potential information leakage finding(s) remain`);
+    reasons.push(`${leakage.totalFindings} 件の情報流出候補が残っています`);
   }
   if (security) {
     if (security.status === "findings") {
       reasons.push(
-        `${security.totalFindings} security finding(s) at or above '${security.failOnSeverity}'`
+        `${security.totalFindings} 件の '${security.failOnSeverity}' 以上のセキュリティ所見`
         + (security.reason ? ` (${security.reason})` : ""),
       );
     } else if (security.status === "error") {
       // An incomplete scan must not read as a passing policy.
-      reasons.push(`the security scan did not complete: ${security.reason}`);
+      reasons.push(`セキュリティスキャンが完了しませんでした: ${security.reason}`);
     } else if (security.status === "skipped") {
       if (security.reason !== "disabled by settings") {
-        advisories.push(`security scan skipped: ${security.reason}`);
+        advisories.push(`セキュリティスキャンは省略しました: ${security.reason}`);
       }
     } else if (security.status !== "passed") {
       // Symmetric with the pre-merge check in local-merge.mjs: only a pass or a
       // deliberate skip is a pass. A status the policy cannot read must not fall
       // through the chain silently and leave the PR at Open / Test OK.
-      reasons.push("the security scan produced no usable result");
+      reasons.push("セキュリティスキャンの結果を利用できません");
     }
   }
   return { reasons, advisories };
 }
+// @ts-expect-error augur-inject
+gateOutcome = contract(gateOutcome, { ...augurContract_56a3282f, contractId: 'C-8', mode: 'observe', sample: 1, where: 'src/review-gate.mjs:122', rule: 'contract-wrap', id: '56a3282f' }); /* augur-inject:contract-wrap:56a3282f */

@@ -73,7 +73,7 @@ test("a required human run blocks auto-merge while the operator asks for it", ()
 
 test("blocking reasons and open questions each need a human", () => {
   for (const overrides of [
-    { reasons: ["target domain is still missing"] },
+    { reasons: ["対象ドメインが未設定です"] },
     { humanQuestion: "どのドメインに属しますか?" },
     { checkStatus: "action_required" },
     { checkStatus: "failed" },
@@ -105,7 +105,7 @@ test("a sole Genius card hold is offered as a human-decision merge", () => {
   assert.equal(offered.decision.autoMergeEligible, false);
 
   for (const overrides of [
-    { reasons: [GENIUS_HUMAN_DECISION_REASON, "registered test case(s) failed"] },
+    { reasons: [GENIUS_HUMAN_DECISION_REASON, "1 件の登録テストが失敗しました"] },
     { reasons: [] },
     { geniusGuidance: { cards: [] } },
     { geniusGuidance: null },
@@ -137,13 +137,13 @@ test("system review failures are human-mergeable but concrete failing evidence i
   assert.equal(workerFailure.decision.autoMergeEligible, false);
 
   for (const reason of [
-    "1 registered test case(s) failed",
-    "2 potential information leakage finding(s) remain",
-    "1 security finding(s) at or above 'high'",
-    "target domain is still missing",
-    "Anatomia gate(s) did not pass: rule_conformance",
-    "1 changed architecture rule violation(s) remain",
-    "complexity score dropped by 12 points",
+    "1 件の登録テストが失敗しました",
+    "2 件の情報流出候補が残っています",
+    "1 件の 'high' 以上のセキュリティ所見",
+    "対象ドメインが未設定です",
+    "Anatomia ゲートが失敗しました: rule_conformance",
+    "1 件の変更アーキテクチャルール違反が残っています",
+    "複雑度スコアが 12 ポイント低下しました",
   ]) {
     assert.equal(decidePullRequest(pullRequest({
       checkStatus: "action_required",
@@ -154,11 +154,11 @@ test("system review failures are human-mergeable but concrete failing evidence i
 
 test("a settled review always says why it is waiting", () => {
   const blocked = decidePullRequest(
-    pullRequest({ checkStatus: "action_required", reasons: ["target domain is still missing"] }),
+    pullRequest({ checkStatus: "action_required", reasons: ["対象ドメインが未設定です"] }),
     SETTINGS,
   );
   assert.equal(blocked.decision.state, "needs_human");
-  assert.ok(blocked.decision.blockers.includes("target domain is still missing"));
+  assert.ok(blocked.decision.blockers.includes("対象ドメインが未設定です"));
 
   const failed = decidePullRequest(
     pullRequest({
@@ -183,12 +183,12 @@ test("a settled review always says why it is waiting", () => {
 test("objective action_required evidence is a review failure, not a human judgment", () => {
   const failed = decidePullRequest(pullRequest({
     checkStatus: "action_required",
-    reasons: ["1 registered test case(s) failed"],
+    reasons: ["1 件の登録テストが失敗しました"],
     ci: [{ name: "unit", status: "failed", exitCode: 1 }],
   }), SETTINGS);
   assert.equal(failed.decision.state, "failed");
   assert.equal(failed.decision.label, "審査が失敗");
-  assert.ok(failed.decision.blockers.includes("1 registered test case(s) failed"));
+  assert.ok(failed.decision.blockers.includes("1 件の登録テストが失敗しました"));
 });
 
 test("objective failure evidence is never omitted from the decision blockers", () => {
@@ -198,7 +198,7 @@ test("objective failure evidence is never omitted from the decision blockers", (
     ci: [{ name: "unit", status: "failed", exitCode: 1 }],
   }), SETTINGS);
   assert.equal(failedTest.decision.state, "failed");
-  assert.ok(failedTest.decision.blockers.includes("1 registered test case(s) failed"));
+  assert.ok(failedTest.decision.blockers.includes("1 件の登録テストが失敗しました"));
 
   const leakageError = decidePullRequest(pullRequest({
     checkStatus: "action_required",
@@ -296,7 +296,7 @@ test("a closed PR is neither a decision nor auto-mergeable again", () => {
 
 test("a closed PR that failed review still reports no blockers", () => {
   const decided = decidePullRequest(
-    pullRequest({ status: "closed", checkStatus: "action_required", reasons: ["target domain is still missing"] }),
+    pullRequest({ status: "closed", checkStatus: "action_required", reasons: ["対象ドメインが未設定です"] }),
     SETTINGS,
   );
   assert.equal(decided.decision.state, "closed");

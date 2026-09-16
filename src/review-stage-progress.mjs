@@ -30,7 +30,7 @@ export const DETERMINISTIC_REVIEW_STAGES = Object.freeze(["anatomia", "tests", "
  */
 export function securityStageCompleted(security) {
   return security?.status === "passed"
-    || (security?.status === "skipped" && security.reason === "not required by the review plan");
+    || (security?.status === "skipped" && security.reason === "レビュー計画に不要なため");
 }
 
 function sameSha(left, right) {

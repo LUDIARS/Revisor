@@ -326,7 +326,7 @@ test("verification mode asks a human when the autofix cannot repair the tests", 
   });
   assert.equal(committed, false);
   assert.equal(result.reviewedHeadSha, "b".repeat(40));
-  assert.match(result.humanQuestion, /still fail after the bounded automated autofix/);
+  assert.match(result.humanQuestion, /自動テスト修正後も登録テストが失敗/);
   assert.ok(result.reasons.length > 0, "failed tests stay a blocking reason");
 });
 

@@ -211,7 +211,7 @@ export function assessMergeRisk({
   }
   // Complexity remains visible without indirectly crossing the auto-merge threshold.
   const riskAdvisories = advisories.filter((entry) =>
-    !/^(complexity score dropped by |Call-graph complexity: |Complexity comparison uses legacy aggregate: )/.test(entry));
+    !/^(複雑度スコアが |コールグラフ複雑度: |複雑度比較は旧集計を使用: )/.test(entry));
   add("advisories", Math.min(6, riskAdvisories.length * 2), `所見 ${riskAdvisories.length} 件`);
 
   const score = clamp(factors.reduce((total, factor) => total + factor.points, 0));

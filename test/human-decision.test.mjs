@@ -70,13 +70,13 @@ test("does not relabel concrete review evidence as a system failure", () => {
   assert.equal(isHumanOverrideableReviewHold(pullRequest({
     checkStatus: "action_required",
     error: null,
-    reasons: ["1 registered test case(s) failed"],
+    reasons: ["1 件の登録テストが失敗しました"],
   })), false);
   for (const reason of [
-    "target domain is still missing",
-    "Anatomia gate(s) did not pass: rule_conformance",
-    "1 changed architecture rule violation(s) remain",
-    "complexity score dropped by 12 points",
+    "対象ドメインが未設定です",
+    "Anatomia ゲートが失敗しました: rule_conformance",
+    "1 件の変更アーキテクチャルール違反が残っています",
+    "複雑度スコアが 12 ポイント低下しました",
   ]) {
     assert.equal(isHumanOverrideableReviewHold(pullRequest({
       checkStatus: "action_required",
@@ -88,9 +88,9 @@ test("does not relabel concrete review evidence as a system failure", () => {
 
 test("separates objective action_required failures from actual human decisions", () => {
   for (const reason of [
-    "1 registered test case(s) failed",
-    "Anatomia gate(s) did not pass: rule_conformance",
-    "1 changed architecture rule violation(s) remain",
+    "1 件の登録テストが失敗しました",
+    "Anatomia ゲートが失敗しました: rule_conformance",
+    "1 件の変更アーキテクチャルール違反が残っています",
   ]) {
     assert.equal(hasConcreteReviewFailure(pullRequest({
       checkStatus: "action_required",
@@ -101,7 +101,7 @@ test("separates objective action_required failures from actual human decisions",
   assert.equal(hasConcreteReviewFailure(pullRequest({
     checkStatus: "action_required",
     error: null,
-    reasons: ["target domain is still missing"],
+    reasons: ["対象ドメインが未設定です"],
   })), false);
   assert.equal(hasConcreteReviewFailure(pullRequest({
     checkStatus: "action_required",

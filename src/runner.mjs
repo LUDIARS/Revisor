@@ -171,12 +171,12 @@ async function autofixFailingTests({
 
 function testAutofixHumanQuestion(status) {
   if (status === "model_failed") {
-    return "Automated test autofix model failed; inspect the captured registered test evidence.";
+    return "自動テスト修正モデルが失敗しました。記録済みの登録テスト結果を確認してください";
   }
   if (status === "stalled") {
-    return "Automated test autofix made no progress; inspect the failing test or environment.";
+    return "自動テスト修正で進展がありません。失敗したテストまたは環境を確認してください";
   }
-  return "Registered tests still fail after the bounded automated autofix attempts.";
+  return "制限回数の自動テスト修正後も登録テストが失敗しています";
 }
 
 export async function runReviewWithCapacityFallback(
@@ -288,10 +288,10 @@ function buildGateResult({
   });
   if (codeAnalysisGating(plan)) {
     advisories.push(complexityComparison.mode === "matched-functions"
-      ? `Call-graph complexity: ${complexityComparison.compared} matched, `
-        + `${complexityComparison.added} added, ${complexityComparison.removed} removed; `
-        + `new maximum ${complexityComparison.addedMaximum}`
-      : `Complexity comparison uses legacy aggregate: ${complexityComparison.reason}`);
+      ? `コールグラフ複雑度: ${complexityComparison.compared} 件が対応、`
+        + `${complexityComparison.added} 件を追加、${complexityComparison.removed} 件を削除; `
+        + `新しい最大値 ${complexityComparison.addedMaximum}`
+      : `複雑度比較は旧集計を使用: ${complexityComparison.reason}`);
   }
   const reasons = [...new Set([
     ...gateReasons,
@@ -407,7 +407,7 @@ function buildAnatomiaBlockedResult({
       anatomiaGate: gate,
       additionalReasons: gate.reasons,
     }),
-    humanQuestion: "Resolve the Anatomia review-gate violations before LLM review can start.",
+    humanQuestion: "LLM レビューを開始する前に Anatomia レビューゲート違反を解消してください",
   };
 }
 
@@ -423,10 +423,10 @@ function buildAnatomiaBlockedResult({
 // gate reports it as an advisory rather than passing silently.
 async function reviewSecurityScan({ runSecurity, worktrees, leakage, ci, settings, plan }) {
   if (!stageEnabled(plan, "security_review")) {
-    return skippedSecurityScan("not required by the review plan");
+    return skippedSecurityScan("レビュー計画に不要なため");
   }
-  if (leakage.totalFindings > 0) return skippedSecurityScan("blocked by the leakage scan");
-  if (!testsPassed(ci)) return skippedSecurityScan("registered tests failed");
+  if (leakage.totalFindings > 0) return skippedSecurityScan("情報流出検査でブロックされたため");
+  if (!testsPassed(ci)) return skippedSecurityScan("登録テストが失敗したため");
   return runSecurity({
     worktreePath: worktrees.head,
     diffBase: worktrees.mergeBase,
@@ -999,7 +999,7 @@ export function createPrReviewRunner({
             docsOrConfigOnly,
             security: initialSecurity,
           }),
-          humanQuestion: "Potential information leakage must be removed before automated review.",
+          humanQuestion: "自動レビューを開始する前に情報流出候補を解消してください",
         };
       }
       if (!testsPassed(initialCi)) {
@@ -1021,7 +1021,7 @@ export function createPrReviewRunner({
               security: initialSecurity,
               intentReviewCompleted: true,
             }),
-            humanQuestion: "Registered tests must pass before validation can continue.",
+            humanQuestion: "検証を続行する前に登録テストを成功させてください",
           };
         }
         // ここから worktree は request.headSha の内容ではなくなる。 以降の通過を
