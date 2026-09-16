@@ -34,7 +34,14 @@ export function redactedReviewerOutput(value) {
 
 function behaviorBlock(ci) {
   const runs = Array.isArray(ci) ? ci.filter((item) => typeof item?.domain === "string") : [];
-  if (runs.length === 0) return { status: "台帳未整備", runs: [] };
+  if (runs.length === 0) {
+    const ledgerPresent = Array.isArray(ci) && ci.some((item) => item?.augurLedgerPresent === true);
+    if (ledgerPresent) {
+      const registered = ci.some((item) => item?.testSelectionMode === "registered-non-code");
+      return { status: registered ? "登録検査（コードドメイン不要）" : "台帳あり・実行不能", runs: [] };
+    }
+    return { status: "台帳未整備", runs: [] };
+  }
   return {
     status: "記録済み",
     runs: runs.map((run) => ({
@@ -56,8 +63,8 @@ function experienceBlock(ci) {
 
 export function reviewBlockLines(ci) {
   const behavior = behaviorBlock(ci);
-  const behaviorLine = behavior.status === "台帳未整備"
-    ? "動作ブロック: 台帳未整備"
+  const behaviorLine = behavior.runs.length === 0
+    ? `動作ブロック: ${behavior.status}`
     : behavior.runs.map((run) => `動作ブロック: ${run.domain} / passed ${run.passed} / failed ${run.failed} / ${run.durationMs}ms / runId ${run.runId ?? "未確認"}`);
   const experience = experienceBlock(ci);
   return [

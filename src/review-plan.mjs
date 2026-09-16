@@ -150,6 +150,8 @@ export function planReview({ classification, testCases = [] }) {
       changedLines: classification.changedLines,
       docsOnly: classification.docsOnly,
       docsOrConfigOnly: classification.docsOrConfigOnly,
+      // Missing legacy metadata must never opt code out of domain validation.
+      codeDomainRequired: classification.codeDomainRequired !== false,
       dependencyOnly: classification.dependencyOnly,
       touchesSpec: classification.touchesSpec,
       runtimeSurfaces: classification.runtimeSurfaces,

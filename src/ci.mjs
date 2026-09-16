@@ -124,6 +124,7 @@ async function runAugurDomainBundles({ worktreePath, targetDomains, augurFolder,
     return [{
       name: "動作ブロック (対象ドメインなし)", domain: null, status: "error", total: 0, passed: 0, failed: 0,
       durationMs: 0, runId: null, exitCode: null, reason: "対象ドメインを取得できないため動作ブロックを実行できませんでした",
+      augurLedgerPresent: true,
     }];
   }
   if (!augurFolder || !existsSync(cliPath)) {
@@ -169,7 +170,12 @@ export async function runPlannedTests({
   if (!Array.isArray(testCases) || testCases.length === 0) {
     throw new Error("リポジトリに登録テストがありません");
   }
-  if (existsSync(join(worktreePath, ".augur", "tests.jsonl"))) {
+  const ledgerPresent = existsSync(join(worktreePath, ".augur", "tests.jsonl"));
+  // This is an explicit non-code plan, not recovery from a missing code domain.
+  // Keep the registered selection (including justified skips) for this route.
+  const registeredNonCode = plan?.changeProfile?.codeDomainRequired === false
+    && targetDomainNames(targetDomains).length === 0;
+  if (ledgerPresent && !registeredNonCode) {
     return await runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now, headSha });
   }
   const selected = selectedTestCases(plan, testCases);
@@ -177,6 +183,11 @@ export async function runPlannedTests({
     ? await runRegisteredTests({ worktreePath, testCases: selected, env, execute, now })
     : [];
   const results = [...executed, ...skippedTestOutcomes(plan)];
+  if (ledgerPresent) {
+    return results.map((result) => ({
+      ...result, augurLedgerPresent: true, testSelectionMode: "registered-non-code",
+    }));
+  }
   if (results.length > 0) {
     results[0] = { ...results[0], advisory: "Augur 台帳未整備 (全体スイートを実行)" };
   }
