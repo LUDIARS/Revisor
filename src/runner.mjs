@@ -96,8 +96,8 @@ function changeKindsDiffer(before, after) {
     || beforeKinds.some((kind) => !afterKinds.includes(kind));
 }
 
-async function verifyAutofixPlan({ worktreePath, testCases, plan, env, runTests = runPlannedTests }) {
-  const ci = await runTests({ worktreePath, testCases, plan, env });
+async function verifyAutofixPlan({ worktreePath, testCases, plan, targetDomains, augurFolder, env, runTests = runPlannedTests }) {
+  const ci = await runTests({ worktreePath, testCases, plan, targetDomains, augurFolder, env });
   if (!testsPassed(ci)) {
     throw new Error(
       "Test autofix changed the review plan and the newly selected registered tests do not pass.",
@@ -128,6 +128,8 @@ async function autofixFailingTests({
   initialCi,
   testCases,
   plan,
+  targetDomains,
+  augurFolder,
   env,
   runReview,
   runTests = runPlannedTests,
@@ -163,6 +165,8 @@ async function autofixFailingTests({
       worktreePath,
       testCases,
       plan,
+      targetDomains,
+      augurFolder,
       env,
     }),
   });
@@ -493,6 +497,8 @@ export async function runPartialVerification({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan,
+        targetDomains: analysis.domain.targetDomains,
+        augurFolder: settings.augurFolder,
         env,
       })
     : previous.ci;
@@ -519,6 +525,8 @@ export async function runPartialVerification({
       initialCi: ci,
       testCases: request.testCases,
       plan,
+      targetDomains: analysis.domain.targetDomains,
+      augurFolder: settings.augurFolder,
       env,
       runReview,
       runTests,
@@ -544,6 +552,8 @@ export async function runPartialVerification({
           worktreePath: worktrees.head,
           testCases: request.testCases,
           plan,
+          targetDomains: analysis.domain.targetDomains,
+          augurFolder: settings.augurFolder,
           env,
           runTests,
         });
@@ -954,6 +964,8 @@ export function createPrReviewRunner({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan,
+        targetDomains: initial.domain.targetDomains,
+        augurFolder: settings.augurFolder,
         env,
       });
       if (testsPassed(initialCi)) await checkpoint("tests", { ci: initialCi });
@@ -1035,6 +1047,8 @@ export function createPrReviewRunner({
           initialCi,
           testCases: request.testCases,
           plan,
+          targetDomains: initial.domain.targetDomains,
+          augurFolder: settings.augurFolder,
           env,
           runReview: executeReview,
           runTests: executeTests,
@@ -1287,6 +1301,8 @@ export function createPrReviewRunner({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan: finalPlan,
+        targetDomains: initial.domain.targetDomains,
+        augurFolder: settings.augurFolder,
         env,
       });
       if (!testsPassed(finalCi)) {
@@ -1299,6 +1315,8 @@ export function createPrReviewRunner({
           initialCi: finalCi,
           testCases: request.testCases,
           plan: finalPlan,
+          targetDomains: initial.domain.targetDomains,
+          augurFolder: settings.augurFolder,
           env,
           runReview: executeReview,
           runTests: executeTests,
@@ -1350,6 +1368,8 @@ export function createPrReviewRunner({
             worktreePath: worktrees.head,
             testCases: request.testCases,
             plan: finalPlan,
+            targetDomains: initial.domain.targetDomains,
+            augurFolder: settings.augurFolder,
             env,
             runTests: executeTests,
           });

@@ -91,7 +91,7 @@ export function updateReviewReport(report, entry, { attemptId, headSha } = {}) {
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 export function reviewReportEntry(stage, payload) {
   if (stage === "tests") {
-    return { kind: "check", label: "Registered tests", content: payload?.ci ?? [] };
+    return { kind: "check", label: "動作ブロック（登録テスト）", content: payload?.ci ?? [] };
   }
   if (stage === "anatomia") {
     const analysis = payload?.analysis;

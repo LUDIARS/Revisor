@@ -148,14 +148,25 @@ export function gateOutcome({
   const codeAnalysis = codeAnalysisGating(plan);
   const failedTests = ci.filter((test) => test.status === "failed");
   if (failedTests.length > 0) {
-    reasons.push(`${failedTests.length} 件の登録テストが失敗しました`);
+    for (const test of failedTests) {
+      reasons.push(`${test.failed ?? 1} 件の登録テストが失敗しました${test.domain ? ` (${test.domain})` : ""}`);
+    }
+  }
+  const erroredTests = ci.filter((test) => test.status === "error");
+  if (erroredTests.length > 0) {
+    reasons.push(`${erroredTests.length} 件の登録テストが未実行です`);
   }
   const skippedTests = ci.filter((test) => test.status === "skipped");
   if (skippedTests.length > 0) {
-    advisories.push(
-      `${skippedTests.length} 件の登録テストはレビュー計画に不要なため省略しました`,
-    );
+    const emptyBundles = skippedTests.filter((test) => typeof test.domain === "string"
+      && test.reason === `${test.domain} に登録テストが無い`);
+    advisories.push(...emptyBundles.map((test) => `${test.domain} に登録テストが無い`));
+    const plannedSkips = skippedTests.length - emptyBundles.length;
+    if (plannedSkips > 0) {
+      advisories.push(`${plannedSkips} 件の登録テストはレビュー計画に不要なため省略しました`);
+    }
   }
+  advisories.push(...new Set(ci.map((test) => test.advisory).filter((entry) => typeof entry === "string")));
   // needsTargetDomain stays the only place that decides whether the domain is
   // still owed; the gate only chooses where to record it.
   if (!domainReviewEnabled) {

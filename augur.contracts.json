@@ -74,6 +74,15 @@
       "module": "contracts/gate-outcome-japanese-messages.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-9",
+      "criterion": "C-9 runPlannedTests(input): Augur 台帳があるリポは変更ドメインの動作ブロックだけを記録し、空・失敗・未実行を区別する",
+      "symbol": "runPlannedTests",
+      "file": "src/ci.mjs",
+      "module": "contracts/run-planned-tests-augur-domain-bundles.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

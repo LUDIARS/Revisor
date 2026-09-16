@@ -287,3 +287,11 @@ Revisor 側で名前を再掲して維持する必要がある。 Anatomia に�
   合格と読めないためブロックする (`the security scan produced no usable result`)。
   マージ直前の `assertMergeSecurityScan` と同じ fail-closed 規則で、審査時点と
   マージ時点の判定が食い違わないようにする。
+
+## Augur 動作ブロックの扱い
+
+Augur 台帳があるリポジトリの登録テスト結果は、ドメイン別の動作ブロックとして `ci` に残す。
+`failed` は `<failed> 件の登録テストが失敗しました (<domain>)` を reason にしてブロックする。
+`error` は runner 未実行であり、通過として扱わず reason にする。空 bundle の `skipped` は
+`<domain> に登録テストが無い` の advisory にする。台帳が無い場合は、従来の全体スイート結果を
+同じ `ci` 契約で扱う。

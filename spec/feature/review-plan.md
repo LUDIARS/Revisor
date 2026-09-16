@@ -328,3 +328,16 @@ stage が選んだ effort を上書きする。モデルは空文字が既定で
 6. `forcedReviewEffort` は `low` / `medium` / `high` または空文字だけを受け付ける。
    設定中は investigator、judge、test autofix、narrative、plan advisor の指定 effort より
    優先する。Codex Security は reviewer stage ではないため、専用の `securityScanEffort` を使う。
+
+## SPEC-AUGUR-DOMAIN-TEST-BUNDLES: 変更ドメインの動作ブロック
+
+`registered_tests` は全体スイートを審査で回さない。対象 worktree に
+`.augur/tests.jsonl` があるときは、Anatomia の `domain.targetDomains` ごとに
+`augur tests run --repo <worktree> --bundle domain:<name> --for-revisor --json` を実行する。
+同名ドメインは一度だけ実行し、各結果を `domain`、`total`、`passed`、`failed`、
+`durationMs`、`runId` を含む動作ブロックとして CI と審査レポートへ残す。
+
+台帳が無いリポジトリだけは、既存の変更種別による登録テスト選択を使って全体スイートを
+実行する。この fallback は移行用であり、台帳があるリポジトリで全体スイートへ戻る理由には
+ならない。空の domain bundle は advisory（`<domain> に登録テストが無い`）とし、failed は
+ブロック、Augur runner の error や対象ドメイン欠如は未実行としてブロックする。

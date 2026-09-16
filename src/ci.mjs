@@ -1,8 +1,11 @@
-import { resolve, relative } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve, relative } from "node:path";
 import { isGitCommand } from "./git-runtime.mjs";
 import { runProcess } from "./process.mjs";
 import { selectedTestCases, skippedTestOutcomes } from "./review-plan.mjs";
 import { captureFailedTestOutput } from "./test-output.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:61c7a431 */
+import augurContract_81e33a0d from '../contracts/run-planned-tests-augur-domain-bundles.contract.mjs'; /* augur-inject:contract-predicate:caf0700f */
 
 function testCwd(worktreePath, configuredCwd) {
   const path = resolve(worktreePath, configuredCwd);
@@ -70,6 +73,77 @@ export async function runRegisteredTests({
   return results;
 }
 
+function targetDomainNames(targetDomains) {
+  return [...new Set((Array.isArray(targetDomains) ? targetDomains : [])
+    .map((domain) => typeof domain === "string" ? domain : domain?.name)
+    .filter((name) => typeof name === "string" && name.trim())
+    .map((name) => name.trim()))];
+}
+
+function parseRunRecord(stdout) {
+  try {
+    const record = JSON.parse(stdout);
+    return record?.runId && record?.summary ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+function augurOutcome(domain, result, durationMs) {
+  const record = parseRunRecord(result.stdout ?? "");
+  if (record) {
+    return {
+      name: `動作ブロック (${domain})`,
+      domain,
+      status: record.status === "passed" ? "passed" : record.status === "failed" ? "failed" : "error",
+      total: record.summary.total,
+      passed: record.summary.passed,
+      failed: record.summary.failed,
+      durationMs: record.durationMs ?? durationMs,
+      runId: record.runId,
+      exitCode: result.exitCode,
+    };
+  }
+  if (result.exitCode === 3 || (result.ok && !String(result.stdout ?? "").trim())) {
+    return {
+      name: `動作ブロック (${domain})`, domain, status: "skipped", total: 0, passed: 0, failed: 0,
+      durationMs, runId: null, exitCode: result.exitCode, reason: `${domain} に登録テストが無い`,
+    };
+  }
+  return {
+    name: `動作ブロック (${domain})`, domain, status: "error", total: 0, passed: 0, failed: 0,
+    durationMs, runId: null, exitCode: result.exitCode ?? null, reason: `${domain} の動作ブロックを実行できませんでした`,
+  };
+}
+
+async function runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now }) {
+  const cliPath = join(augurFolder, "bin", "augur.mjs");
+  const domains = targetDomainNames(targetDomains);
+  if (domains.length === 0) {
+    return [{
+      name: "動作ブロック (対象ドメインなし)", domain: null, status: "error", total: 0, passed: 0, failed: 0,
+      durationMs: 0, runId: null, exitCode: null, reason: "対象ドメインを取得できないため動作ブロックを実行できませんでした",
+    }];
+  }
+  if (!augurFolder || !existsSync(cliPath)) {
+    return domains.map((domain) => ({
+      name: `動作ブロック (${domain})`, domain, status: "error", total: 0, passed: 0, failed: 0,
+      durationMs: 0, runId: null, exitCode: null, reason: `${domain} の動作ブロックを実行できませんでした`,
+    }));
+  }
+  return await Promise.all(domains.map(async (domain) => {
+    const startedAt = now();
+    const result = await execute({
+      command: process.execPath,
+      args: [cliPath, "tests", "run", "--repo", worktreePath, "--bundle", `domain:${domain}`, "--for-revisor", "--json"],
+      cwd: worktreePath,
+      env,
+      timeoutMs: 30 * 60_000,
+    });
+    return augurOutcome(domain, result, Math.max(0, now() - startedAt));
+  }));
+}
+
 // Executes only the cases the review plan selected and records the rest as
 // `skipped` with the reason, so the dashboard shows what was not run instead of
 // a shorter list that reads like a smaller suite.
@@ -77,6 +151,8 @@ export async function runPlannedTests({
   worktreePath,
   testCases,
   plan,
+  targetDomains = [],
+  augurFolder = "",
   env = process.env,
   execute = runProcess,
   now = () => Date.now(),
@@ -84,12 +160,21 @@ export async function runPlannedTests({
   if (!Array.isArray(testCases) || testCases.length === 0) {
     throw new Error("リポジトリに登録テストがありません");
   }
+  if (existsSync(join(worktreePath, ".augur", "tests.jsonl"))) {
+    return await runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now });
+  }
   const selected = selectedTestCases(plan, testCases);
   const executed = selected.length > 0
     ? await runRegisteredTests({ worktreePath, testCases: selected, env, execute, now })
     : [];
-  return [...executed, ...skippedTestOutcomes(plan)];
+  const results = [...executed, ...skippedTestOutcomes(plan)];
+  if (results.length > 0) {
+    results[0] = { ...results[0], advisory: "Augur 台帳未整備 (全体スイートを実行)" };
+  }
+  return results;
 }
+// @ts-expect-error augur-inject
+runPlannedTests = contract(runPlannedTests, { ...augurContract_81e33a0d, contractId: 'C-9', mode: 'observe', sample: 1, where: 'src/ci.mjs:76', rule: 'contract-wrap', id: '81e33a0d' }); /* augur-inject:contract-wrap:81e33a0d */
 
 // A skipped case is not a failure: the plan decided the change does not need it.
 // Only an actual failing run blocks. An empty result set is still not a pass —
@@ -98,5 +183,5 @@ export async function runPlannedTests({
 export function testsPassed(results) {
   return Array.isArray(results)
     && results.length > 0
-    && results.every((result) => result.status !== "failed");
+    && results.every((result) => result.status === "passed" || result.status === "skipped");
 }

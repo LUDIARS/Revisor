@@ -44,6 +44,28 @@ function evaluate(finalAnalysis, overrides = {}) {
   });
 }
 
+test("blocks failed Augur domains and runner errors while leaving empty bundles advisory", () => {
+  const outcome = evaluate(analysis(), {
+    ci: [
+      { name: "動作ブロック (billing)", domain: "billing", status: "failed", failed: 2 },
+      { name: "動作ブロック (orders)", domain: "orders", status: "error" },
+      { name: "動作ブロック (search)", domain: "search", status: "skipped", reason: "search に登録テストが無い" },
+    ],
+  });
+  assert.deepEqual(outcome.reasons, [
+    "2 件の登録テストが失敗しました (billing)",
+    "1 件の登録テストが未実行です",
+  ]);
+  assert.equal(outcome.advisories.includes("search に登録テストが無い"), true);
+});
+
+test("reports the full-suite fallback as an Augur-ledger advisory", () => {
+  const outcome = evaluate(analysis(), {
+    ci: [{ name: "unit", status: "passed", advisory: "Augur 台帳未整備 (全体スイートを実行)" }],
+  });
+  assert.equal(outcome.advisories.includes("Augur 台帳未整備 (全体スイートを実行)"), true);
+});
+
 test("reports spec linkage and orphans without blocking the merge", () => {
   const outcome = evaluate(analysis({
     gates: [

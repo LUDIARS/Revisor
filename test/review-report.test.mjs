@@ -27,6 +27,16 @@ test("keeps one stable entry per attempt and replaces stage updates", () => {
   assert.equal(completed.entries.find((entry) => entry.id === "stage:tests").status, "passed");
 });
 
+test("records Augur domain runs as a Japanese behavior block", () => {
+  const entry = reviewReportEntry("tests", {
+    ci: [{ domain: "billing", total: 3, passed: 2, failed: 1, durationMs: 12, runId: "r-billing" }],
+  });
+  assert.equal(entry.label, "動作ブロック（登録テスト）");
+  assert.deepEqual(entry.content[0], {
+    domain: "billing", total: 3, passed: 2, failed: 1, durationMs: 12, runId: "r-billing",
+  });
+});
+
 test("starts a distinct report for a same-head retry and redacts report text", () => {
   const first = createReviewReport({ attemptId: ATTEMPT, headSha: HEAD, at: AT });
   const retry = updateReviewReport(first, {
