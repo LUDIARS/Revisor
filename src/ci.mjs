@@ -6,6 +6,7 @@ import { selectedTestCases, skippedTestOutcomes } from "./review-plan.mjs";
 import { captureFailedTestOutput } from "./test-output.mjs";
 import { contract } from './contract-runtime.mjs'; /* augur-inject:import:61c7a431 */
 import augurContract_81e33a0d from '../contracts/run-planned-tests-augur-domain-bundles.contract.mjs'; /* augur-inject:contract-predicate:caf0700f */
+import { experienceEvidenceFor } from "./augur-evidence.mjs";
 
 function testCwd(worktreePath, configuredCwd) {
   const path = resolve(worktreePath, configuredCwd);
@@ -116,7 +117,7 @@ function augurOutcome(domain, result, durationMs) {
   };
 }
 
-async function runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now }) {
+async function runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now, headSha }) {
   const cliPath = join(augurFolder, "bin", "augur.mjs");
   const domains = targetDomainNames(targetDomains);
   if (domains.length === 0) {
@@ -131,7 +132,7 @@ async function runAugurDomainBundles({ worktreePath, targetDomains, augurFolder,
       durationMs: 0, runId: null, exitCode: null, reason: `${domain} の動作ブロックを実行できませんでした`,
     }));
   }
-  return await Promise.all(domains.map(async (domain) => {
+  const outcomes = await Promise.all(domains.map(async (domain) => {
     const startedAt = now();
     const result = await execute({
       command: process.execPath,
@@ -142,6 +143,13 @@ async function runAugurDomainBundles({ worktreePath, targetDomains, augurFolder,
     });
     return augurOutcome(domain, result, Math.max(0, now() - startedAt));
   }));
+  const experience = typeof headSha === "string"
+    ? experienceEvidenceFor({ worktreePath, headSha, runIds: outcomes.map((item) => item.runId) })
+    : { status: "unverified", count: 0 };
+  return [...outcomes, {
+    name: "体験ブロック", status: "skipped", durationMs: 0, experience,
+    reason: experience.status === "recorded" ? `evidence ${experience.count} 件` : "未確認",
+  }];
 }
 
 // Executes only the cases the review plan selected and records the rest as
@@ -152,6 +160,7 @@ export async function runPlannedTests({
   testCases,
   plan,
   targetDomains = [],
+  headSha = null,
   augurFolder = "",
   env = process.env,
   execute = runProcess,
@@ -161,7 +170,7 @@ export async function runPlannedTests({
     throw new Error("リポジトリに登録テストがありません");
   }
   if (existsSync(join(worktreePath, ".augur", "tests.jsonl"))) {
-    return await runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now });
+    return await runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now, headSha });
   }
   const selected = selectedTestCases(plan, testCases);
   const executed = selected.length > 0

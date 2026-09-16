@@ -83,8 +83,9 @@ test("uses each changed Augur domain instead of the registered full suite", asyn
       },
     });
     assert.deepEqual(invocations.map((item) => item.args.at(-2)), ["--for-revisor", "--for-revisor"]);
-    assert.deepEqual(results.map((item) => item.domain), ["billing", "orders"]);
-    assert.equal(results.every((item) => item.status === "passed"), true);
+    assert.deepEqual(results.filter((item) => item.domain).map((item) => item.domain), ["billing", "orders"]);
+    assert.equal(results.filter((item) => item.domain).every((item) => item.status === "passed"), true);
+    assert.deepEqual(results.at(-1).experience, { status: "unverified", count: 0 });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -110,7 +111,8 @@ test("records empty, failed, and runner-error Augur bundles without running fall
       plan: { testSelection: { selected: ["whole-suite"], skipped: [] } },
       targetDomains: ["empty", "failed", "error"], augurFolder, execute,
     });
-    assert.deepEqual(results.map((item) => item.status), ["skipped", "failed", "error"]);
+    assert.deepEqual(results.slice(0, 3).map((item) => item.status), ["skipped", "failed", "error"]);
+    assert.equal(results.at(-1).experience.status, "unverified");
     assert.equal(results[0].reason, "empty に登録テストが無い");
     assert.equal(testsPassed(results), false);
   } finally {

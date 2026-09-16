@@ -33,3 +33,9 @@ null とし、本文保存前の記録にはこの項目が無い (consumer は�
 
 `reviewedHeadSha` は完走時だけ更新し、古い job/head の報告は現行 attempt を上書きしない。
 WebSocket は従来どおり識別子だけを送る無効化 signal とし、consumer は fresh API projection を読む。
+
+## 動作ブロック・体験ブロック
+
+`tests` 段階は Augur のドメイン別 run を動作ブロックとして保持する。各 run は domain、passed、failed、durationMs、runId を日本語の報告に出す。Augur 台帳を持たないリポジトリは「台帳未整備」と出し、全体スイートの通過を Augur の動作証跡に読み替えない。
+
+対象 head の `.augur/runs`（互換の `runs.jsonl` を含む）に evidence 配列があるときだけ体験ブロックを「記録済み」とし、件数を出す。存在しない・空・読めない場合は「未確認」とし、成功表示にしない。完了通知も同じブロックを Concordia へ返す。

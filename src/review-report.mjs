@@ -32,6 +32,40 @@ export function redactedReviewerOutput(value) {
   return typeof value === "string" && value.trim() ? redactSecretLines(value) : null;
 }
 
+function behaviorBlock(ci) {
+  const runs = Array.isArray(ci) ? ci.filter((item) => typeof item?.domain === "string") : [];
+  if (runs.length === 0) return { status: "台帳未整備", runs: [] };
+  return {
+    status: "記録済み",
+    runs: runs.map((run) => ({
+      domain: run.domain,
+      passed: Number.isFinite(run.passed) ? run.passed : 0,
+      failed: Number.isFinite(run.failed) ? run.failed : 0,
+      durationMs: Number.isFinite(run.durationMs) ? run.durationMs : 0,
+      runId: run.runId ?? null,
+    })),
+  };
+}
+
+function experienceBlock(ci) {
+  const experience = Array.isArray(ci) ? ci.find((item) => item?.experience)?.experience : null;
+  return experience?.status === "recorded"
+    ? { status: "記録済み", count: experience.count }
+    : { status: "未確認", count: 0 };
+}
+
+export function reviewBlockLines(ci) {
+  const behavior = behaviorBlock(ci);
+  const behaviorLine = behavior.status === "台帳未整備"
+    ? "動作ブロック: 台帳未整備"
+    : behavior.runs.map((run) => `動作ブロック: ${run.domain} / passed ${run.passed} / failed ${run.failed} / ${run.durationMs}ms / runId ${run.runId ?? "未確認"}`);
+  const experience = experienceBlock(ci);
+  return [
+    ...(Array.isArray(behaviorLine) ? behaviorLine : [behaviorLine]),
+    experience.status === "記録済み" ? `体験ブロック: evidence ${experience.count} 件` : "体験ブロック: 未確認",
+  ];
+}
+
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 function isoTime(value) {
   const at = String(value ?? "");
@@ -91,7 +125,11 @@ export function updateReviewReport(report, entry, { attemptId, headSha } = {}) {
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 export function reviewReportEntry(stage, payload) {
   if (stage === "tests") {
-    return { kind: "check", label: "動作ブロック（登録テスト）", content: payload?.ci ?? [] };
+    return {
+      kind: "check",
+      label: "動作ブロック・体験ブロック",
+      content: { 動作ブロック: behaviorBlock(payload?.ci), 体験ブロック: experienceBlock(payload?.ci) },
+    };
   }
   if (stage === "anatomia") {
     const analysis = payload?.analysis;

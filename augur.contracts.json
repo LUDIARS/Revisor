@@ -83,6 +83,15 @@
       "module": "contracts/run-planned-tests-augur-domain-bundles.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-10",
+      "criterion": "C-10 experienceEvidenceFor(input): 同一 head の Augur run だけから体験証跡件数を返し、未登録を成功扱いにしない",
+      "symbol": "experienceEvidenceFor",
+      "file": "src/augur-evidence.mjs",
+      "module": "contracts/experience-evidence-for-review-report.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

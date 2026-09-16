@@ -20,6 +20,12 @@
       "pathPattern": "(^|/)src/(?:claude\\-capacity|genius\\-review|plan\\-advisor|pull\\-request\\-diff\\-service|review\\-context|review\\-diff|review\\-work|reviewer\\-prompt|test\\-output)\\.mjs$"
     },
     {
+      "pathPattern": "(^|/)src/augur\\-evidence\\.mjs$"
+    },
+    {
+      "pathPattern": "(^|/)test/augur\\-evidence\\.test\\.mjs$"
+    },
+    {
       "pathPattern": "(^|/)test/(?:claude\\-capacity|genius\\-review|plan\\-advisor|pull\\-request\\-diff\\-service|review\\-context|review\\-diff|review\\-work|reviewer\\-prompt|test\\-output)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {

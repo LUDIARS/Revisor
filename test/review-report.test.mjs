@@ -27,14 +27,24 @@ test("keeps one stable entry per attempt and replaces stage updates", () => {
   assert.equal(completed.entries.find((entry) => entry.id === "stage:tests").status, "passed");
 });
 
-test("records Augur domain runs as a Japanese behavior block", () => {
+test("records Augur runs and evidence as Japanese behavior and experience blocks", () => {
   const entry = reviewReportEntry("tests", {
-    ci: [{ domain: "billing", total: 3, passed: 2, failed: 1, durationMs: 12, runId: "r-billing" }],
+    ci: [
+      { domain: "billing", total: 3, passed: 2, failed: 1, durationMs: 12, runId: "r-billing" },
+      { experience: { status: "recorded", count: 2 } },
+    ],
   });
-  assert.equal(entry.label, "動作ブロック（登録テスト）");
-  assert.deepEqual(entry.content[0], {
-    domain: "billing", total: 3, passed: 2, failed: 1, durationMs: 12, runId: "r-billing",
+  assert.equal(entry.label, "動作ブロック・体験ブロック");
+  assert.deepEqual(entry.content.動作ブロック.runs[0], {
+    domain: "billing", passed: 2, failed: 1, durationMs: 12, runId: "r-billing",
   });
+  assert.deepEqual(entry.content.体験ブロック, { status: "記録済み", count: 2 });
+});
+
+test("keeps a missing Augur ledger and evidence visibly unverified", () => {
+  const entry = reviewReportEntry("tests", { ci: [{ name: "unit", status: "passed" }] });
+  assert.equal(entry.content.動作ブロック.status, "台帳未整備");
+  assert.equal(entry.content.体験ブロック.status, "未確認");
 });
 
 test("starts a distinct report for a same-head retry and redacts report text", () => {

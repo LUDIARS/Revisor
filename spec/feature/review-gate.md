@@ -295,3 +295,7 @@ Augur 台帳があるリポジトリの登録テスト結果は、ドメイン�
 `error` は runner 未実行であり、通過として扱わず reason にする。空 bundle の `skipped` は
 `<domain> に登録テストが無い` の advisory にする。台帳が無い場合は、従来の全体スイート結果を
 同じ `ci` 契約で扱う。
+
+## 体験ブロックの扱い
+
+動作ブロックに対応する対象 head の Augur run に `evidence` 配列が記録されていれば、審査報告と Concordia 完了通知に件数を出す。evidence が無い場合は「未確認」であり、動作ブロックの通過や `skipped` を体験確認済みとは扱わない。

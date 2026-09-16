@@ -9,6 +9,8 @@
  * (Cc 通知は 1 レビュー 1 通の方針、neco 2026-07-30)。
  */
 
+import { reviewBlockLines } from "./review-report.mjs";
+
 const MAX_LISTED_REASONS = 5;
 
 function summarizeList(items, max = MAX_LISTED_REASONS) {
@@ -60,6 +62,7 @@ export function reviewCompletionMessage(pullRequest) {
   if (pullRequest.humanQuestion) {
     lines.push(String(pullRequest.humanQuestion));
   }
+  lines.push(...reviewBlockLines(pullRequest.ci));
   return lines.join("\n");
 }
 

@@ -92,6 +92,14 @@ test("lists advisories and the human question without hiding the verdict", () =>
   assert.match(text, /対象ドメインは\?/);
 });
 
+test("returns Japanese behavior and unverified experience blocks to Concordia", () => {
+  const text = reviewCompletionMessage(pr({
+    ci: [{ domain: "billing", passed: 3, failed: 0, durationMs: 12, runId: "r-billing" }],
+  }));
+  assert.match(text, /動作ブロック: billing \/ passed 3 \/ failed 0 \/ 12ms \/ runId r-billing/);
+  assert.match(text, /体験ブロック: 未確認/);
+});
+
 test("caps a long reason list instead of flooding the session", () => {
   const reasons = Array.from({ length: 9 }, (_, i) => `reason ${i + 1}`);
   const text = reviewCompletionMessage(pr({ checkStatus: "action_required", reasons }));

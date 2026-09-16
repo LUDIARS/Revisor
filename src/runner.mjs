@@ -965,6 +965,7 @@ export function createPrReviewRunner({
         testCases: request.testCases,
         plan,
         targetDomains: initial.domain.targetDomains,
+        headSha: request.headSha,
         augurFolder: settings.augurFolder,
         env,
       });
@@ -1302,6 +1303,7 @@ export function createPrReviewRunner({
         testCases: request.testCases,
         plan: finalPlan,
         targetDomains: initial.domain.targetDomains,
+        headSha: request.headSha,
         augurFolder: settings.augurFolder,
         env,
       });
