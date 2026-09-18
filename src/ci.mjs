@@ -91,6 +91,16 @@ function parseRunRecord(stdout) {
   }
 }
 
+// `augur tests run --for-revisor --json` reports a domain without registered
+// tests as exit 0 with `{"empty":true,...}` (exit 3 is only the non-Revisor form).
+function isEmptyBundle(stdout) {
+  try {
+    return JSON.parse(stdout)?.empty === true;
+  } catch {
+    return false;
+  }
+}
+
 function augurOutcome(domain, result, durationMs) {
   const record = parseRunRecord(result.stdout ?? "");
   if (record) {
@@ -106,7 +116,8 @@ function augurOutcome(domain, result, durationMs) {
       exitCode: result.exitCode,
     };
   }
-  if (result.exitCode === 3 || (result.ok && !String(result.stdout ?? "").trim())) {
+  const stdout = String(result.stdout ?? "").trim();
+  if (result.exitCode === 3 || (result.ok && (!stdout || isEmptyBundle(stdout)))) {
     return {
       name: `動作ブロック (${domain})`, domain, status: "skipped", total: 0, passed: 0, failed: 0,
       durationMs, runId: null, exitCode: result.exitCode, reason: `${domain} に登録テストが無い`,
