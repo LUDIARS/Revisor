@@ -7,6 +7,7 @@ import { captureFailedTestOutput } from "./test-output.mjs";
 import { contract } from './contract-runtime.mjs'; /* augur-inject:import:61c7a431 */
 import augurContract_81e33a0d from '../contracts/run-planned-tests-augur-domain-bundles.contract.mjs'; /* augur-inject:contract-predicate:caf0700f */
 import { experienceEvidenceFor } from "./augur-evidence.mjs";
+import { runSetupTestCases, setupTestCases } from "./setup-test-cases.mjs";
 
 function testCwd(worktreePath, configuredCwd) {
   const path = resolve(worktreePath, configuredCwd);
@@ -176,7 +177,15 @@ export async function runPlannedTests({
   const registeredNonCode = plan?.changeProfile?.codeDomainRequired === false
     && targetDomainNames(targetDomains).length === 0;
   if (ledgerPresent && !registeredNonCode) {
-    return await runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now, headSha });
+    // The bundles run the repository's own runner from the review checkout, so
+    // its registered preparation steps must run first (see setup-test-cases.mjs).
+    const setup = await runSetupTestCases({
+      testCases: setupTestCases(testCases),
+      runCase: (testCase) => runRegisteredTests({ worktreePath, testCases: [testCase], env, execute, now }),
+    });
+    if (!setup.ok) return setup.results;
+    const bundles = await runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now, headSha });
+    return [...bundles, ...setup.results];
   }
   const selected = selectedTestCases(plan, testCases);
   const executed = selected.length > 0
