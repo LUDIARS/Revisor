@@ -60,6 +60,7 @@ import {
   securityStageCompleted,
 } from "./review-stage-progress.mjs";
 import { withWorktreeMutationLock } from "./worktree-mutation-lock.mjs";
+import { verificationTestDomains } from "./verification-test-domains.mjs";
 
 async function commitAndAdvanceAutofix(cwd, repoPath, request) {
   const status = await git(cwd, ["status", "--porcelain"]);
@@ -487,6 +488,9 @@ export async function runPartialVerification({
   if (!targets.has("anatomia") && !analysis) {
     throw new Error("Partial verification requires the previous Anatomia result.");
   }
+  const testTargetDomains = targets.has("tests")
+    ? verificationTestDomains(analysis, previousAnalysis(previous))
+    : [];
   let plan = planVerification({
     classification: submitted.classification,
     testCases: request.testCases,
@@ -497,7 +501,7 @@ export async function runPartialVerification({
         worktreePath: worktrees.head,
         testCases: request.testCases,
         plan,
-        targetDomains: analysis.domain.targetDomains,
+        targetDomains: testTargetDomains,
         augurFolder: settings.augurFolder,
         env,
       })
@@ -525,7 +529,7 @@ export async function runPartialVerification({
       initialCi: ci,
       testCases: request.testCases,
       plan,
-      targetDomains: analysis.domain.targetDomains,
+      targetDomains: testTargetDomains,
       augurFolder: settings.augurFolder,
       env,
       runReview,
@@ -552,7 +556,7 @@ export async function runPartialVerification({
           worktreePath: worktrees.head,
           testCases: request.testCases,
           plan,
-          targetDomains: analysis.domain.targetDomains,
+          targetDomains: testTargetDomains,
           augurFolder: settings.augurFolder,
           env,
           runTests,
