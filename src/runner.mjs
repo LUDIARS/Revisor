@@ -488,8 +488,19 @@ export async function runPartialVerification({
   if (!targets.has("anatomia") && !analysis) {
     throw new Error("Partial verification requires the previous Anatomia result.");
   }
+  // A review that failed before its Anatomia stage leaves no previous analysis
+  // to select tests from. Analyse the head first then, and reuse that result
+  // for the Anatomia stage below unless an autofix moves the head.
+  const preAnalysis = targets.has("tests") && targets.has("anatomia") && !previousAnalysis(previous)
+    ? await analyze({
+        cliPath: anatomiaCliPath ?? await resolveCli(settings.anatomiaFolder),
+        cwd: worktrees.head,
+        base: worktrees.mergeBase,
+        includeProjectOrphans: true,
+      })
+    : null;
   const testTargetDomains = targets.has("tests")
-    ? verificationTestDomains(analysis, previousAnalysis(previous))
+    ? verificationTestDomains(analysis ?? preAnalysis, previousAnalysis(previous))
     : [];
   let plan = planVerification({
     classification: submitted.classification,
@@ -596,12 +607,14 @@ export async function runPartialVerification({
     // autofix で anatomia が後から対象に入った場合、 呼び出し側は CLI を解決していない。
     const cliPath = anatomiaCliPath ?? await resolveCli(settings.anatomiaFolder);
     const [currentAnalysis, baseline] = await Promise.all([
-      analyze({
-        cliPath,
-        cwd: worktrees.head,
-        base: worktrees.mergeBase,
-        includeProjectOrphans: true,
-      }),
+      preAnalysis && !autofixApplied
+        ? preAnalysis
+        : analyze({
+            cliPath,
+            cwd: worktrees.head,
+            base: worktrees.mergeBase,
+            includeProjectOrphans: true,
+          }),
       stageEnabled(plan, "anatomia_code_analysis")
         ? analyze({
             cliPath,
