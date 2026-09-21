@@ -79,11 +79,39 @@ test("a stage checkpoint records the stage and its outcome without settling the 
   assert.equal(store.record.ci[0].name, "unit");
   assert.ok(store.record.anatomia.domain);
   assert.equal(store.record.reviewReport.version, 1);
-  assert.equal(store.record.reviewReport.entries.find((entry) => entry.id === "stage:tests").status, "passed");
+  assert.equal(store.record.reviewReport.entries.find((entry) => entry.id === "stage:tests:result").status, "passed");
   // 審査は終わっていない。 ここで test_ok にすると通っていない段階が通ったように見える。
   assert.equal(store.record.checkStatus, "running");
   // 審査を通り切ったヘッドはマージ判定が読む別の状態で、段階の通過では書かない。
   assert.equal(store.record.reviewedHeadSha, undefined);
+});
+
+test("planned stages stay queued until execution starts and skipped security stays skipped", async () => {
+  const store = storeDouble({ checkStatus: "queued", headSha: HEAD, jobId: "job-1" });
+  const reporter = new LocalPrReporter(store, { now: () => "2026-09-12T00:00:00.000Z" });
+  const job = { id: "job-1", request: { localPrId: "PR1", headSha: HEAD, reviewMode: "full" } };
+  await reporter.running(job);
+  assert.equal(store.record.reviewReport.entries.find((entry) => entry.id === "stage:tests").status, "queued");
+  await reporter.reviewStageStarted({ localPrId: "PR1", jobId: "job-1", stage: "tests", headSha: HEAD });
+  assert.equal(store.record.reviewReport.entries.find((entry) => entry.id === "stage:tests:start").status, "running");
+  await reporter.reviewStageCompleted({
+    localPrId: "PR1", jobId: "job-1", stage: "security", headSha: HEAD,
+    security: { status: "skipped", reason: "登録テストが失敗したため" },
+  });
+  assert.equal(store.record.reviewReport.entries.find((entry) => entry.id === "stage:security:result").status, "skipped");
+  assert.equal(store.record.reviewStages.security, undefined);
+});
+
+test("registered CI check entries use distinct lifecycle ids and retain skipped reasons", async () => {
+  const store = storeDouble({ checkStatus: "running", headSha: HEAD, jobId: "job-1" });
+  const reporter = new LocalPrReporter(store, { now: () => "2026-09-12T00:00:00.000Z" });
+  const common = { localPrId: "PR1", jobId: "job-1", headSha: HEAD };
+  await reporter.reviewCiStarted({ ...common, check: { name: "unit" } });
+  await reporter.reviewCiResult({ ...common, check: { name: "unit", status: "skipped", reason: "not selected" } });
+  assert.equal(store.record.reviewReport.entries.find((entry) => entry.id === "ci:unit:start").status, "running");
+  const result = store.record.reviewReport.entries.find((entry) => entry.id === "ci:unit:result");
+  assert.equal(result.status, "skipped");
+  assert.match(result.content, /not selected/);
 });
 
 test("a review interrupted before the model review still pays for it", async () => {

@@ -157,6 +157,31 @@ test("announces both a completed review and a failed one", async () => {
   assert.deepEqual(announced, ["test_ok", "failed"]);
 });
 
+test("terminal reports mark unrun planned stages as skipped", async () => {
+  const record = pr({ checkStatus: "queued" });
+  const reporter = new LocalPrReporter(makeStore(record));
+  await reporter.completed({
+    id: "job-1",
+    request: { localPrId: "pr-1", headSha: "abc", reviewMode: "full" },
+    result: { conclusion: "action_required", ci: [] },
+  });
+  for (const stage of ["anatomia", "tests", "security", "review"]) {
+    assert.equal(record.reviewReport.entries.find((entry) => entry.id === `stage:${stage}:result`).status, "skipped");
+  }
+});
+
+test("a started check without a result is interrupted rather than never run", async () => {
+  const record = pr({ checkStatus: "running" });
+  const reporter = new LocalPrReporter(makeStore(record));
+  const common = { localPrId: "pr-1", jobId: "job-1", headSha: "abc" };
+  await reporter.reviewStageStarted({ ...common, stage: "tests" });
+  await reporter.reviewCiStarted({ ...common, check: { name: "unit" } });
+  await reporter.failed({ id: "job-1", request: { localPrId: "pr-1", headSha: "abc" }, error: "worker exited" });
+  assert.equal(record.reviewReport.entries.find((entry) => entry.id === "stage:tests:result").status, "interrupted");
+  assert.equal(record.reviewReport.entries.find((entry) => entry.id === "ci:unit:result").status, "interrupted");
+  assert.equal(record.reviewReport.entries.find((entry) => entry.id === "stage:security:result").status, "skipped");
+});
+
 test("a notification failure never fails the job", async () => {
   const record = pr();
   const reporter = new LocalPrReporter(makeStore(record), {

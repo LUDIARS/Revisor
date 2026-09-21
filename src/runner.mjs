@@ -765,6 +765,9 @@ export function createPrReviewRunner({
   // crash later in the pipeline does not throw that work away; the requeued
   // review then runs only what is left (spec/feature/crash-recovery.md).
   onReviewStageCompleted = null,
+  onReviewStageStarted = null,
+  onReviewCiStarted = null,
+  onReviewCiResult = null,
   onNarrativeReconciled = null,
 } = {}) {
   return async (request) => {
@@ -786,22 +789,36 @@ export function createPrReviewRunner({
       () => prepareLocalWorktrees(request, settings),
     );
     try {
-      const runStage = (stage, options, priority) => {
+      const runStage = async (stage, options, priority) => {
+        const reportStageName = stage === REVIEW_WORK_STAGES.INITIAL_ANALYZE ? "anatomia"
+          : stage === REVIEW_WORK_STAGES.TEST ? "tests"
+          : stage === REVIEW_WORK_STAGES.REVIEW ? "review" : stage;
+        const onProgress = async (event) => {
+          const report = event.type === "stage-start" ? onReviewStageStarted
+            : event.type === "ci-start" ? onReviewCiStarted
+            : event.type === "ci-result" ? onReviewCiResult : null;
+          if (!report) return;
+          await reportStageCompleted(report, { localPrId: request.localPrId, jobId: request.jobId,
+            headSha: request.headSha, stage: reportStageName, check: event.check,
+            at: event.at ?? new Date().toISOString() });
+        };
+        let result;
         if (!scheduleWork) {
-          if (stage === REVIEW_WORK_STAGES.REVIEW) return runReview(options);
-          if (stage === REVIEW_WORK_STAGES.TEST) return runTests(options);
-          if (stage === REVIEW_WORK_STAGES.ANALYZE) return analyze(options);
-          if (stage === REVIEW_WORK_STAGES.INITIAL_ANALYZE) return initialAnalyze(options);
-          if (stage === REVIEW_WORK_STAGES.SECURITY) return runSecurity(options);
-          throw new Error(`Unsupported review stage '${stage}'.`);
+          await onProgress({ type: "stage-start" });
+          if (stage === REVIEW_WORK_STAGES.REVIEW) result = await runReview(options);
+          else if (stage === REVIEW_WORK_STAGES.TEST) result = await runTests({ ...options,
+            onCheckStarted: (check) => onProgress({ type: "ci-start", check }),
+            onCheckResult: (check) => onProgress({ type: "ci-result", check }),
+          });
+          else if (stage === REVIEW_WORK_STAGES.ANALYZE) result = await analyze(options);
+          else if (stage === REVIEW_WORK_STAGES.INITIAL_ANALYZE) result = await initialAnalyze(options);
+          else if (stage === REVIEW_WORK_STAGES.SECURITY) result = await runSecurity(options);
+          else throw new Error(`Unsupported review stage '${stage}'.`);
+        } else {
+          result = await scheduleWork({ stage, repository: request.repository, number: request.number,
+            localPrId: request.localPrId, options }, { priority, reviewLane: request.reviewLane, onProgress });
         }
-        return scheduleWork({
-          stage,
-          repository: request.repository,
-          number: request.number,
-          localPrId: request.localPrId,
-          options,
-        }, { priority, reviewLane: request.reviewLane });
+        return result;
       };
       // This binding is intentionally per PR. A pool task must always carry
       // the local PR identity that owns it, never an ambient mutable request.

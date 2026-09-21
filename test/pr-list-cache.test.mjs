@@ -55,7 +55,7 @@ test("projects only the fields needed by PR cards", () => {
   });
   assert.deepEqual(Object.keys(summary), [
     "id", "number", "repository", "title", "status", "checkStatus", "reviewLane",
-    "headSha", "reviewReport", "mergeCommitSha", "externalVerification", "createdAt", "updatedAt", "decision",
+    "headSha", "reviewReportVersion", "mergeCommitSha", "externalVerification", "createdAt", "updatedAt", "decision",
   ]);
   for (const field of ["anatomia", "body", "ci", "lifecycleEvents", "reviewPlan", "mergeRisk"]) {
     assert.equal(field in summary, false);
@@ -82,12 +82,18 @@ test("serializes summary projections and preserves full all records", () => {
     pullRequests: [{
       id: "pr-1", number: 1, repository: "LUDIARS/Revisor", title: "一覧を軽量化する",
       status: "open", checkStatus: "queued", reviewLane: "standard",
-      headSha: "a".repeat(40), reviewReport: null, mergeCommitSha: null, externalVerification: null,
+      headSha: "a".repeat(40), reviewReportVersion: null, mergeCommitSha: null, externalVerification: null,
       createdAt: "2026-08-13T00:00:00.000Z", updatedAt: "2026-08-13T00:01:00.000Z",
       decision: { state: "needs_human" },
     }],
   });
   assert.equal(listResponseBody(pullRequests, { view: "full", state: "all" }), JSON.stringify({ pullRequests }));
+});
+
+test("keeps complete review reports out of summary cards", () => {
+  const summary = summaryProjection({ id: "pr-1", reviewReport: { version: 1, entries: [{ output: "large" }] } });
+  assert.equal(summary.reviewReportVersion, 1);
+  assert.equal("reviewReport" in summary, false);
 });
 
 test("caches list response bodies by source and view-state key", () => {

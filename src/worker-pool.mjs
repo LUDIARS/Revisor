@@ -1,3 +1,4 @@
+/** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 import { fork } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -50,7 +51,7 @@ export class PrReviewWorkerPool {
     for (let index = 0; index < size; index += 1) this.#spawn();
   }
 
-  run(request, { priority = 1, reviewLane = REVIEW_LANES.STANDARD } = {}) {
+  run(request, { priority = 1, reviewLane = REVIEW_LANES.STANDARD, onProgress } = {}) {
     if (this.#closing) return Promise.reject(new Error("PR review worker pool is closing."));
     if (!Number.isInteger(priority) || priority < 0) {
       return Promise.reject(new TypeError("PR review task priority must be a non-negative integer."));
@@ -65,6 +66,8 @@ export class PrReviewWorkerPool {
         createdAt: this.now(),
         startedAt: null,
         workerId: null,
+        onProgress,
+        progress: Promise.resolve(),
         resolve,
         reject,
       };
@@ -149,14 +152,22 @@ export class PrReviewWorkerPool {
   }
 
   #handleMessage(worker, message) {
-    if (!message || (message.type !== "result" && message.type !== "error")) return;
+    if (!message || !["progress", "result", "error"].includes(message.type)) return;
     const task = this.#active.get(message.id);
     if (!task || task.worker !== worker) return;
+    if (message.type === "progress") {
+      task.progress = task.progress.then(() => task.onProgress?.(message.progress)).catch((error) => {
+        this.log("review_progress_failed", { localPrId: task.request?.localPrId, error: String(error) }, { level: "warn" });
+      });
+      return;
+    }
     this.#active.delete(message.id);
     this.#idle.push(worker);
     task.status = message.type === "result" ? "completed" : "failed";
-    if (message.type === "result") task.resolve(message.result);
-    else task.reject(new Error(message.error || "PR review worker failed."));
+    task.progress.then(() => {
+      if (message.type === "result") task.resolve(message.result);
+      else task.reject(new Error(message.error || "PR review worker failed."));
+    });
     this.#notifyState();
     this.#dispatch();
   }
@@ -168,7 +179,7 @@ export class PrReviewWorkerPool {
       if (task.worker !== worker) continue;
       this.#active.delete(id);
       task.status = "failed";
-      task.reject(error);
+      task.progress.then(() => task.reject(error));
       break;
     }
     this.#notifyState();

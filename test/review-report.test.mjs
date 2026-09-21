@@ -47,6 +47,11 @@ test("keeps a missing Augur ledger and evidence visibly unverified", () => {
   assert.equal(entry.content.体験ブロック.status, "未確認");
 });
 
+test("records the queued submission and leaves the start to the running worker", () => {
+  const created = createReviewReport({ attemptId: ATTEMPT, headSha: HEAD, at: AT });
+  assert.deepEqual(created.entries.map((entry) => [entry.id, entry.status]), [["review-queued", "queued"]]);
+});
+
 test("starts a distinct report for a same-head retry and redacts report text", () => {
   const first = createReviewReport({ attemptId: ATTEMPT, headSha: HEAD, at: AT });
   const retry = updateReviewReport(first, {

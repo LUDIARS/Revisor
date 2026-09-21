@@ -4,6 +4,7 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
+    { "pathPattern": "(^|/)src/worker-entry\\.mjs$" },
     {
       "pathPattern": "(^|/)src/(?:job-store|persistent-queue|review-job-scheduler|review-lane|review-stage-workers|worker-command|worker-pool|worker-state)\\.mjs$"
     },

@@ -5,6 +5,55 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { configuredProcess, runPlannedTests, runRegisteredTests, testsPassed } from "../src/ci.mjs";
 
+test("reports each case only as it executes, retaining sequential result order", async () => {
+  const events = [];
+  await runRegisteredTests({ worktreePath: process.cwd(),
+    testCases: ["first", "second"].map((name) => ({ name, command: "node", args: [], cwd: "." })),
+    onCheckStarted: async (check) => events.push(`start:${check.name}`),
+    onCheckResult: async (check) => events.push(`result:${check.name}`),
+    execute: async () => { events.push("execute"); return { ok: true, exitCode: 0 }; },
+  });
+  assert.deepEqual(events, ["start:first", "execute", "result:first", "start:second", "execute", "result:second"]);
+});
+
+test("reports every Augur behaviour block result so no check stays without one", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-augur-ci-"));
+  try {
+    mkdirSync(join(directory, ".augur"));
+    writeFileSync(join(directory, ".augur", "tests.jsonl"), "{}\n");
+    const augurFolder = join(directory, "augur");
+    mkdirSync(join(augurFolder, "bin"), { recursive: true });
+    writeFileSync(join(augurFolder, "bin", "augur.mjs"), "");
+    const reported = [];
+    const results = await runPlannedTests({
+      worktreePath: directory,
+      testCases: [{ name: "whole-suite", command: "node", args: [], cwd: ".", timeoutMs: 1 }],
+      plan: { testSelection: { selected: ["whole-suite"], skipped: [] } },
+      targetDomains: [{ name: "billing" }],
+      augurFolder,
+      onCheckResult: async (check) => reported.push(check.name),
+      execute: async () => ({ ok: true, exitCode: 0, stdout: runRecord("billing"), stderr: "" }),
+    });
+    assert.deepEqual(reported, results.map((item) => item.name));
+    assert.deepEqual(reported, ["動作ブロック (billing)", "体験ブロック"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("reports the cases the review plan skipped so they are not read as unrun", async () => {
+  const reported = [];
+  const results = await runPlannedTests({
+    worktreePath: process.cwd(),
+    testCases: [{ name: "unit", command: "node", args: [], cwd: "." }, { name: "e2e", command: "node", args: [], cwd: "." }],
+    plan: { testSelection: { selected: ["unit"], skipped: [{ name: "e2e", reason: "not selected" }] } },
+    onCheckResult: async (check) => reported.push(`${check.name}:${check.status}`),
+    execute: async () => ({ ok: true, exitCode: 0 }),
+  });
+  assert.deepEqual(results.map((item) => item.name), ["unit", "e2e"]);
+  assert.deepEqual(reported, ["unit:passed", "e2e:skipped"]);
+});
+
 test("keeps registered Git tests on the managed process boundary on Windows", () => {
   const options = configuredProcess(
     { command: "git", args: ["submodule", "update"], timeoutMs: 1_000 },

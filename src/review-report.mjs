@@ -1,4 +1,6 @@
 import { redactSecretLines } from "./leakage.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:3df73173 */
+import augurContract_38fe4793 from '../contracts/update-review-report.contract.mjs'; /* augur-inject:contract-predicate:5cff4476 */
 
 export const REVIEW_REPORT_VERSION = 1;
 
@@ -83,12 +85,12 @@ function isoTime(value) {
 }
 
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
-export function createReviewReport({ attemptId, headSha, at, content = "Review started." }) {
+export function createReviewReport({ attemptId, headSha, at, content = "Review queued." }) {
   return updateReviewReport(null, {
-    id: "review-start",
+    id: "review-queued",
     kind: "review",
-    label: "Review started",
-    status: "running",
+    label: "Review queued",
+    status: "queued",
     at,
     content,
   }, { attemptId, headSha });
@@ -128,6 +130,8 @@ export function updateReviewReport(report, entry, { attemptId, headSha } = {}) {
     entries: [...entries, next],
   };
 }
+// @ts-expect-error augur-inject
+updateReviewReport = contract(updateReviewReport, { ...augurContract_38fe4793, contractId: 'C-7', mode: 'observe', sample: 1, where: 'src/review-report.mjs:99', rule: 'contract-wrap', id: '38fe4793' }); /* augur-inject:contract-wrap:38fe4793 */
 
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 export function reviewReportEntry(stage, payload) {

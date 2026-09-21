@@ -4,6 +4,7 @@ import {
 } from "./pr-lifecycle-notice.mjs";
 import {
   REVIEW_STAGES,
+  securityStageCompleted,
   stageProgressFromResult,
   stageProgressRecord,
   withCompletedStage,
@@ -65,6 +66,39 @@ function stageOutcomeProjection(stage, payload) {
     // 再検証がモデルレビューを引き継ぐとき、判定の根拠になった本文も一緒に読めるようにする。
     reviewerOutput: payload?.reviewerOutput ?? null,
   };
+}
+
+function plannedReviewStages(job) {
+  return [...new Set([
+    ...(job.request.verificationTargets ?? ["anatomia", "tests", "security"]),
+    ...(job.request.reviewMode === "full" ? ["review"] : []),
+  ])];
+}
+
+function finishUnrunStages(report, job, reason, at) {
+  let next = report;
+  for (const stage of plannedReviewStages(job)) {
+    const resultId = `stage:${stage}:result`;
+    if (next?.entries?.some((entry) => entry.id === resultId)) continue;
+    const started = next?.entries?.some((entry) => entry.id === `stage:${stage}:start`);
+    next = updateReviewReport(next, {
+      id: resultId, kind: "check", label: `${stage} check`, status: started ? "interrupted" : "skipped", at,
+      content: started ? "The stage started, but no completed checkpoint was recorded before the review ended." : reason,
+    }, { attemptId: job.id, headSha: job.request.headSha });
+  }
+  for (const entry of report?.entries ?? []) {
+    if (!entry.id.startsWith("ci:") || !entry.id.endsWith(":start")) continue;
+    const id = entry.id.replace(/:start$/, ":result");
+    if (next?.entries?.some((item) => item.id === id)) continue;
+    next = updateReviewReport(next, { id, kind: "check", label: entry.label, status: "interrupted", at,
+      content: "The registered check started, but no result was recorded before the review ended." });
+  }
+  return next;
+}
+
+function checkpointStatus(stage, payload) {
+  if (stage === "security") return payload?.security?.status ?? "unknown";
+  return "passed";
 }
 
 // The review outcome fields owned by `completed`, cleared. A re-review resolves
@@ -206,25 +240,59 @@ export class LocalPrReporter {
       id: "review-start", kind: "review", label: "Review started", status: "running", at,
       content: "Review worker started.",
     }, { attemptId: job.id, headSha: job.request.headSha });
-    const planned = [...new Set([
-      ...(job.request.verificationTargets ?? ["anatomia", "tests", "security"]),
-      ...(job.request.reviewMode === "full" ? ["review"] : []),
-    ])];
-    for (const stage of planned) {
+    // worker が受け持った時点ではまだどの段階も動いていない。 実行中と書くと、
+    // 落ちた審査の報告で走っていない段階まで走ったように読めてしまう。
+    for (const stage of plannedReviewStages(job)) {
       reviewReport = updateReviewReport(reviewReport, {
-        id: `stage:${stage}`, kind: "check", label: `${stage} check`, status: "running", at,
-        content: "Check started.",
+        id: `stage:${stage}`, kind: "check", label: `${stage} check`, status: "queued", at,
+        content: "Check queued.",
       });
     }
     for (const stage of job.request.reusedStages ?? []) {
       reviewReport = updateReviewReport(reviewReport, {
-        id: `stage:${stage}`, kind: "check", label: `${stage} check`, status: "skipped", at,
+        id: `stage:${stage}:result`, kind: "check", label: `${stage} check`, status: "skipped", at,
         content: "Reused from an equivalent completed review stage.",
       });
     }
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: "running",
       reviewReport,
+    });
+  }
+
+  async reviewStageStarted({ localPrId, jobId, stage, headSha, at }) {
+    if (!REVIEW_STAGES.includes(stage)) throw new Error(`Unknown review stage '${stage}'.`);
+    const pullRequest = this.store.getPullRequest(localPrId);
+    if (!pullRequest || pullRequest.jobId !== jobId
+      || String(pullRequest.headSha).toLowerCase() !== String(headSha).toLowerCase()) return;
+    this.store.updatePullRequest(localPrId, {
+      reviewReport: updateReviewReport(pullRequest.reviewReport, {
+        id: `stage:${stage}:start`, kind: "check", label: `${stage} check`, status: "running",
+        at: at ?? this.now(), content: "Check started.",
+      }, { attemptId: jobId, headSha }),
+    });
+  }
+
+  async reviewCiStarted({ localPrId, jobId, headSha, check, at }) {
+    this.#recordCiProgress({ localPrId, jobId, headSha, check, at, phase: "start" });
+  }
+
+  async reviewCiResult({ localPrId, jobId, headSha, check, at }) {
+    this.#recordCiProgress({ localPrId, jobId, headSha, check, at, phase: "result" });
+  }
+
+  #recordCiProgress({ localPrId, jobId, headSha, check, phase, at }) {
+    const pullRequest = this.store.getPullRequest(localPrId);
+    if (!pullRequest || pullRequest.jobId !== jobId
+      || String(pullRequest.headSha).toLowerCase() !== String(headSha).toLowerCase()) return;
+    const name = String(check?.name ?? "registered-check");
+    const isStart = phase === "start";
+    this.store.updatePullRequest(localPrId, {
+      reviewReport: updateReviewReport(pullRequest.reviewReport, {
+        id: `ci:${name}:${phase}`, kind: "check", label: name,
+        status: isStart ? "running" : String(check?.status ?? "unknown"), at: at ?? this.now(),
+        content: isStart ? "Registered check started." : check,
+      }, { attemptId: jobId, headSha }),
     });
   }
 
@@ -256,16 +324,13 @@ export class LocalPrReporter {
       // `reviewedHeadSha` はここでは書かない。あれはマージ時の陳腐化判定が読む
       // 「審査を通り切ったヘッド」で、段階の通過とは意味が違う (完走時に `completed`
       // が書く)。段階がどのヘッドを通したかは `reviewStages` 側が正本。
-      reviewStages: withCompletedStage(
-        stageProgressRecord(pullRequest),
-        stage,
-        headSha,
-        this.now(),
-      ),
+      reviewStages: stage === "security" && !securityStageCompleted(payload?.security)
+        ? stageProgressRecord(pullRequest)
+        : withCompletedStage(stageProgressRecord(pullRequest), stage, headSha, this.now()),
       reviewReport: updateReviewReport(pullRequest.reviewReport, {
-        id: `stage:${stage}`,
+        id: `stage:${stage}:result`,
         ...detail,
-        status: "passed",
+        status: checkpointStatus(stage, payload),
         at: this.now(),
       }, {
         // Older direct callers predate reviewReport. Keep their checkpoint
@@ -347,11 +412,12 @@ export class LocalPrReporter {
       mergeRisk: job.result?.mergeRisk ?? null,
       runtimeVerification: job.result?.runtimeVerification ?? null,
       geniusGuidance: job.result?.geniusGuidance ?? null,
-      reviewReport: updateReviewReport(pullRequest.reviewReport, {
+      reviewReport: finishUnrunStages(updateReviewReport(pullRequest.reviewReport, {
         id: "final",
         ...finalReviewReportEntry(job.result),
         at: this.now(),
-      }, { attemptId: job.id, headSha: job.request.headSha }),
+      }, { attemptId: job.id, headSha: job.request.headSha }), job,
+      "Not run because the review reached its terminal result.", this.now()),
     });
     if (job.result?.anatomiaGate && typeof this.store.appendPullRequestEvent === "function") {
       this.store.appendPullRequestEvent(job.request.localPrId, {
@@ -389,11 +455,12 @@ export class LocalPrReporter {
     this.store.updatePullRequest(job.request.localPrId, {
       checkStatus: "failed",
       error: job.error || "The local review worker failed.",
-      reviewReport: updateReviewReport(pullRequest.reviewReport, {
+      reviewReport: finishUnrunStages(updateReviewReport(pullRequest.reviewReport, {
         id: "final",
         ...finalReviewReportEntry(null, job.error || "The local review worker failed."),
         at: this.now(),
-      }, { attemptId: job.id, headSha: job.request.headSha }),
+      }, { attemptId: job.id, headSha: job.request.headSha }), job,
+      "Not run because the review worker failed.", this.now()),
     });
     await this.#announceReviewStatus("review_failed", job.request.localPrId);
     // 失敗も終局状態。ここで黙ると投稿側は running のまま待ち続ける。

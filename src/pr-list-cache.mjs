@@ -38,7 +38,10 @@ export function summaryProjection(pullRequest) {
     checkStatus: pullRequest.checkStatus,
     reviewLane: pullRequest.reviewLane ?? null,
     headSha: pullRequest.headSha,
-    reviewReport: pullRequest.reviewReport ?? null,
+    // 進捗記録は検査ごとの出力を持ち、この PR で登録チェック単位の記録が増えた。
+    // 板の一覧カードは詳細の有無だけ分かればよいので版だけを返し、全文は
+    // 詳細 (`/v1/local-prs/:id`) と `view=full` の一覧が返す。
+    reviewReportVersion: pullRequest.reviewReport?.version ?? null,
     // 決着済み PR の終局投稿 (Concordia Test Forum) がマージ先を示すのに使う。
     mergeCommitSha: pullRequest.mergeCommitSha ?? null,
     externalVerification: pullRequest.externalVerification ?? null,

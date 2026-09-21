@@ -1,3 +1,4 @@
+/** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 import { existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { isGitCommand } from "./git-runtime.mjs";
@@ -45,12 +46,15 @@ export async function runRegisteredTests({
   env = process.env,
   execute = runProcess,
   now = () => Date.now(),
+  onCheckStarted = async () => {},
+  onCheckResult = async () => {},
 }) {
   if (!Array.isArray(testCases) || testCases.length === 0) {
     throw new Error("リポジトリに登録テストがありません");
   }
   const results = [];
   for (const test of testCases) {
+    await onCheckStarted({ name: test.name });
     const startedAt = now();
     const result = await execute(configuredProcess(
       test,
@@ -71,6 +75,7 @@ export async function runRegisteredTests({
       if (output) outcome.output = output;
     }
     results.push(outcome);
+    await onCheckResult(outcome);
   }
   return results;
 }
@@ -165,6 +170,13 @@ async function runAugurDomainBundles({ worktreePath, targetDomains, augurFolder,
   }];
 }
 
+// 実行しなかった検査も 1 件ずつ進捗へ返す。 報告が沈黙すると、審査報告では開始も結果も
+// 無い検査として interrupted に見えてしまう。
+async function reportOutcomes(outcomes, onCheckResult) {
+  for (const outcome of outcomes) await onCheckResult(outcome);
+  return outcomes;
+}
+
 // Executes only the cases the review plan selected and records the rest as
 // `skipped` with the reason, so the dashboard shows what was not run instead of
 // a shorter list that reads like a smaller suite.
@@ -178,6 +190,8 @@ export async function runPlannedTests({
   env = process.env,
   execute = runProcess,
   now = () => Date.now(),
+  onCheckStarted = async () => {},
+  onCheckResult = async () => {},
 }) {
   if (!Array.isArray(testCases) || testCases.length === 0) {
     throw new Error("リポジトリに登録テストがありません");
@@ -192,25 +206,29 @@ export async function runPlannedTests({
     // its registered preparation steps must run first (see setup-test-cases.mjs).
     const setup = await runSetupTestCases({
       testCases: setupTestCases(testCases),
-      runCase: (testCase) => runRegisteredTests({ worktreePath, testCases: [testCase], env, execute, now }),
+      runCase: (testCase) => runRegisteredTests({
+        worktreePath, testCases: [testCase], env, execute, now, onCheckStarted, onCheckResult,
+      }),
     });
     if (!setup.ok) return setup.results;
+    // 動作ブロックは 1 ドメインずつ並行に走り、返るまで個別の結果を持たない。
+    // 返ってから 1 件ずつ返し、検査の粒度を報告に残す。
     const bundles = await runAugurDomainBundles({ worktreePath, targetDomains, augurFolder, env, execute, now, headSha });
-    return [...bundles, ...setup.results];
+    return [...await reportOutcomes(bundles, onCheckResult), ...setup.results];
   }
   const selected = selectedTestCases(plan, testCases);
   const executed = selected.length > 0
-    ? await runRegisteredTests({ worktreePath, testCases: selected, env, execute, now })
+    ? await runRegisteredTests({ worktreePath, testCases: selected, env, execute, now, onCheckStarted, onCheckResult })
     : [];
-  const results = [...executed, ...skippedTestOutcomes(plan)];
+  let results = [...executed, ...skippedTestOutcomes(plan)];
   if (ledgerPresent) {
-    return results.map((result) => ({
+    results = results.map((result) => ({
       ...result, augurLedgerPresent: true, testSelectionMode: "registered-non-code",
     }));
-  }
-  if (results.length > 0) {
+  } else if (results.length > 0) {
     results[0] = { ...results[0], advisory: "Augur 台帳未整備 (全体スイートを実行)" };
   }
+  await reportOutcomes(results.slice(executed.length), onCheckResult);
   return results;
 }
 // @ts-expect-error augur-inject

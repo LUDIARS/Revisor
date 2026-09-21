@@ -4,6 +4,8 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
+    { "pathPattern": "(^|/)src/(?:ci|review-work)\\.mjs$" },
+    { "pathPattern": "(^|/)test/(?:ci|review-work)\\.test\\.mjs$" },
     {
       "pathPattern": "(^|/)(?:src/auxiliary-model-selection|test/auxiliary-model-capacity\\.test)\\.mjs$"
     },

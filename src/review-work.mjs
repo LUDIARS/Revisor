@@ -1,3 +1,4 @@
+/** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 import { analyzePr, ensureInitialAnalysis } from "./anatomia.mjs";
 import { runPlannedTests } from "./ci.mjs";
 import { configuredForcedReviewEffort } from "./forced-review-effort.mjs";
@@ -29,6 +30,7 @@ export async function runReviewWork(work, {
   security = runSecurityScan,
   forcedReviewModel = configuredForcedReviewModel,
   forcedReviewEffort = configuredForcedReviewEffort,
+  onProgress = async () => {},
 } = {}) {
   if (!work || typeof work !== "object") {
     throw new TypeError("Review work must be an object.");
@@ -37,13 +39,17 @@ export async function runReviewWork(work, {
   if (!options || typeof options !== "object") {
     throw new TypeError("Review work options must be an object.");
   }
+  await onProgress({ type: "stage-start" });
   switch (work.stage) {
     case REVIEW_WORK_STAGES.ANALYZE:
       return analyze(options);
     case REVIEW_WORK_STAGES.INITIAL_ANALYZE:
       return initialAnalyze(options);
     case REVIEW_WORK_STAGES.TEST:
-      return runTests(options);
+      return runTests({ ...options,
+        onCheckStarted: (check) => onProgress({ type: "ci-start", check }),
+        onCheckResult: (check) => onProgress({ type: "ci-result", check }),
+      });
     case REVIEW_WORK_STAGES.REVIEW:
       // 審査ステージはすべてここを通るので、強制モデルの解決はこの 1 箇所で
       // 済む。補助用途ではモデルとeffortの強制を明示的に除外する。

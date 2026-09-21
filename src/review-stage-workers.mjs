@@ -1,3 +1,4 @@
+/** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 import { PrReviewWorkerPool } from "./worker-pool.mjs";
 import { REVIEW_WORK_STAGES } from "./review-work.mjs";
 
@@ -61,11 +62,11 @@ export class ReviewStageWorkers {
     ]));
   }
 
-  run(work, { priority = 1, reviewLane } = {}) {
+  run(work, { priority = 1, reviewLane, onProgress } = {}) {
     const queue = queueForStage(work?.stage);
     if (!queue) return Promise.reject(new Error(`Unsupported review work stage '${work?.stage}'.`));
     const pool = this.pools.get(queue.id);
-    return pool.run(work, { priority, reviewLane });
+    return pool.run(work, { priority, reviewLane, ...(onProgress ? { onProgress } : {}) });
   }
 
   state() {

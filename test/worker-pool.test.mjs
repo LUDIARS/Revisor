@@ -32,6 +32,31 @@ function settle({ worker, message }, settled, result) {
   worker.emit("message", { type: "result", id: message.id, result });
 }
 
+test("persists owned progress in order before resolving the worker result", async () => {
+  const worker = new FakeWorker();
+  const pool = new PrReviewWorkerPool({ size: 1, cwd: process.cwd(), forkWorker: () => worker, log: () => {} });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const events = [];
+  try {
+    const completed = pool.run({ stage: "registered_tests" }, { onProgress: async (event) => {
+      await gate; events.push(event.type);
+    } });
+    const id = worker.messages[0].id;
+    worker.emit("message", { type: "progress", id: "wrong-task", progress: { type: "ignore" } });
+    worker.emit("message", { type: "progress", id, progress: { type: "ci-start" } });
+    worker.emit("message", { type: "progress", id, progress: { type: "ci-result" } });
+    worker.emit("message", { type: "result", id, result: 7 });
+    let resolved = false;
+    completed.then(() => { resolved = true; });
+    await Promise.resolve();
+    assert.equal(resolved, false);
+    release();
+    assert.equal(await completed, 7);
+    assert.deepEqual(events, ["ci-start", "ci-result"]);
+  } finally { await pool.close(); }
+});
+
 // fast lane の予約枠は、 fast の待ちが無くても standard へ貸さない (既存仕様。
 // 4 本目のテスト "standard tasks cannot consume capacity reserved for the fast lane"
 // と同じ扱い)。 size 2 で予約 1 なら standard の同時実行は 1 本になる。

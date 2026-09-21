@@ -1,11 +1,11 @@
 ---
 type: feature
 title: "complete-discord-review-report — 完全な審査報告 API"
-description: "local PR の詳細と open 一覧に、attempt 単位の reviewReport を公開し、Discord 側が Revisor を開かずに審査開始、各段階、スキップ理由、レビュー本文、結果を表示できるようにする。"
+description: "local PR の詳細と open 一覧に、attempt 単位の reviewReport を公開し、Discord 側が Revisor を開かずに審査開始、各段階、登録チェック、スキップ理由、レビュー本文、結果を表示できるようにする。"
 service: revisor
 domain: review-report
 status: implemented
-updated: 2026-09-13
+updated: 2026-09-21
 ---
 
 # complete-discord-review-report — 完全な審査報告 API
@@ -33,6 +33,26 @@ null とし、本文保存前の記録にはこの項目が無い (consumer は�
 
 `reviewedHeadSha` は完走時だけ更新し、古い job/head の報告は現行 attempt を上書きしない。
 WebSocket は従来どおり識別子だけを送る無効化 signal とし、consumer は fresh API projection を読む。
+
+## 実行境界で取る進捗
+
+開始時刻はキュー投入時ではなく実行 worker の開始イベントを記録する。投入は `review-queued`、
+worker が受け持った時点で `review-start` を書く。段階は `stage:<name>` を queued で置き、
+実行開始を `stage:<name>:start`、結果を `stage:<name>:result` と別 id に分ける。同じ id で
+上書きすると、落ちた審査の報告で走っていない段階まで走ったように読めるため。
+
+登録チェックの開始・結果は CI の逐次実行ループから IPC で返し、task を所有する worker の
+イベントだけを親が受け付ける。結果の確定前に受領済み進捗の永続化を待つ。直接実行時も同じ
+callback を使う。Augur の動作ブロックは並行に走り個別の開始時刻を持たないため、返った
+結果だけを 1 件ずつ返す。計画が飛ばした検査も結果として返し、報告の沈黙を未実行と取り
+違えないようにする。
+
+終局では開始済みで結果が無いものを interrupted、未開始を理由付き skipped として記録する。
+既存のゲート・安全な再利用条件は変更しない。security の段階記録は実結果に従い、通過しな
+かった skip を通過済みとして引き継がない。
+
+軽量一覧 (`view=summary`) は `reviewReportVersion` だけを返す。カードは詳細の有無しか要らず、
+全文は詳細 (`/v1/local-prs/:id`) と `view=full` の一覧が返す。
 
 ## 動作ブロック・体験ブロック
 

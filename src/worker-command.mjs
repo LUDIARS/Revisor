@@ -55,6 +55,9 @@ export async function runReviewWorker({
       // 書いておくと、 次のワーカーは残りの段階だけを実行でき、 通過済みの
       // モデルレビューや登録テストをやり直さずに済む (spec/feature/crash-recovery.md)。
       onReviewStageCompleted: (checkpoint) => context.reporter.reviewStageCompleted(checkpoint),
+      onReviewStageStarted: (checkpoint) => context.reporter.reviewStageStarted(checkpoint),
+      onReviewCiStarted: (checkpoint) => context.reporter.reviewCiStarted(checkpoint),
+      onReviewCiResult: (checkpoint) => context.reporter.reviewCiResult(checkpoint),
       onNarrativeReconciled: ({ localPrId, ...narrative }) =>
         context.reporter.narrativeReconciled(localPrId, narrative),
     });
