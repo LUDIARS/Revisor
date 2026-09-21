@@ -30,6 +30,22 @@ export function assertSafeSha(value, label) {
   }
 }
 
+// 失敗メッセージの見出しに使う実サブコマンドを拾う。 呼び出し側は
+// `["-c", "user.name=...", "commit", ...]` のように設定を args 側へ混ぜるので、
+// 先頭要素をそのまま使うと `git -c failed:` という診断しようのない見出しになる。
+function gitSubcommand(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "-c" || arg === "--config-env") {
+      index += 1;
+      continue;
+    }
+    if (typeof arg === "string" && arg.startsWith("-")) continue;
+    return arg;
+  }
+  return args[0] ?? "";
+}
+
 async function runGit(cwd, args, timeoutMs, configArgs = []) {
   const result = await runProcess({
     command: "git",
@@ -38,7 +54,7 @@ async function runGit(cwd, args, timeoutMs, configArgs = []) {
     timeoutMs,
   });
   if (!result.ok) {
-    const error = new Error(`git ${args[0]} failed: ${result.stderr.trim() || result.stdout.trim()}`);
+    const error = new Error(`git ${gitSubcommand(args)} failed: ${result.stderr.trim() || result.stdout.trim()}`);
     // Some Git predicates use exit status 1 as a normal false result. Preserve
     // the status so callers can distinguish that from spawn, timeout, or
     // repository failures without parsing localized stderr.

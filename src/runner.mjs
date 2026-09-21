@@ -62,21 +62,28 @@ import {
 import { withWorktreeMutationLock } from "./worktree-mutation-lock.mjs";
 import { verificationTestDomains } from "./verification-test-domains.mjs";
 
-async function commitAndAdvanceAutofix(cwd, repoPath, request) {
+export async function commitAndAdvanceAutofix(cwd, repoPath, request) {
   const status = await git(cwd, ["status", "--porcelain"]);
   if (status) {
     await git(cwd, ["add", "--all"]);
-    await git(cwd, [
-      "-c",
-      "user.name=LUDIARS Revisor",
-      "-c",
-      "user.email=revisor@localhost",
-      "commit",
-      "-m",
-      "fix(pr-review): apply automated review fixes",
-      "-m",
-      "Revisor-Autofix: true",
-    ]);
+    // `status --porcelain` が非空でも `add` の後に stage が空になることがある。
+    // Windows の autocrlf がその典型で、 作業ツリー上は改行差で modified に見える
+    // ファイルが index と同じ内容へ正規化され、 何も stage されないまま残る。
+    // そこで commit すると「nothing to commit」で非ゼロ終了し、 審査全体が
+    // 「git commit failed」で落ちる。 stage を一次情報として見る。
+    if ((await git(cwd, ["diff", "--cached", "--name-only"])).trim()) {
+      await git(cwd, [
+        "-c",
+        "user.name=LUDIARS Revisor",
+        "-c",
+        "user.email=revisor@localhost",
+        "commit",
+        "-m",
+        "fix(pr-review): apply automated review fixes",
+        "-m",
+        "Revisor-Autofix: true",
+      ]);
+    }
   }
   const reviewedHead = await git(cwd, ["rev-parse", "HEAD"]);
   if (reviewedHead.toLowerCase() !== request.headSha.toLowerCase()) {

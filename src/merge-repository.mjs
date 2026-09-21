@@ -224,3 +224,47 @@ export async function prepareMergeRepository({
     };
   }, { label: "merge-repository-prepare", timeoutMs: 300_000 });
 }
+
+/**
+ * Revisor 所有の merge repository が持つ base と、 登録元 checkout の base の関係を読む。
+ *
+ * merge base は一度初期化したら Revisor の所有物で、 登録元から refresh されない
+ * (`prepareMergeRepository` の注釈)。 その前提が崩れて両者が別系列になると、 載せ替えは
+ * 「誰も持っていない base」の上で走り続け、 提出元をいくら rebase しても直らない衝突を
+ * 出し続ける。 起きていることを名指しできるように、 関係だけを読んで返す。
+ *
+ * 返り値の `diverged` は「どちらももう一方の祖先ではない」状態だけを指す。 merge base が
+ * 登録元より進んでいるのは publication 前の正常な状態なので diverged には数えない。
+ */
+export async function readBaseDivergence({ repository, baseRef }) {
+  const registeredRootPath = repository?.registeredRootPath;
+  if (!registeredRootPath || !repository?.rootPath) return null;
+  try {
+    assertSafeRef(baseRef, "base_ref");
+    const ref = `refs/heads/${baseRef}`;
+    const mergeBaseSha = await git(repository.rootPath, ["rev-parse", "--verify", ref]);
+    const registeredBaseSha = await git(registeredRootPath, ["rev-parse", "--verify", ref]);
+    if (mergeBaseSha === registeredBaseSha) {
+      return { diverged: false, mergeBaseSha, registeredBaseSha };
+    }
+    const ancestor = async (candidate, descendant) => {
+      try {
+        await git(repository.rootPath, [
+          "merge-base",
+          "--is-ancestor",
+          candidate,
+          descendant,
+        ]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const diverged = !await ancestor(registeredBaseSha, mergeBaseSha)
+      && !await ancestor(mergeBaseSha, registeredBaseSha);
+    return { diverged, mergeBaseSha, registeredBaseSha };
+  } catch {
+    // 診断のための読み取りなので、 読めないことでマージ経路を失敗させない。
+    return null;
+  }
+}

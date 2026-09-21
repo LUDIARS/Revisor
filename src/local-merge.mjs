@@ -4,6 +4,7 @@ import { makeScratchDir } from "./scratch-space.mjs";
 import { BaseMovedError, MergeConflictError, StaleReviewError } from "./errors.mjs";
 import { relandHeadOnBase } from "./base-relanding.mjs";
 import { reconcileBaseWithRemote } from "./base-reconcile.mjs";
+import { readBaseDivergence } from "./merge-repository.mjs";
 import { assertCommitMessageFreeOfConfidentialTerms } from "./confidential-terms.mjs";
 import { redactSecretLines } from "./leakage.mjs";
 import { runSecurityScan } from "./security-scan.mjs";
@@ -399,13 +400,30 @@ async function attemptSquashMerge({
       });
     } catch (error) {
       if (error instanceof MergeConflictError) {
+        // 載せ替えは merge repository の中で走る。 その base が登録元 checkout の base と
+        // 別系列になっていると、 提出元をいくら rebase しても同じ衝突が返り続ける。
+        // 提出者に「rebase しろ」と言い続けないよう、 その事実を衝突に添えて返す。
+        const divergence = await readBaseDivergence({
+          repository,
+          baseRef: pullRequest.baseRef,
+        });
         logEvent("merge_conflict_detected", {
           ...subject,
           baseSha,
           headSha,
           conflictFiles: error.conflictedPaths,
           gitMessage: error.message,
+          ...(divergence ? { baseDivergence: divergence } : {}),
         }, { level: "warn" });
+        if (divergence?.diverged) {
+          throw new MergeConflictError(
+            `${error.message} Note: Revisor's merge repository has '${pullRequest.baseRef}' at `
+            + `${divergence.mergeBaseSha}, on a different line of history from the registered `
+            + `checkout's ${divergence.registeredBaseSha}. Rebasing the submitted branch cannot `
+            + "clear this; the merge base has to be reconciled first.",
+            { cause: error, conflictedPaths: error.conflictedPaths },
+          );
+        }
       }
       throw error;
     }
