@@ -31,6 +31,11 @@ null とし、本文保存前の記録にはこの項目が無い (consumer は�
 再審査は PR レコードの前回本文を消し、モデルレビューを引き継ぐ再検証だけが前回本文を引き継ぐ。
 最終結果には引き継いだ審査段階 (`reusedStages`) も載せる。
 
+`reviewReport` 項目をまだ持たない PR レコード (本機能より前に作られたもの) は、進捗記録の
+入力として `undefined` を渡す正当な呼び出しである。報告の更新はこれを欠損扱いせず新しい
+attempt 報告を作る。契約 C-7 の事前条件も同じ扱いとし、任意の報告が未設定であることを
+違反として記録しない。
+
 `reviewedHeadSha` は完走時だけ更新し、古い job/head の報告は現行 attempt を上書きしない。
 WebSocket は従来どおり識別子だけを送る無効化 signal とし、consumer は fresh API projection を読む。
 

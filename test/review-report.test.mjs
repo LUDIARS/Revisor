@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { pendingReviewProjection } from "../src/local-reporter.mjs";
 import {
@@ -104,4 +107,31 @@ test("a re-review clears the previous review text unless it reuses that model re
   const previous = { reviewer: "codex-sol", reviewPlan: null, reviewerOutput: "LGTM" };
   assert.equal(retainedStageProjection(previous, ["review"]).reviewerOutput, "LGTM");
   assert.equal("reviewerOutput" in retainedStageProjection(previous, ["tests"]), false);
+});
+
+test("a PR record that predates reviewReport is an accepted call, not a contract violation", () => {
+  const entry = {
+    id: "stage:tests:start", kind: "check", label: "tests check", status: "running",
+    at: AT, content: "Check started.",
+  };
+  // 旧 PR レコードは `reviewReport` 項目を持たず、LocalPrReporter はその `undefined` を
+  // そのまま渡す。C-7 の述語がこれを弾くと、正当な進捗記録が違反として記録されてしまう。
+  const logs = mkdtempSync(join(tmpdir(), "revisor-contract-"));
+  const previous = process.env.VESTIGIUM_LOGS_DIR;
+  let report;
+  try {
+    process.env.VESTIGIUM_LOGS_DIR = logs;
+    report = updateReviewReport(undefined, entry, { attemptId: ATTEMPT, headSha: HEAD });
+  } finally {
+    if (previous === undefined) delete process.env.VESTIGIUM_LOGS_DIR;
+    else process.env.VESTIGIUM_LOGS_DIR = previous;
+  }
+  const observed = readFileSync(join(logs, "contracts.jsonl"), "utf8")
+    .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
+    .filter((record) => record.ctx?.contract === "C-7");
+  assert.deepEqual(observed.map((record) => record.msg), ["contract observed"]);
+
+  assert.equal(report.attemptId, ATTEMPT);
+  assert.equal(report.headSha, HEAD);
+  assert.deepEqual(report.entries.map((item) => item.id), ["stage:tests:start"]);
 });

@@ -59,7 +59,7 @@
     },
     {
       "id": "C-7",
-      "criterion": "C-7 updateReviewReport(report, entry): attempt ごとに安定 id の安全なレビュー報告を置換記録する",
+      "criterion": "C-7 updateReviewReport(report, entry): reviewReport 未設定の呼び出しも受け入れ、attempt ごとに安定 id の安全なレビュー報告を置換記録する",
       "symbol": "updateReviewReport",
       "file": "src/review-report.mjs",
       "module": "contracts/update-review-report.contract.mjs",
