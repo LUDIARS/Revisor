@@ -104,7 +104,16 @@ export async function prepareRegisteredVersionFile(rootPath) {
   };
 }
 
-export async function initializeLocalVersion(rootPath, baseRef, initialVersion) {
+/**
+ * @param {string} rootPath 登録 checkout
+ * @param {string} baseRef
+ * @param {string} initialVersion
+ * @param {{ onBootstrapCommitted?: (commit: {parentSha: string, bootstrapSha: string}) => Promise<void> }} [options]
+ *   初期化コミットを登録 checkout の base に積んだ直後に呼ぶ。 merge repository の base を
+ *   同じコミットへ進めるために使う (`advanceMergeBaseAfterBootstrap`)。 呼ばないと
+ *   初期化コミットが merge repository に届かず、 次のマージで 2 つの base が分岐する。
+ */
+export async function initializeLocalVersion(rootPath, baseRef, initialVersion, options = {}) {
   const version = normalizeLocalVersion(initialVersion);
   const state = await inspectLocalVersionState(rootPath);
   if (state.status === "ready") {
@@ -127,6 +136,7 @@ export async function initializeLocalVersion(rootPath, baseRef, initialVersion) 
       `${LOCAL_VERSION_FILE} exists but is not tracked; preserve or remove it before registration.`,
     );
   }
+  const parentSha = await git(rootPath, ["rev-parse", "--verify", "HEAD"]);
   let committed = false;
   try {
     await writeFile(path, `${UNINITIALIZED_VERSION}\n`, "utf8");
@@ -154,6 +164,10 @@ export async function initializeLocalVersion(rootPath, baseRef, initialVersion) 
       }
       await unlink(path).catch(() => undefined);
     }
+  }
+  if (typeof options.onBootstrapCommitted === "function") {
+    const bootstrapSha = await git(rootPath, ["rev-parse", "--verify", "HEAD"]);
+    await options.onBootstrapCommitted({ parentSha, bootstrapSha });
   }
   return writeLocalVersion(rootPath, version);
 }

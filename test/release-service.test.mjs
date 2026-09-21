@@ -33,7 +33,47 @@ test("projects registered before versioning stay visible and can be initialized"
     repository: "LUDIARS/Product",
     version: "0.8.0",
   });
-  assert.deepEqual(initialized, [["E:/Product", "main", "0.8.0"]]);
+  assert.equal(initialized.length, 1);
+  assert.deepEqual(initialized[0].slice(0, 3), ["E:/Product", "main", "0.8.0"]);
+  // 初期化コミットを merge repository の base へ届けるための口が渡っている。
+  assert.equal(typeof initialized[0][3]?.onBootstrapCommitted, "function");
+});
+
+test("初期化コミットを積んだら merge repository の base を同じコミットへ進め、結果を返す", async () => {
+  const repository = { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main" };
+  const advanced = [];
+  const service = new ReleaseService({
+    store: {
+      path: "E:/state/revisor.sqlite",
+      listRepositories: () => [repository],
+      getRepository: () => repository,
+    },
+    publicationCoordinator: { run: (operation) => operation() },
+    // 実物と同じく、 初期化コミットを作ったときだけコールバックを呼ぶ。
+    initializeVersion: async (_rootPath, _baseRef, version, options) => {
+      await options.onBootstrapCommitted({ parentSha: "a".repeat(40), bootstrapSha: "b".repeat(40) });
+      return version;
+    },
+    advanceMergeBase: async (request) => {
+      advanced.push(request);
+      return { status: "advanced", mergeBaseSha: request.bootstrapSha };
+    },
+  });
+
+  const result = await service.initialize("LUDIARS/Product", "0.8.0");
+
+  assert.deepEqual(result, {
+    repository: "LUDIARS/Product",
+    version: "0.8.0",
+    mergeBase: { status: "advanced", mergeBaseSha: "b".repeat(40) },
+  });
+  assert.deepEqual(advanced, [{
+    repository,
+    statePath: "E:/state/revisor.sqlite",
+    baseRef: "main",
+    parentSha: "a".repeat(40),
+    bootstrapSha: "b".repeat(40),
+  }]);
 });
 
 test("ready projects expose major and minor targets and publish through the coordinator", async () => {

@@ -268,3 +268,72 @@ export async function readBaseDivergence({ repository, baseRef }) {
     return null;
   }
 }
+
+/**
+ * `.revisor-version` の初期化コミットを、 merge repository の base にも同じ SHA で載せる。
+ *
+ * 初期化 (`initializeLocalVersion`) は登録 checkout の base branch へ直接コミットする。
+ * merge repository の base は「初期化後は Revisor の所有物で、 登録元から refresh しない」
+ * ので、 そのままでは初期化コミットが merge repository に永遠に届かず、 次のマージで
+ * 2 つの base が別系列になる (2026-09-21 の点検で 84 件中 25 件がこれで分岐していた)。
+ *
+ * そこで初期化コミットを積んだ直後に限り、 merge repository の base が**その親と同じ**
+ * (= 初期化直前まで揃っていた) ときだけ、 同じコミットへ fast-forward する。 CAS で
+ * 旧値を確かめてから動かすので、 並行して動いた base を上書きしない。 揃っていなかった
+ * base は触らず、 呼び出し側が報告できるよう状態だけ返す。
+ *
+ * @returns {Promise<{status: "advanced"|"already"|"no-merge-repository"|"not-in-step", mergeBaseSha?: string}>}
+ */
+export async function advanceMergeBaseAfterBootstrap({
+  repository,
+  statePath,
+  baseRef,
+  parentSha,
+  bootstrapSha,
+  runGit = git,
+}) {
+  if (!repository?.repository || !repository?.rootPath) {
+    throw new TypeError("A registered repository is required to advance the merge base.");
+  }
+  assertSafeRef(baseRef, "base_ref");
+  const mergeRoot = resolveMergeRepositoryPath({ repository, statePath });
+  // まだ一度もマージしていないリポには merge repository が無い。 後で初期化されるときに
+  // 登録 checkout から複製されるので、 初期化コミットも自然に含まれる。
+  if (!await pathExists(mergeRoot)) return { status: "no-merge-repository" };
+
+  const repositoriesRoot = join(dirname(resolve(statePath)), MERGE_REPOSITORIES_DIRECTORY);
+  // prepareMergeRepository と同じロックで直列化する。 準備中の fetch と base の移動が
+  // 交差しないように。
+  const preparationLockPath = join(
+    repositoriesRoot,
+    `${repositoryDirectoryName(repository)}.prepare`,
+  );
+  return withFileLock(preparationLockPath, async () => {
+    const ref = `refs/heads/${baseRef}`;
+    const mergeBaseSha = await runGit(mergeRoot, ["rev-parse", "--verify", ref]);
+    if (mergeBaseSha === bootstrapSha) return { status: "already", mergeBaseSha };
+    if (mergeBaseSha !== parentSha) return { status: "not-in-step", mergeBaseSha };
+
+    const sourceDirectories = await registeredSourceDirectories(repository.rootPath, runGit);
+    const stagingRef = `refs/revisor-bootstrap/${baseRef}`;
+    try {
+      await runGit(mergeRoot, sourceGitArgs(sourceDirectories, [
+        "fetch",
+        "--no-tags",
+        "--force",
+        portableAbsolutePath(repository.rootPath),
+        `+${ref}:${stagingRef}`,
+      ]), 300_000);
+      const fetched = await runGit(mergeRoot, ["rev-parse", "--verify", stagingRef]);
+      if (fetched !== bootstrapSha) {
+        // 初期化の直後に登録元がさらに動いた。 初期化コミットだけを載せる前提が崩れて
+        // いるので、 base は動かさない。
+        return { status: "not-in-step", mergeBaseSha };
+      }
+      await runGit(mergeRoot, ["update-ref", ref, bootstrapSha, parentSha]);
+      return { status: "advanced", mergeBaseSha: bootstrapSha };
+    } finally {
+      await runGit(mergeRoot, ["update-ref", "-d", stagingRef]).catch(() => undefined);
+    }
+  }, { label: "merge-repository-bootstrap", timeoutMs: 300_000 });
+}

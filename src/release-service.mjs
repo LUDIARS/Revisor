@@ -10,6 +10,7 @@ import augurContract_02a82258 from "../contracts/manual-release-local-api.contra
 import { listLocalReleaseTags } from "./git-publication.mjs";
 import { collectRepositoryChanges } from "./repository-changes.mjs";
 import { git } from "./workspace.mjs";
+import { advanceMergeBaseAfterBootstrap } from "./merge-repository.mjs";
 
 function nextVersions(state) {
   if (state.status !== "ready") return { nextMajor: null, nextMinor: null };
@@ -30,6 +31,7 @@ export class ReleaseService {
     listTags = listLocalReleaseTags,
     collectChanges = collectRepositoryChanges,
     runGit = git,
+    advanceMergeBase = advanceMergeBaseAfterBootstrap,
   }) {
     if (!store || !publicationCoordinator) {
       throw new TypeError("Release service requires a store and publication coordinator.");
@@ -43,6 +45,7 @@ export class ReleaseService {
     this.listTags = listTags;
     this.collectChanges = collectChanges;
     this.runGit = runGit;
+    this.advanceMergeBase = advanceMergeBase;
   }
 
   async listProjects() {
@@ -71,14 +74,32 @@ export class ReleaseService {
   async initialize(repositoryName, version) {
     const repository = this.#repository(repositoryName);
     return this.publicationCoordinator.run(async () => {
+      // 初期化コミットは登録 checkout の base に積まれる。 merge repository の base にも
+      // 同じコミットを載せないと、 次のマージで 2 つの base が別系列になる。 publication と
+      // 同じ coordinator の中で行うので、 マージが base を並行して動かすことはない。
+      let mergeBase = null;
       const registeredVersion = await this.initializeVersion(
         repository.rootPath,
         repository.baseRef,
         version,
+        {
+          onBootstrapCommitted: async ({ parentSha, bootstrapSha }) => {
+            mergeBase = await this.advanceMergeBase({
+              repository,
+              statePath: this.store.path,
+              baseRef: repository.baseRef,
+              parentSha,
+              bootstrapSha,
+            });
+          },
+        },
       );
       return {
         repository: repository.repository,
         version: registeredVersion,
+        // 初期化コミットを作らなかった (既に追跡済みだった) ときは null。
+        // not-in-step は merge repository が初期化前から揃っていなかったことを示す。
+        ...(mergeBase ? { mergeBase } : {}),
       };
     });
   }
