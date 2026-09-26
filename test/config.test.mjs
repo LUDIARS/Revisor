@@ -231,7 +231,7 @@ test("stores settings and encrypts local workflow secrets", () => {
       costValidationSkipAnatomiaDomain: false,
       // Automatic merging is off until a human states the risk they accept.
       autoMergeEnabled: false,
-      autoMergeRiskThreshold: 15,
+      autoMergeRiskThreshold: 100,
       autoMergeRequiresRuntimeVerificationClear: true,
       planAdvisor: "none",
       augurFolder: "",

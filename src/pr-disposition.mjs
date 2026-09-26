@@ -46,6 +46,9 @@ function blockersOf(pullRequest, thresholds) {
     blockers.push(String(pullRequest.error));
   }
   if (pullRequest.mergeError) blockers.push(String(pullRequest.mergeError));
+  if (["held", "failed", "reserved"].includes(pullRequest.riskReassessment?.state)) {
+    blockers.push("高スコアの自動修正・再審査が未解決です。人間の確認が必要です");
+  }
   const reasons = pullRequest.reasons ?? [];
   const failedTestCount = Array.isArray(pullRequest.ci)
     ? pullRequest.ci.filter((entry) => entry?.status === "failed").length
@@ -56,9 +59,10 @@ function blockersOf(pullRequest, thresholds) {
   for (const reason of reasons) blockers.push(reason);
   if (pullRequest.humanQuestion) blockers.push(pullRequest.humanQuestion);
   const risk = effectiveMergeRisk(pullRequest);
-  if (risk && typeof risk.score === "number" && risk.score > thresholds.riskThreshold) {
+  if (!risk || !Number.isFinite(risk.score)) blockers.push("マージリスクが未確認です");
+  if (risk && typeof risk.score === "number" && (risk.score >= 100 || risk.score > thresholds.riskThreshold)) {
     blockers.push(
-      `マージリスク ${risk.score} が閾値 ${thresholds.riskThreshold} を超えています`,
+      `マージリスク ${risk.score} は自動マージ範囲外です (設定閾値 ${thresholds.riskThreshold}、100以上は再審査)`,
     );
   }
   if (
@@ -73,7 +77,7 @@ function blockersOf(pullRequest, thresholds) {
 
 export function decidePullRequest(pullRequest, {
   autoMergeEnabled = false,
-  autoMergeRiskThreshold = 15,
+  autoMergeRiskThreshold = 100,
   autoMergeRequiresRuntimeVerificationClear = true,
 } = {}) {
   const thresholds = {

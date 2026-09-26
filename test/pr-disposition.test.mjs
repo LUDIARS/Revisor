@@ -43,7 +43,7 @@ test("risk above the human's threshold hands the PR back to the human", () => {
     SETTINGS,
   );
   assert.equal(decided.decision.state, "needs_human");
-  assert.match(decided.decision.blockers.join(" "), /マージリスク 40 が閾値 15/);
+  assert.match(decided.decision.blockers.join(" "), /マージリスク 40.*設定閾値 15/);
   assert.equal(decided.decision.autoMergeEligible, false);
 });
 

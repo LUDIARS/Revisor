@@ -781,7 +781,12 @@ export function createPrReviewRunner({
     if (request.repository !== request.headRepository) {
       throw new Error("Fork pull requests are not eligible for the local autofix review");
     }
-    const settings = readSettings(env);
+    const configuredSettings = readSettings(env);
+    // High-risk retries must execute the reviewer/autofix and all normal gates.
+    const settings = request.riskReassessment === true
+      ? { ...configuredSettings, costValidationModeEnabled: false, costValidationSkipReview: false,
+          costValidationSkipGenius: false, costValidationSkipAnatomiaDomain: false }
+      : configuredSettings;
     const workspaceRoot = resolveWorkspaceRoot(cwd);
     const repoPath = request.rootPath;
     const reportStage = stageCheckpointReporter(onReviewStageCompleted, request);

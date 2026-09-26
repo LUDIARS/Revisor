@@ -80,9 +80,9 @@ function defaults() {
     costValidationSkipGenius: false,
     costValidationSkipAnatomiaDomain: false,
     // Automatic merging stays off until a human sets the risk they accept. The
-    // threshold is the human's decision, so there is no safe value to assume.
+    // threshold is configured explicitly; a score of 100 is always held for reassessment.
     autoMergeEnabled: false,
-    autoMergeRiskThreshold: 15,
+    autoMergeRiskThreshold: 100,
     autoMergeRequiresRuntimeVerificationClear: true,
     planAdvisor: "none",
     augurFolder: "",

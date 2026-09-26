@@ -110,7 +110,7 @@ const BODY = `
         </label>
       </div>
       <div class="field">
-        <label for="auto-merge-threshold">許容するマージリスク（0〜100、これ以下はオートマージ）</label>
+        <label for="auto-merge-threshold">許容するマージリスク（0〜100、100以上は自動修正・再審査）</label>
         <input id="auto-merge-threshold" type="number" min="0" max="100" step="1" required>
         <span class="note">審査済みの PR に対して即時に再判定されます。閾値を下げると判断待ちに戻ります。</span>
       </div>

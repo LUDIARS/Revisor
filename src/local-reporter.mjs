@@ -1,3 +1,4 @@
+import { completedRiskCycle } from "./risk-reassessment.mjs";
 import {
   pullRequestLifecycleMessage,
   pullRequestLifecycleTone,
@@ -387,6 +388,7 @@ export class LocalPrReporter {
     const passed = job.result?.conclusion === "success";
     const pullRequest = this.store.getPullRequest(job.request.localPrId);
     this.store.updatePullRequest(job.request.localPrId, {
+      ...completedRiskCycle(pullRequest, job),
       checkStatus: passed ? "test_ok" : "action_required",
       reviewedHeadSha: job.result?.reviewedHeadSha ?? job.request.headSha,
       reviewer: job.result?.reviewer ?? null,
@@ -453,6 +455,7 @@ export class LocalPrReporter {
     if (!this.#isCurrent(job)) return;
     const pullRequest = this.store.getPullRequest(job.request.localPrId);
     this.store.updatePullRequest(job.request.localPrId, {
+      ...completedRiskCycle(pullRequest, job, true),
       checkStatus: "failed",
       error: job.error || "The local review worker failed.",
       reviewReport: finishUnrunStages(updateReviewReport(pullRequest.reviewReport, {
@@ -463,6 +466,10 @@ export class LocalPrReporter {
       "Not run because the review worker failed.", this.now()),
     });
     await this.#announceReviewStatus("review_failed", job.request.localPrId);
+    if (job.request.riskReassessment === true && this.afterCompleted) {
+      try { await this.afterCompleted(job.request.localPrId); }
+      catch { /* The PR retains the failed cycle for reconciliation. */ }
+    }
     // 失敗も終局状態。ここで黙ると投稿側は running のまま待ち続ける。
     await this.#announce(job.request.localPrId);
   }

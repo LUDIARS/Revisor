@@ -1,3 +1,4 @@
+import { notifyRiskSystem } from "./risk-notice.mjs";
 import { optionalDiscordWebhookUrl, readSettings } from "./config.mjs";
 import {
   notifyConcordia,
@@ -9,6 +10,7 @@ import { LocalPrReporter } from "./local-reporter.mjs";
 import { LocalPrService } from "./local-pr-service.mjs";
 import { PersistentPrReviewQueue } from "./persistent-queue.mjs";
 import {
+  pullRequestLifecycleMessage,
   notifyPullRequestLifecycle,
   notifyPullRequestLifecycleWebhook,
 } from "./pr-lifecycle-notice.mjs";
@@ -105,6 +107,9 @@ export function createReviewContext({
       jobs,
       env,
       notifyLifecycle: announceLifecycle,
+      notifyRisk: (event, pullRequest) => notifyRiskSystem({
+        baseUrl: optionalConcordiaUrl(cwd, true), event, pullRequest,
+      }),
       publicationCoordinator,
     });
   }

@@ -2418,3 +2418,34 @@ test("登録 checkout へ降りたら未反映の印は残さない", async () =
     await removeFixture(fixture.directory);
   }
 });
+
+
+test("high risk queues full autofix instead of reusing the passing review", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "risk-state.json") });
+  const submissions = [];
+  const service = new LocalPrService({ store,
+    queue: { async submit(request) { submissions.push(request); store.updatePullRequest(request.localPrId, { jobId: "risk-job" }); return { id: "risk-job" }; } },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    prepareMerge: async ({ repository }) => repository,
+    loadSettings: () => ({ autoMergeEnabled: true, autoMergeRiskThreshold: 100 }),
+  });
+  try {
+    await service.registerRepository({ repository: "LUDIARS/Product", rootPath: fixture.repoPath, baseRef: "main", testCases: [] });
+    const pr = await service.submitPullRequest({ repository: "LUDIARS/Product", title: "risk", body: "", author: "neco", headRef: "feat/local" });
+    store.updatePullRequest(pr.id, { jobId: "original", checkStatus: "test_ok", reviewedHeadSha: pr.headSha,
+      mergeRisk: { score: 100, factors: [] }, reasons: [], reviewer: "codex" });
+    await service.autoMergeIfEligible(pr.id);
+    const request = submissions.at(-1);
+    assert.equal(request.riskReassessment, true);
+    assert.equal(request.reviewMode, "full");
+    assert.equal(request.previousReview, null);
+    assert.deepEqual(request.reusedStages, []);
+    assert.equal(store.getPullRequest(pr.id).riskReassessment.attempts, 1);
+    const reporter = new LocalPrReporter(store, { afterCompleted: (id) => service.autoMergeIfEligible(id) });
+    await reporter.completed({ id: "risk-job", request, result: { conclusion: "success", reviewedHeadSha: "b".repeat(40),
+      mergeRisk: { score: 100, factors: [] }, reasons: [], ci: [] } });
+    assert.equal(store.getPullRequest(pr.id).riskReassessment.state, "held");
+    assert.equal(submissions.length, 2);
+  } finally { removeFixture(fixture.directory); }
+});

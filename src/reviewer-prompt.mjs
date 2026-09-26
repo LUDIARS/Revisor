@@ -105,6 +105,9 @@ export function buildReviewerPrompt({
     `Compare the checked-out HEAD with ${request.baseRef}.`,
     "You may read and edit files only. Do not run repository code, install dependencies, use network access, commit, or push; Revisor owns local Git and CI operations.",
     "Perform a normal correctness and maintainability review and directly fix actionable issues.",
+    request.riskReassessment === true
+      ? "This is the single high-risk repair attempt. Fix actionable causes within this PR; do not weaken tests, gates, or scoring to reduce the number. Report remaining risks. Prior evidence: " + JSON.stringify(request.riskReassessmentContext ?? {})
+      : null,
     stageEnabled(plan, "security_review") ? securityInstruction() : null,
     leakageInstruction(leakage),
     "Preserve existing user changes and keep edits scoped to this PR.",

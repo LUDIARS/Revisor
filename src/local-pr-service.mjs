@@ -1,5 +1,7 @@
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { handleRiskReassessment, notifyRiskOnce } from "./risk-reassessment.mjs";
+import { effectiveMergeRisk } from "./merge-risk.mjs";
 import { autoMergeDecision, autoMergeRecord } from "./auto-merge.mjs";
 import { readSettings } from "./config.mjs";
 import { MergeConflictError, StaleReviewError } from "./errors.mjs";
@@ -78,6 +80,12 @@ function reviewRequest(repository, reviewRepository, pullRequest, options = {}) 
     rootPath: repository.rootPath,
     reviewRootPath: reviewRepository.rootPath,
     testCases: repository.testCases,
+    riskReassessment: options.riskReassessment === true,
+    ...(options.riskReassessment === true ? { riskReassessmentContext: {
+      score: pullRequest.riskReassessment?.initialScore,
+      factors: pullRequest.riskReassessment?.factors ?? [],
+      reasons: pullRequest.riskReassessment?.reasons ?? [],
+    } } : {}),
     reviewMode: options.reviewMode ?? "full",
     verificationTargets: options.verificationTargets ?? [],
     // どの段階を引き継いだか。 審査結果に載せて外から見えるようにする
@@ -127,6 +135,7 @@ export class LocalPrService {
     loadSettings = () => readSettings(env),
     log = serviceLog,
     notifyLifecycle = null,
+    notifyRisk = null,
     publicationCoordinator = new PublicationCoordinator(),
   }) {
     if (!store || !queue) {
@@ -153,6 +162,7 @@ export class LocalPrService {
     this.log = log;
     this.cliPath = cliPath;
     this.notifyLifecycle = notifyLifecycle;
+    this.notifyRisk = notifyRisk;
     this.publicationCoordinator = publicationCoordinator;
     this.lifecycleLockPath = store.path ? `${store.path}.lifecycle` : null;
     // Read on every decision, not cached: moving the accepted risk threshold has
@@ -537,6 +547,7 @@ export class LocalPrService {
 
   async #requeue(pullRequest, {
     announceFailure = true,
+    forceFullReview = false,
     allowActiveSameHead = false,
     reviewLane = normalizeReviewLane(pullRequest.reviewLane),
   } = {}) {
@@ -577,6 +588,7 @@ export class LocalPrService {
       // 設定が変わったら古い通過は使い回さない。 段階フラグごと捨てる。
       scope = { reviewMode: "full", verificationTargets: [] };
     }
+    if (forceFullReview) scope = { reviewMode: "full", verificationTargets: [], riskReassessment: true };
     const previousReview = scope.reviewMode === "verification" ? pullRequest : null;
     const reusedStages = scope.reusedStages ?? [];
     const requeued = await this.#enqueue(
@@ -992,6 +1004,13 @@ export class LocalPrService {
         syncReason: sync.synced ? null : sync.reason,
       });
       await this.#announceLifecycle(bypass ? "bypass_merged" : "merged", settled);
+      if (effectiveMergeRisk(pullRequest)?.score >= 60) {
+        try { await notifyRiskOnce({ store: this.store, id, event: "merged", notify: this.notifyRisk }); }
+        catch {
+          // Publication has completed. A notification-store failure must not relabel it as failed.
+          this.log("risk_notice_unrecorded", { localPrId: id, event: "merged" }, { level: "warn" });
+        }
+      }
       return settled;
     } catch (error) {
       try {
@@ -1088,7 +1107,9 @@ export class LocalPrService {
           || pullRequest.status !== "open"
           || pullRequest.checkStatus !== "test_ok"
         ) continue;
-        const decision = autoMergeDecision(pullRequest, settings);
+        if (await handleRiskReassessment({ store: this.store, id: pullRequest.id, enabled: true,
+          requeue: (pr) => this.#requeue(pr, { forceFullReview: true }), notify: this.notifyRisk })) continue;
+        const decision = autoMergeDecision(this.store.getPullRequest(pullRequest.id), settings);
         if (!decision.merge) {
           // 見送りは記録に残さない方針だったが、 「Test OK なのに何周しても
           // マージされない」 を説明できるのは、 この理由だけである。 状態は
@@ -1137,7 +1158,11 @@ export class LocalPrService {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) return null;
     const settings = this.loadSettings();
-    const decision = autoMergeDecision(pullRequest, settings);
+    if (await handleRiskReassessment({ store: this.store, id, enabled: settings.autoMergeEnabled,
+      requeue: (pr) => this.#requeue(pr, { forceFullReview: true }), notify: this.notifyRisk })) {
+      return this.store.getPullRequest(id);
+    }
+    const decision = autoMergeDecision(this.store.getPullRequest(id), settings);
     if (!decision.merge) {
       if (!settings.autoMergeEnabled) return pullRequest;
       return this.store.updatePullRequest(id, {
