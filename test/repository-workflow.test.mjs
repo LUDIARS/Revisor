@@ -22,7 +22,7 @@ import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 // GitHub Workflow は App を使わず通常 push で送り、 Revisor Workflow (既定) は不変。
 
 function git(repoPath, ...args) {
-  const result = spawnSync("git", [...NO_LFS_FILTER_ARGS, "-C", repoPath, ...args], {
+  const result = spawnSync("git", [...NO_LFS_FILTER_ARGS, "-c", "core.hooksPath=" + join(repoPath, ".git", "hooks"), "-C", repoPath, ...args], {
     encoding: "utf8",
     windowsHide: true,
   });

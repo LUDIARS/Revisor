@@ -11,6 +11,7 @@ import {
 import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { resolveRepositoryWorkflow, WORKFLOW_GITHUB } from "./repository-workflow.mjs";
 import { BRANCH_PUSH_ENV_FLAG } from "./branch-push-flag.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { LocalPrStore, redirectLegacyStorePath } from "./state-store.mjs";
@@ -229,23 +230,24 @@ export async function guardMainPush({
   statePath,
   input,
   now = () => new Date().toISOString(),
-  authorizedPublication = process.env.REVISOR_PUBLISHING === "1",
-  authorizedBranchPublication = process.env[BRANCH_PUSH_ENV_FLAG] === "1",
+  env = process.env,
+  authorizedPublication = env.REVISOR_PUBLISHING === "1",
+  authorizedBranchPublication = env[BRANCH_PUSH_ENV_FLAG] === "1",
 }) {
   // 配布済み hook は旧 revisor.state.json のパスを焼き込んでいる。 再インストール
   // なしで database を見つけられるよう、旧パスはここで読み替える。
   const store = new LocalPrStore({ path: redirectLegacyStorePath(statePath), now });
   const repository = store.findRepositoryByPath(repoPath);
   if (!repository) throw new Error(`Repository is not registered in Revisor: ${repoPath}`);
+  const githubWorkflow = resolveRepositoryWorkflow(repository, env) === WORKFLOW_GITHUB;
+  const allowsBranchPush = githubWorkflow || authorizedBranchPublication;
   const pushes = parsePushLines(input);
   const branchPushes = pushes.filter((record) =>
     record.remoteRef.startsWith("refs/heads/")
     && record.remoteRef !== `refs/heads/${repository.baseRef}`
     && !ZERO_SHA.test(record.localSha));
-  // 作業ブランチは既定では出さない。 通れるのは Revisor 自身のブランチ送出
-  // (`branch-push.mjs`) が旗を立てた子プロセスだけで、 直接の `git push` は
-  // これまでどおり落ちる。 base とタグの認可はこの旗では動かない。
-  const blockedRefs = authorizedBranchPublication
+  // Use the registry workflow; Revisor publication still needs explicit ownership.
+  const blockedRefs = allowsBranchPush
     ? []
     : branchPushes.map((record) => record.remoteRef);
   const checkedAt = now();
@@ -270,7 +272,7 @@ export async function guardMainPush({
     record.remoteRef === `refs/heads/${repository.baseRef}`
     && !ZERO_SHA.test(record.localSha));
   const tagPushes = pushes.filter((record) => record.remoteRef.startsWith("refs/tags/"));
-  if ((mainPushes.length > 0 || tagPushes.length > 0) && !authorizedPublication) {
+  if ((mainPushes.length > 0 || tagPushes.length > 0) && !githubWorkflow && !authorizedPublication) {
     store.updatePushGuard(repository.repository, {
       status: "revisor_publication_required",
       checkedAt,
@@ -288,8 +290,11 @@ export async function guardMainPush({
   }
   let scannedAddedLines = 0;
   const findings = [];
-  // 認可されたブランチ送出も GitHub へ出る。 base と同じ漏洩走査を通す。
-  for (const record of [...mainPushes, ...(authorizedBranchPublication ? branchPushes : [])]) {
+  // Ordinary GitHub pushes still scan outgoing history, including tag targets.
+  const scannedPushes = githubWorkflow
+    ? pushes.filter((record) => !ZERO_SHA.test(record.localSha))
+    : [...mainPushes, ...(allowsBranchPush ? branchPushes : [])];
+  for (const record of scannedPushes) {
     const result = scanAddedDiffForLeaks(await pushDiff(repoPath, record, repository.baseRef));
     scannedAddedLines += result.scannedAddedLines;
     findings.push(...result.findings);

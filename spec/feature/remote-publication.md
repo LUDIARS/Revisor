@@ -68,8 +68,12 @@ request fails instead of silently publishing a different version.
 
 Feature branches, hosted pull requests, GitHub Actions dispatch, repository
 creation, branch-protection administration, and arbitrary remote Git commands
-are outside this domain. The managed pre-push hook rejects direct base/tag and
-feature-branch pushes; only Revisor marks publication refs as owned.
+are outside the Revisor publication transaction. For Revisor Workflow, the managed
+pre-push hook requires publication ownership for base/tags and explicit branch
+publication authorization for feature branches. GitHub Workflow accepts ordinary
+git push using the registered workflow resolver, while retaining outgoing-history
+leakage scanning for branch, base and tag updates. Hook flags do not redefine the
+registered workflow.
 
 The former Castra-owned `dw` GitHub command has no independent runtime
 responsibility. Revisor exposes `dw` as a compatibility alias for its CLI while

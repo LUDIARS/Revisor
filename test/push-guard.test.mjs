@@ -14,7 +14,7 @@ import { LocalPrStore } from "../src/state-store.mjs";
 import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 function git(repoPath, ...args) {
-  const result = spawnSync("git", ["-C", repoPath, ...args], {
+  const result = spawnSync("git", ["-c", "core.hooksPath=" + join(repoPath, ".git", "hooks"), "-C", repoPath, ...args], {
     encoding: "utf8",
     windowsHide: true,
   });
@@ -308,4 +308,64 @@ test("途中で削除された秘密も送出履歴に残るため拒む", async
   } finally {
     removeFixture(state.directory);
   }
+});
+
+
+for (const selection of [
+  { name: "explicit github", workflow: "github", env: {} },
+  { name: "org github", env: { REVISOR_ORG_WORKFLOWS: "MELPOT=github" } },
+]) {
+  test(selection.name + " allows ordinary branch/base/tag pushes and still scans history", async () => {
+    const state = fixture();
+    const statePath = join(state.directory, "state.json");
+    const store = new LocalPrStore({ path: statePath });
+    store.registerRepository({ repository: "MELPOT/Product", rootPath: state.repoPath,
+      baseRef: "main", testCases: [{ name: "unit" }],
+      ...(selection.workflow ? { workflow: selection.workflow } : {}) });
+    try {
+      git(state.repoPath, "checkout", "-b", "feat/ordinary");
+      writeFileSync(join(state.repoPath, "feature.txt"), "safe feature\n", "utf8");
+      git(state.repoPath, "add", "feature.txt");
+      git(state.repoPath, "commit", "-m", "feature");
+      const safeSha = git(state.repoPath, "rev-parse", "HEAD");
+      const refs = ["refs/heads/feat/ordinary", "refs/heads/main", "refs/tags/v1.0.0"];
+      const check = (sha, ref) => guardMainPush({ repoPath: state.repoPath, statePath,
+        env: selection.env, authorizedPublication: false, authorizedBranchPublication: false,
+        input: ["HEAD", sha, ref, ref === "refs/heads/main" ? state.baseSha : "0".repeat(40)].join(" ") + "\n" });
+      for (const ref of refs) {
+        const result = await check(safeSha, ref);
+        assert.equal(result.allowed, true, ref);
+        assert.ok(result.scannedAddedLines > 0, ref);
+      }
+      writeFileSync(join(state.repoPath, "config.js"),
+        'const token = "' + "gh" + 'p_abcdefghijklmnopqrstuvwxyz123456";\n', "utf8");
+      git(state.repoPath, "add", "config.js");
+      git(state.repoPath, "commit", "-m", "unsafe middle");
+      writeFileSync(join(state.repoPath, "config.js"), "const token = process.env.TOKEN;\n", "utf8");
+      git(state.repoPath, "add", "config.js");
+      git(state.repoPath, "commit", "-m", "remove secret");
+      const unsafeSha = git(state.repoPath, "rev-parse", "HEAD");
+      for (const ref of refs) {
+        const result = await check(unsafeSha, ref);
+        assert.equal(result.allowed, false, ref);
+        assert.equal(result.amendRequired, true, ref);
+      }
+    } finally { removeFixture(state.directory); }
+  });
+}
+
+test("explicit Revisor workflow overrides the GitHub org default in the hook", async () => {
+  const state = fixture();
+  const statePath = join(state.directory, "state.json");
+  const store = new LocalPrStore({ path: statePath });
+  store.registerRepository({ repository: "MELPOT/Product", rootPath: state.repoPath,
+    baseRef: "main", workflow: "revisor", testCases: [{ name: "unit" }] });
+  try {
+    const result = await guardMainPush({ repoPath: state.repoPath, statePath,
+      env: { REVISOR_ORG_WORKFLOWS: "MELPOT=github" },
+      authorizedPublication: false, authorizedBranchPublication: false,
+      input: ["HEAD", state.baseSha, "refs/heads/feat/private", "0".repeat(40)].join(" ") + "\n" });
+    assert.equal(result.allowed, false);
+    assert.deepEqual(result.blockedRefs, ["refs/heads/feat/private"]);
+  } finally { removeFixture(state.directory); }
 });
