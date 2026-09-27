@@ -109,6 +109,7 @@ function isEmptyBundle(stdout) {
 function augurOutcome(domain, result, durationMs) {
   const record = parseRunRecord(result.stdout ?? "");
   if (record) {
+    const output = record.status === "passed" ? null : captureFailedTestOutput(result);
     return {
       name: `動作ブロック (${domain})`,
       domain,
@@ -119,6 +120,7 @@ function augurOutcome(domain, result, durationMs) {
       durationMs: record.durationMs ?? durationMs,
       runId: record.runId,
       exitCode: result.exitCode,
+      ...(output ? { output } : {}),
     };
   }
   const stdout = String(result.stdout ?? "").trim();
@@ -128,9 +130,11 @@ function augurOutcome(domain, result, durationMs) {
       durationMs, runId: null, exitCode: result.exitCode, reason: `${domain} に登録テストが無い`,
     };
   }
+  const output = captureFailedTestOutput(result);
   return {
     name: `動作ブロック (${domain})`, domain, status: "error", total: 0, passed: 0, failed: 0,
     durationMs, runId: null, exitCode: result.exitCode ?? null, reason: `${domain} の動作ブロックを実行できませんでした`,
+    ...(output ? { output } : {}),
   };
 }
 
