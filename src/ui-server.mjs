@@ -28,7 +28,7 @@ import { renderPrBoardPage } from "./ui-pr-board-page.mjs";
 import { renderReleasePage } from "./ui-release-page.mjs";
 import { renderSettingsPage } from "./ui-settings-page.mjs";
 import { isAllowedHost, isAuthorizedSession } from "./ui-security.mjs";
-import { LIST_STATES, ListResponseCache, listResponseBody } from "./pr-list-cache.mjs";
+import { LIST_STATES, ListResponseCache, listResponseBody, parseListIncludes } from "./pr-list-cache.mjs";
 
 const PAGES = new Map([
   ["/", renderPrBoardPage],
@@ -247,17 +247,19 @@ export function createUiRequestHandler({
       if (request.method === "GET" && url.pathname === "/api/local-prs") {
         const view = url.searchParams.get("view") ?? "full";
         const state = url.searchParams.get("state") ?? "all";
-        if ((view !== "full" && view !== "summary") || !LIST_STATES.has(state)) {
+        const includes = parseListIncludes(url.searchParams.getAll("include"));
+        if ((view !== "full" && view !== "summary") || !LIST_STATES.has(state) || !includes) {
           sendJson(response, 400, {
-            error: "view must be full|summary and state must be open|merged|closed|all.",
+            error: "view must be full|summary, state must be open|merged|closed|all, and include must be reviewReport.",
           });
           return;
         }
+        const { includeReviewReport } = includes;
         const pullRequests = localPrService.listPullRequests();
         sendSerializedJson(response, 200, listBody.render(
           pullRequests,
-          view + "|" + state,
-          () => listResponseBody(pullRequests, { view, state }),
+          view + "|" + state + "|" + (includeReviewReport ? "reviewReport" : ""),
+          () => listResponseBody(pullRequests, { view, state, includeReviewReport }),
         ));
         return;
       }

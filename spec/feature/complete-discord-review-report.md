@@ -1,11 +1,11 @@
 ---
 type: feature
 title: "complete-discord-review-report — 完全な審査報告 API"
-description: "local PR の詳細と open 一覧に、attempt 単位の reviewReport を公開し、Discord 側が Revisor を開かずに審査開始、各段階、登録チェック、スキップ理由、レビュー本文、結果を表示できるようにする。"
+description: "local PR の詳細に attempt 単位の reviewReport を公開し (一覧は版だけ)、Discord 側が Revisor を開かずに審査開始、各段階、登録チェック、スキップ理由、レビュー本文、結果を表示できるようにする。"
 service: revisor
 domain: review-report
 status: implemented
-updated: 2026-09-21
+updated: 2026-10-02
 ---
 
 # complete-discord-review-report — 完全な審査報告 API
@@ -56,8 +56,11 @@ callback を使う。Augur の動作ブロックは並行に走り個別の開�
 既存のゲート・安全な再利用条件は変更しない。security の段階記録は実結果に従い、通過しな
 かった skip を通過済みとして引き継がない。
 
-軽量一覧 (`view=summary`) は `reviewReportVersion` だけを返す。カードは詳細の有無しか要らず、
-全文は詳細 (`/v1/local-prs/:id`) と `view=full` の一覧が返す。
+軽量一覧 (`view=summary`) と既定の全項目一覧 (`view=full`) は `reviewReportVersion` だけを返す。
+本文は詳細 (`/v1/local-prs/:id`、UI は `/api/local-prs/:id`) が PR 単位で返す。全件の本文は
+一覧応答の 9 割超 (2026-10-02 実測 277 MB / 290 MB) を占め、一覧取得をタイムアウトさせていたため
+一覧から外した。一覧で本文が必要な呼び出しは `include=reviewReport` を明示する (未知の
+`include` 値は 400)。
 
 ## 動作ブロック・体験ブロック
 

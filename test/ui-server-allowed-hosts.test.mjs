@@ -209,7 +209,9 @@ test("filters and summarizes session-authorized local PR lists", async () => {
       headers: { "x-revisor-session": "ui-session-token" },
     }), full);
     assert.equal(full.status, 200);
-    assert.equal(full.body, JSON.stringify({ pullRequests }));
+    assert.equal(full.body, JSON.stringify({
+      pullRequests: pullRequests.map((pullRequest) => ({ ...pullRequest, reviewReportVersion: null })),
+    }));
 
     const summary = response();
     await handle(request({

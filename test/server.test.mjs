@@ -533,7 +533,9 @@ test("filters and summarizes local PR lists without changing the default respons
   const full = response();
   await handler(request({ method: "GET", url: "/v1/local-prs" }), full);
   assert.equal(full.status, 200);
-  assert.equal(full.body, JSON.stringify({ pullRequests }));
+  assert.equal(full.body, JSON.stringify({
+    pullRequests: pullRequests.map((pullRequest) => ({ ...pullRequest, reviewReportVersion: null })),
+  }));
 
   const summary = response();
   await handler(request({ method: "GET", url: "/v1/local-prs?view=summary&state=open" }), summary);
@@ -549,6 +551,46 @@ test("filters and summarizes local PR lists without changing the default respons
   const invalid = response();
   await handler(request({ method: "GET", url: "/v1/local-prs?view=compact" }), invalid);
   assert.equal(invalid.status, 400);
+});
+
+test("serves review report bodies per PR instead of in the full list", async () => {
+  const reviewReport = {
+    version: 1, attemptId: "job-1", headSha: "a".repeat(40),
+    entries: [{ id: "stage:tests", stage: "tests", output: { text: "large output", truncated: false } }],
+  };
+  const pullRequest = {
+    id: "pr-open", number: 1, repository: "LUDIARS/Revisor", title: "Open PR",
+    status: "open", checkStatus: "test_ok", body: "full record", reviewReport,
+  };
+  const handler = createRequestHandler({
+    env: {}, sessionToken: "ui-token", queue: { state: () => ({}) },
+    localPrService: {
+      listPullRequests: () => [pullRequest],
+      getPullRequest: (id) => (id === pullRequest.id ? pullRequest : null),
+    },
+  });
+  for (const url of ["/v1/local-prs", "/v1/local-prs?state=all", "/v1/local-prs?view=full&state=open"]) {
+    const full = response();
+    await handler(request({ method: "GET", url }), full);
+    assert.equal(full.status, 200);
+    const [listed] = JSON.parse(full.body).pullRequests;
+    assert.equal("reviewReport" in listed, false);
+    assert.equal(listed.reviewReportVersion, 1);
+    assert.equal(listed.body, "full record");
+  }
+
+  const included = response();
+  await handler(request({ method: "GET", url: "/v1/local-prs?include=reviewReport" }), included);
+  assert.deepEqual(JSON.parse(included.body).pullRequests[0].reviewReport, reviewReport);
+
+  const detail = response();
+  await handler(request({ method: "GET", url: "/v1/local-prs/pr-open" }), detail);
+  assert.equal(detail.status, 200);
+  assert.deepEqual(JSON.parse(detail.body).pullRequest.reviewReport, reviewReport);
+
+  const unknownInclude = response();
+  await handler(request({ method: "GET", url: "/v1/local-prs?include=lifecycleEvents" }), unknownInclude);
+  assert.equal(unknownInclude.status, 400);
 });
 
 test("serves version state and confirmed release actions through the UI session", async () => {

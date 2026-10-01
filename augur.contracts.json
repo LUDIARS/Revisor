@@ -92,6 +92,15 @@
       "module": "contracts/experience-evidence-for-review-report.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-11",
+      "criterion": "C-11 listResponseBody(pullRequests, options): view=full の一覧は include 指定が無い限り reviewReport 本文を外し reviewReportVersion を残す。summary と state フィルタは従来どおり",
+      "symbol": "listResponseBody",
+      "file": "src/pr-list-cache.mjs",
+      "module": "contracts/list-response-body-without-review-report.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

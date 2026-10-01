@@ -5,6 +5,7 @@ import {
   filterByState,
   ListResponseCache,
   listResponseBody,
+  parseListIncludes,
   PrListCache,
   summaryProjection,
 } from "../src/pr-list-cache.mjs";
@@ -87,7 +88,46 @@ test("serializes summary projections and preserves full all records", () => {
       decision: { state: "needs_human" },
     }],
   });
-  assert.equal(listResponseBody(pullRequests, { view: "full", state: "all" }), JSON.stringify({ pullRequests }));
+  assert.equal(
+    listResponseBody(pullRequests, { view: "full", state: "all" }),
+    JSON.stringify({ pullRequests: pullRequests.map((pullRequest) => ({ ...pullRequest, reviewReportVersion: null })) }),
+  );
+});
+
+test("drops review report bodies from the full list but keeps their version", () => {
+  const reviewReport = { version: 1, attemptId: "job-1", headSha: "a".repeat(40), entries: [{ output: "large" }] };
+  const pullRequests = [
+    { id: "pr-1", status: "open", body: "full", reviewReport },
+    { id: "pr-2", status: "merged", body: "legacy" },
+  ];
+  const full = JSON.parse(listResponseBody(pullRequests, { view: "full", state: "all" })).pullRequests;
+  assert.deepEqual(full, [
+    { id: "pr-1", status: "open", body: "full", reviewReportVersion: 1 },
+    { id: "pr-2", status: "merged", body: "legacy", reviewReportVersion: null },
+  ]);
+  // The cached source records stay intact for the detail route.
+  assert.deepEqual(pullRequests[0].reviewReport, reviewReport);
+  const open = JSON.parse(listResponseBody(pullRequests, { view: "full", state: "open" })).pullRequests;
+  assert.deepEqual(open.map((pullRequest) => pullRequest.id), ["pr-1"]);
+});
+
+test("returns review report bodies in the full list only when explicitly included", () => {
+  const pullRequests = [{ id: "pr-1", status: "open", reviewReport: { version: 1, entries: [] } }];
+  assert.equal(
+    listResponseBody(pullRequests, { view: "full", state: "all", includeReviewReport: true }),
+    JSON.stringify({ pullRequests }),
+  );
+  // summary ignores the include flag and keeps its projection.
+  const summary = JSON.parse(listResponseBody(pullRequests, { view: "summary", state: "all", includeReviewReport: true }));
+  assert.equal("reviewReport" in summary.pullRequests[0], false);
+  assert.equal(summary.pullRequests[0].reviewReportVersion, 1);
+});
+
+test("parses include query values", () => {
+  assert.deepEqual(parseListIncludes([]), { includeReviewReport: false });
+  assert.deepEqual(parseListIncludes(["reviewReport"]), { includeReviewReport: true });
+  assert.deepEqual(parseListIncludes(["reviewReport,", " reviewReport "]), { includeReviewReport: true });
+  assert.equal(parseListIncludes(["body"]), null);
 });
 
 test("keeps complete review reports out of summary cards", () => {
