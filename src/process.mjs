@@ -21,11 +21,15 @@ export async function runProcess({
       resolve({ ok: false, stdout, stderr: error.message, exitCode: null });
       return;
     }
+    // 渡す入力が無いコマンド (git merge-base 等) には入力の口を開かない。開いて空文字を
+    // 書くと、すぐ終わる子が先に口を閉じたとき EPIPE になり、成功 (exit 0) が失敗扱いになる。
+    const hasInput = stdin !== undefined && stdin !== null && stdin !== "";
     const child = spawn(invocation.command, invocation.args, {
       cwd,
       env: invocation.env,
       windowsHide: true,
       shell: false,
+      stdio: [hasInput ? "pipe" : "ignore", "pipe", "pipe"],
     });
     const finish = (result) => {
       if (settled) return;
@@ -58,6 +62,7 @@ export async function runProcess({
     child.on("close", (exitCode) => {
       finish({ ok: exitCode === 0 && !stdinFailed, stdout, stderr, exitCode });
     });
+    if (!hasInput) return;
     child.stdin.on("error", (error) => {
       // A child can close its input while end() is still writing. Stream errors
       // do not reach child.on('error'); without this handler they kill the worker.

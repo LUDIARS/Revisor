@@ -56,3 +56,38 @@ test("reports a child closing stdin without crashing or hiding its exit code", a
   assert.equal(result.exitCode, 0);
   assert.match(result.stderr, /stdin write failed \([^)]+\)/);
 });
+
+test("treats a fast command without input as successful (no stdin pipe, no EPIPE)", async () => {
+  // git merge-base のように入力を読まずすぐ終わるコマンドを繰り返し起動する。
+  // 以前は空の入力を書き込み、子が先に終わると EPIPE で失敗扱いになっていた。
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const result = await runProcess({
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      timeoutMs: TIMEOUT_MS,
+    });
+    assert.equal(result.ok, true, result.stderr);
+    assert.doesNotMatch(result.stderr, /stdin write failed/);
+  }
+});
+
+test("does not hand the parent's input to a command that takes none", async () => {
+  const result = await runProcess({
+    command: process.execPath,
+    args: ["-e", "process.stdin.on('data',()=>{});process.stdin.on('end',()=>process.stdout.write('eof'))"],
+    timeoutMs: TIMEOUT_MS,
+  });
+  assert.equal(result.ok, true, result.stderr);
+  assert.equal(result.stdout, "eof");
+});
+
+test("still delivers input to commands that read it", async () => {
+  const result = await runProcess({
+    command: process.execPath,
+    args: ["-e", "let s='';process.stdin.on('data',(c)=>s+=c);process.stdin.on('end',()=>process.stdout.write(s.toUpperCase()))"],
+    stdin: "patch",
+    timeoutMs: TIMEOUT_MS,
+  });
+  assert.equal(result.ok, true, result.stderr);
+  assert.equal(result.stdout, "PATCH");
+});
