@@ -2449,3 +2449,89 @@ test("high risk queues full autofix instead of reusing the passing review", asyn
     assert.equal(submissions.length, 2);
   } finally { removeFixture(fixture.directory); }
 });
+
+test("a re-review announces its start once, with the reason, to the board and the session", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const lifecycle = [];
+  const restarts = [];
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit() {
+        return { id: "job" };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    notifyLifecycle: async (event) => {
+      lifecycle.push(event);
+    },
+    notifyReviewRestart: async (pullRequest, reason) => {
+      restarts.push({ id: pullRequest.id, checkStatus: pullRequest.checkStatus, reason });
+    },
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    // 初回の受付は再審査ではない。
+    assert.deepEqual(restarts, []);
+    store.updatePullRequest(pullRequest.id, { checkStatus: "action_required" });
+
+    await service.retryPullRequest(pullRequest.id);
+
+    assert.deepEqual(restarts, [{ id: pullRequest.id, checkStatus: "queued", reason: "manual" }]);
+    assert.equal(lifecycle.filter((event) => event === "review_queued").length, 1);
+  } finally {
+    removeFixture(fixture.directory);
+  }
+});
+
+test("a failing session notifier does not block the re-review", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const submitted = [];
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit(request) {
+        submitted.push(request);
+        return { id: `job-${submitted.length}` };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+    notifyReviewRestart: async () => {
+      throw new Error("Concordia is down");
+    },
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    store.updatePullRequest(pullRequest.id, { checkStatus: "action_required" });
+
+    const retried = await service.retryPullRequest(pullRequest.id);
+    assert.equal(retried.checkStatus, "queued");
+    assert.equal(submitted.length, 2);
+  } finally {
+    removeFixture(fixture.directory);
+  }
+});

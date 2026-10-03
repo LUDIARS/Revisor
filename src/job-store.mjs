@@ -155,6 +155,66 @@ export class JobStore {
     return withImmediateTransaction(database, () => run(database));
   }
 
+  // job の `request` は審査の入力一式 (前回の PR 記録を含む) で、 1 件数百 KB になる。
+  // 全件を読むと 200 件で 70 MB 近い JSON.parse になり、 キュー操作のたびにイベント
+  // ループを止めていた。 条件で絞れる操作は SQL 側で行を選んでから parse する。
+  #jobsWhere(database, condition, ...params) {
+    return database.prepare(`SELECT record FROM jobs WHERE ${condition}`).all(...params)
+      .map((row) => JSON.parse(row.record));
+  }
+
+  #activeJobs(database, statuses = ["queued", "running"]) {
+    const placeholders = statuses.map(() => "?").join(", ");
+    return this.#jobsWhere(
+      database,
+      `json_extract(record, '$.status') IN (${placeholders})`,
+      ...statuses,
+    );
+  }
+
+  /**
+   * 状態表示・ローテーション用の軽い射影。 `request` 本体は読まず、 表示に要る
+   * リポジトリ・番号・レーンだけを SQLite の JSON 関数で取り出す。
+   */
+  #jobSummaries(database) {
+    return database.prepare(`
+      SELECT id,
+        json_extract(record, '$.key') AS key,
+        json_extract(record, '$.localPrId') AS localPrId,
+        json_extract(record, '$.status') AS status,
+        json_extract(record, '$.reviewLane') AS reviewLane,
+        json_extract(record, '$.attempts') AS attempts,
+        json_extract(record, '$.claimedPid') AS claimedPid,
+        json_extract(record, '$.error') AS error,
+        json_extract(record, '$.createdAt') AS createdAt,
+        json_extract(record, '$.updatedAt') AS updatedAt,
+        json_extract(record, '$.fastLaneSequence') AS fastLaneSequence,
+        json_extract(record, '$.request.localPrId') AS requestLocalPrId,
+        json_extract(record, '$.request.repository') AS repository,
+        json_extract(record, '$.request.number') AS number,
+        json_extract(record, '$.request.reviewLane') AS requestReviewLane
+      FROM jobs
+    `).all().map((row) => ({
+      id: row.id,
+      key: row.key,
+      localPrId: row.localPrId,
+      status: row.status,
+      reviewLane: row.reviewLane,
+      attempts: row.attempts,
+      claimedPid: row.claimedPid,
+      error: row.error,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      fastLaneSequence: row.fastLaneSequence,
+      request: {
+        localPrId: row.requestLocalPrId,
+        repository: row.repository,
+        number: row.number,
+        reviewLane: row.requestReviewLane,
+      },
+    }));
+  }
+
   #allJobs(database) {
     return database.prepare("SELECT record FROM jobs").all()
       .map((row) => JSON.parse(row.record));
@@ -178,8 +238,7 @@ export class JobStore {
   async enqueue(request, { force = false } = {}) {
     const key = jobKey(request);
     return this.#mutate((database) => {
-      const matching = this.#allJobs(database)
-        .filter((job) => job.key === key)
+      const matching = this.#jobsWhere(database, "json_extract(record, '$.key') = ?", key)
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
       const active = matching.find((job) => job.status === "queued" || job.status === "running");
       if (active) return { job: active, created: false };
@@ -221,7 +280,7 @@ export class JobStore {
   async claimNext({ reviewLane = null } = {}) {
     const selectedLane = reviewLane === null ? null : normalizeReviewLane(reviewLane);
     return this.#mutate((database) => {
-      const job = this.#allJobs(database)
+      const job = this.#activeJobs(database, ["queued"])
         .filter((candidate) => candidate.status === "queued"
           && (selectedLane === null
             || normalizeReviewLane(candidate.reviewLane ?? candidate.request?.reviewLane)
@@ -257,7 +316,7 @@ export class JobStore {
   /** @implements SPEC-REVIEW-FAST-LANE-DURABILITY */
   async promote(localPrId) {
     return this.#mutate((database) => {
-      const job = this.#allJobs(database).find((candidate) =>
+      const job = this.#activeJobs(database, ["queued"]).find((candidate) =>
         candidate.localPrId === localPrId && candidate.status === "queued");
       if (!job) {
         throw new RevisorError(`Queued review job for local PR '${localPrId}' was not found.`);
@@ -305,7 +364,7 @@ export class JobStore {
     return this.#mutate((database) => {
       const requeued = [];
       const exhausted = [];
-      for (const job of this.#allJobs(database)) {
+      for (const job of this.#activeJobs(database, ["running"])) {
         if (job.status !== "running" || !processIsGone(job.claimedPid)) continue;
         job.claimedPid = null;
         job.updatedAt = this.now();
@@ -352,7 +411,7 @@ export class JobStore {
     }
     return this.#mutate((database) => {
       const abandoned = [];
-      for (const job of this.#allJobs(database)) {
+      for (const job of this.#activeJobs(database)) {
         if (job.localPrId !== localPrId && job.request?.localPrId !== localPrId) continue;
         if (job.status !== "queued" && job.status !== "running") continue;
         job.status = "failed";
@@ -376,8 +435,13 @@ export class JobStore {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  /**
+   * キューの状態。 各 job は表示用の射影 (`request` はリポジトリ・番号・レーンだけ) で、
+   * 審査の入力本体は含めない。 入力が要る処理は {@link get} で 1 件ずつ読むこと。
+   */
   state() {
-    const jobs = this.list();
+    const jobs = this.#jobSummaries(this.#db())
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     return {
       queued: jobs.filter((job) => job.status === "queued").length,
       running: jobs.filter((job) => job.status === "running").length,
@@ -396,7 +460,7 @@ export class JobStore {
   // 終局した job だけを古い順に落とす。 未終了の job を数合わせで消すと、実行中の
   // ワーカーが自分の job を見失う。
   #trim(database) {
-    const jobs = this.#allJobs(database);
+    const jobs = this.#jobSummaries(database);
     if (jobs.length <= this.maxJobs) return;
     let count = jobs.length;
     const settled = jobs

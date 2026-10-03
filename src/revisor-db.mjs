@@ -105,6 +105,7 @@ export function openRevisorDatabase(path) {
       CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, record TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pull_requests (id TEXT PRIMARY KEY, record TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pull_request_anatomia (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS pull_request_review_reports (id TEXT PRIMARY KEY, record TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, record TEXT NOT NULL);
     `);
     if (isNewDatabase) secureDatabaseFiles(path);

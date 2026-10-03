@@ -43,7 +43,7 @@ export function summaryProjection(pullRequest) {
     // 進捗記録は検査ごとの出力を持ち、この PR で登録チェック単位の記録が増えた。
     // 板の一覧カードは詳細の有無だけ分かればよいので版だけを返し、全文は
     // 詳細 (`/v1/local-prs/:id`) が返す (`view=full` の一覧は既定で外す)。
-    reviewReportVersion: pullRequest.reviewReport?.version ?? null,
+    reviewReportVersion: reviewReportVersionOf(pullRequest),
     // 決着済み PR の終局投稿 (Concordia Test Forum) がマージ先を示すのに使う。
     mergeCommitSha: pullRequest.mergeCommitSha ?? null,
     externalVerification: pullRequest.externalVerification ?? null,
@@ -91,16 +91,41 @@ export function parseListIncludes(values) {
 // 一覧の取得をタイムアウトさせていた。full 一覧からは本文を外して版だけを残し、
 // 本文は PR 単位の詳細 (`/v1/local-prs/:id`) から取る。
 export function fullProjection(pullRequest) {
-  const { reviewReport, ...rest } = pullRequest;
-  return { ...rest, reviewReportVersion: reviewReport?.version ?? null };
+  const { reviewReport: _reviewReport, ...rest } = pullRequest;
+  return { ...rest, reviewReportVersion: reviewReportVersionOf(pullRequest) };
+}
+
+// 一覧の記録は本文を持たず版だけを持つ (state store が本文を別テーブルへ分けた)。
+// 本文付きの記録 (詳細・テストの手組み) も同じ版を返せるよう、 両方を見る。
+function reviewReportVersionOf(pullRequest) {
+  return pullRequest.reviewReportVersion ?? pullRequest.reviewReport?.version ?? null;
+}
+
+/**
+ * `include=reviewReport` の full 一覧。 本文は state store の別テーブルにあるので、
+ * 絞り込んだ PR の分だけ `readReviewReports(ids)` で読んで付ける。
+ */
+function withReviewReports(pullRequests, readReviewReports) {
+  const reports = readReviewReports(pullRequests.map((pullRequest) => pullRequest.id));
+  return pullRequests.map((pullRequest) => {
+    const { reviewReportVersion: _version, ...rest } = pullRequest;
+    const reviewReport = reports.get(pullRequest.id) ?? pullRequest.reviewReport;
+    return reviewReport === undefined ? rest : { ...rest, reviewReport };
+  });
 }
 
 /** @implements SPEC-PR-LIST-CACHE */
-export function listResponseBody(pullRequests, { view, state, includeReviewReport = false }) {
+export function listResponseBody(pullRequests, {
+  view,
+  state,
+  includeReviewReport = false,
+  readReviewReports = () => new Map(),
+}) {
   const filtered = filterByState(pullRequests, state);
   let projected = filtered;
   if (view === "summary") projected = filtered.map(summaryProjection);
-  else if (!includeReviewReport) projected = filtered.map(fullProjection);
+  else if (includeReviewReport) projected = withReviewReports(filtered, readReviewReports);
+  else projected = filtered.map(fullProjection);
   return JSON.stringify({ pullRequests: projected });
 }
 // @ts-expect-error augur-inject

@@ -117,3 +117,17 @@ token を一切保持しない。
 > `reviewReport` を任意で投影する。entry は安定した attempt 内 id で置換し、開始・段階・
 > 再利用/skip・最終結果を ISO UTC 時刻と秘密情報を無害化した本文で残す。通知 event は
 > identifier-only の invalidation のままとし、consumer は fresh projection を読む。
+
+## SPEC-REVIEW-RESTART-NOTICE: 再審査の開始通知
+
+再審査は人手の retry だけでなく、Revisor 再起動後の復旧・審査後の差分内容の変化・
+高スコア PR の自動修正からも始まる。どの経路も `LocalPrService#requeue` を通るので、
+そこを唯一の通知点とし、受付が成立した時点で 1 回だけ次の 2 つを出す (neco 2026-10-03)。
+
+- 板と `報告` channel への lifecycle `review_queued` (従来は人手の retry だけが出していた)。
+- PR を出したセッションへの inject (`review-restart-notice.mjs`)。本文は PR・レーン・理由
+  (`manual` / `interrupted` / `stale_content` / `risk_reassessment` を日本語で) と
+  「結果は完了時に通知する」の 3 行。session_id の無い PR には送らない。
+
+初回の受付は再審査ではないので送らない。通知は best-effort で、失敗しても再審査の受付は変えない。
+完了通知 (1 レビュー 1 通の終局) はこれまでどおり別に送る。

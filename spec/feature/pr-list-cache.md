@@ -25,3 +25,31 @@ DB 全体を運ぶ (実測: 1,685 件で応答 142MB・約 2 秒、うち 91% �
   移行後に旧コードのプロセスが本体へ書いた `anatomia` は、そのプロセスの最新の書き込みとして
   別テーブルより優先し、次の書き込みで別テーブルへ移す。
 - `view=summary` は決着済み PR の終局表示のため `mergeCommitSha` を含む。
+
+## SPEC-PR-LIST-SLIM-REPORT: 一覧の記録は審査レポート本文を持たない
+
+審査レポート本文 (`reviewReport`) は `pull_request_review_reports` テーブルに置き、
+`pull_requests.record` には版 (`reviewReportVersion`) だけを残す。本文は全件で PR 記録の
+9 割超を占め (2026-10-02 実測 277 MB / 290 MB)、一覧だけでなくリポジトリ一覧・Test Workflow・
+自動マージのスイープが毎回全件を JSON.parse して 1 回 4 秒前後イベントループを止めていた。
+
+- store の一覧 (`listPullRequests`) の記録は `reviewReport` を持たず `reviewReportVersion` を持つ。
+- 単一 PR の取得 (`getPullRequest`) は `reviewReport` を付け戻し、`reviewReportVersion` は出さない
+  (完全な記録の形は分離前と同じ)。完了通知・再審査・詳細 API は単一取得を使う。
+- 状態遷移やイベント追記は本文を書き直さない。本文は patch が `reviewReport` を含むときだけ書く。
+  `reviewReport: null` は値として保存する。
+- 一覧 API の `include=reviewReport` は、絞り込んだ PR の本文だけを別テーブルから読んで付ける。
+- 既存 database は開いたときに一度だけ本体の本文を別テーブルへ移す (meta `review_report_split`)。
+  移行は id 順に 50 件ずつの書き込みトランザクションに分け、間で他プロセスを通す
+  (2026-10-03 実測: 実データ 624 件・14 バッチで計 43 秒、1 バッチの最長 5 秒)。
+  旧コードのプロセスが本体へ書いた本文は、次の書き込みまで別テーブルより優先する。
+
+## SPEC-REVIEW-QUEUE-STATE-PROJECTION: キュー状態は審査の入力を運ばない
+
+審査 job の `request` は審査の入力一式 (前回の PR 記録を含む) で 1 件数百 KB になる
+(2026-10-03 実測: 200 件で `/v1/review-work` が 67 MB)。
+
+- `JobStore.state()` の各 job は表示用の射影で、`request` はリポジトリ・番号・レーン・PR id だけ。
+  射影は SQLite の JSON 関数で取り出し、入力本体を JSON.parse しない。
+- 入力が要る処理 (worker の確保 `claimNext`、`get`) は従来どおり完全な job を返す。
+- 投入・確保・回収など条件で絞れる操作は、SQL で対象行を選んでから parse する。

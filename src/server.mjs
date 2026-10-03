@@ -218,7 +218,12 @@ export function createRequestHandler({
         sendSerializedJson(response, 200, listBody.render(
           pullRequests,
           view + "|" + state + "|" + (includeReviewReport ? "reviewReport" : ""),
-          () => listResponseBody(pullRequests, { view, state, includeReviewReport }),
+          () => listResponseBody(pullRequests, {
+            view,
+            state,
+            includeReviewReport,
+            readReviewReports: (ids) => localPrService.readReviewReports?.(ids) ?? new Map(),
+          }),
         ));
         return;
       }

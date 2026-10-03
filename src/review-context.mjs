@@ -18,6 +18,7 @@ import { postDiscordWebhook } from "./discord-webhook.mjs";
 import { notifyRepositoryEvent } from "./repository-notification.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
+import { notifyReviewRestart } from "./review-restart-notice.mjs";
 import { resolveDbPath } from "./revisor-db.mjs";
 import { LocalPrStore } from "./state-store.mjs";
 
@@ -109,6 +110,13 @@ export function createReviewContext({
       notifyLifecycle: announceLifecycle,
       notifyRisk: (event, pullRequest) => notifyRiskSystem({
         baseUrl: optionalConcordiaUrl(cwd, true), event, pullRequest,
+      }),
+      // 完了通知と同じ宛先・同じ経路 (提出セッションへの inject)。
+      notifyReviewRestart: (pullRequest, reason) => notifyReviewRestart({
+        pullRequest,
+        reason,
+        baseUrl: optionalConcordiaUrl(cwd, readSettings(env).concordiaContextEnabled),
+        notify: notifyConcordia,
       }),
       publicationCoordinator,
     });

@@ -51,6 +51,7 @@ import {
 } from "./local-version.mjs";
 import { normalizeReviewLane, REVIEW_LANES } from "./review-lane.mjs";
 import { decisionSettingsKey, PrListCache } from "./pr-list-cache.mjs";
+import { REVIEW_RESTART_REASONS } from "./review-restart-notice.mjs";
 import { RefactoringProposalCache } from "./refactoring-proposal-cache.mjs";
 
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
@@ -136,6 +137,7 @@ export class LocalPrService {
     log = serviceLog,
     notifyLifecycle = null,
     notifyRisk = null,
+    notifyReviewRestart = null,
     publicationCoordinator = new PublicationCoordinator(),
   }) {
     if (!store || !queue) {
@@ -163,6 +165,7 @@ export class LocalPrService {
     this.cliPath = cliPath;
     this.notifyLifecycle = notifyLifecycle;
     this.notifyRisk = notifyRisk;
+    this.notifyReviewRestart = notifyReviewRestart;
     this.publicationCoordinator = publicationCoordinator;
     this.lifecycleLockPath = store.path ? `${store.path}.lifecycle` : null;
     // Read on every decision, not cached: moving the accepted risk threshold has
@@ -378,12 +381,11 @@ export class LocalPrService {
     if (typeof force !== "boolean") throw new Error("force must be a boolean.");
     if (fastLane) this.#assertFastLaneAvailable();
     if (force) await this.#abandonStalledReview(pullRequest);
-    const queued = await this.#requeue(pullRequest, {
+    return this.#requeue(pullRequest, {
       reviewLane: fastLane ? REVIEW_LANES.FAST : REVIEW_LANES.STANDARD,
       allowActiveSameHead: force,
+      reason: REVIEW_RESTART_REASONS.MANUAL,
     });
-    await this.#announceLifecycle("review_queued", queued);
-    return queued;
   }
 
   /** @implements SPEC-REVIEW-FAST-LANE-AUTHORITY */
@@ -482,6 +484,7 @@ export class LocalPrService {
         await this.#requeue(pullRequest, {
           announceFailure: false,
           allowActiveSameHead: true,
+          reason: REVIEW_RESTART_REASONS.INTERRUPTED,
         });
         recovered.push({ id: pullRequest.id, repository: pullRequest.repository, number: pullRequest.number });
       } catch (error) {
@@ -550,6 +553,7 @@ export class LocalPrService {
     forceFullReview = false,
     allowActiveSameHead = false,
     reviewLane = normalizeReviewLane(pullRequest.reviewLane),
+    reason = forceFullReview ? REVIEW_RESTART_REASONS.RISK_REASSESSMENT : REVIEW_RESTART_REASONS.STALE_CONTENT,
   } = {}) {
     const repository = this.store.getRepository(pullRequest.repository);
     if (!repository) {
@@ -618,7 +622,26 @@ export class LocalPrService {
     // Queue admission can fail after the PR projection is prepared. Announce
     // reuse only once a worker can actually consume the retained evidence.
     this.#announceStageReuse(pullRequest, reusedStages, scope);
+    await this.#announceReviewRestart(requeued, reason);
     return requeued;
+  }
+
+  /**
+   * 再審査の開始を知らせる。 再審査はどの経路 (人手の retry・再起動後の復旧・審査後の
+   * 内容変化・高スコアの自動修正) でも {@link #requeue} を通るので、 ここが唯一の通知点。
+   * 板・Discord の lifecycle と、 PR を出したセッションへの通知の両方を出す。
+   * 通知は best-effort で、 失敗しても再審査の受付は変えない。
+   *
+   * @implements SPEC-REVIEW-RESTART-NOTICE
+   */
+  async #announceReviewRestart(pullRequest, reason) {
+    await this.#announceLifecycle("review_queued", pullRequest);
+    if (!this.notifyReviewRestart) return;
+    try {
+      await this.notifyReviewRestart(pullRequest, reason);
+    } catch {
+      // Session notification is observability only; it must not change PR admission.
+    }
   }
 
   /**
@@ -850,6 +873,11 @@ export class LocalPrService {
 
   testWorkflowProducts() {
     return this.store.testWorkflowProducts();
+  }
+
+  /** 一覧の `include=reviewReport` 用。 一覧の記録は本文を持たないので別に読む。 */
+  readReviewReports(ids) {
+    return this.store.readReviewReports?.(ids) ?? new Map();
   }
 
   // squash マージは base ref を前進させる。定期スイープ・レビュー完了時の自動マージ・

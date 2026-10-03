@@ -21,6 +21,15 @@ import {
   splitInlineAnatomia,
   writeAnatomia,
 } from "./pull-request-anatomia.mjs";
+import {
+  attachReviewReport,
+  detachReviewReport,
+  needsReviewReportSplit,
+  readReviewReport,
+  readReviewReports,
+  splitInlineReviewReports,
+  writeReviewReport,
+} from "./pull-request-review-report.mjs";
 
 const STATE_PATH_ENV = "REVISOR_STATE_PATH";
 const QA_ELIGIBLE_CHECK_STATUSES = new Set(["queued", "running", "test_ok"]);
@@ -97,12 +106,31 @@ function parsePullRequestRecord(record) {
 }
 
 /**
- * 解析結果 (`anatomia`) を付け戻した記録。 本体に残っている値 (旧コードの書き込み) が
- * あればそれを、 無ければ別テーブルの値を使う。 どちらにも無ければキーを作らない。
+ * 本体 record から解析結果 (`anatomia`) と審査レポート本文 (`reviewReport`) を外す。
+ * `light` は一覧用の記録 (レポートは版 `reviewReportVersion` だけ持つ)。
+ * `inline` / `reportInline` はそれぞれのキーが本体に在ったか (旧コードの書き込み)。
  */
-function attachAnatomia(loaded, database, id) {
+function detachHeavy(record) {
+  const anatomia = detachAnatomia(record);
+  const report = detachReviewReport(anatomia.light);
+  return {
+    light: report.light,
+    anatomia: anatomia.anatomia,
+    inline: anatomia.inline,
+    reviewReport: report.reviewReport,
+    reportInline: report.inline,
+  };
+}
+
+/**
+ * 解析結果と審査レポートを付け戻した完全な記録。 本体に残っている値 (旧コードの書き込み)
+ * があればそれを、 無ければ別テーブルの値を使う。 どちらにも無ければキーを作らない。
+ */
+function attachHeavy(loaded, database, id) {
   const anatomia = loaded.inline ? loaded.anatomia : readAnatomia(database, id);
-  return anatomia === undefined ? loaded.light : { ...loaded.light, anatomia };
+  const reviewReport = loaded.reportInline ? loaded.reviewReport : readReviewReport(database, id);
+  const record = attachReviewReport(loaded.light, reviewReport);
+  return anatomia === undefined ? record : { ...record, anatomia };
 }
 
 export class LocalPrStore {
@@ -140,6 +168,7 @@ export class LocalPrStore {
       const database = openRevisorDatabase(this.path);
       this.#importLegacy(database, displaced);
       this.#splitAnatomia(database);
+      this.#splitReviewReports(database);
       this.#database = database;
     } catch (error) {
       throw new RevisorError(`Revisor state is unreadable: ${this.path}`, { cause: error });
@@ -192,6 +221,15 @@ export class LocalPrStore {
     withImmediateTransaction(database, () => splitInlineAnatomia(database));
   }
 
+  /**
+   * 本体に入っている審査レポート本文を別テーブルへ一度だけ移す。 判定は読むだけ。
+   * 全件を 1 トランザクションにすると書き込みロックを数十秒握るので、 小分けに移す。
+   */
+  #splitReviewReports(database) {
+    if (!needsReviewReportSplit(database)) return;
+    splitInlineReviewReports(database, (batch) => withImmediateTransaction(database, batch));
+  }
+
   #mutate(run) {
     const database = this.#db();
     const result = withImmediateTransaction(database, () => run(database));
@@ -215,32 +253,41 @@ export class LocalPrStore {
       .run(record.id, JSON.stringify(record));
   }
 
-  /** 一覧用の記録。 解析結果 (`anatomia`) は持たない — 単一 PR の取得で読む。 */
+  /**
+   * 一覧用の記録。 解析結果 (`anatomia`) と審査レポート本文 (`reviewReport`) は持たず、
+   * レポートは版 (`reviewReportVersion`) だけ — 本文は単一 PR の取得で読む。
+   */
   #allPullRequests(database) {
     return database.prepare("SELECT record FROM pull_requests").all()
-      .map((row) => detachAnatomia(parsePullRequestRecord(row.record)).light);
+      .map((row) => detachHeavy(parsePullRequestRecord(row.record)).light);
   }
 
   #loadPullRequest(database, id) {
     const row = database.prepare("SELECT record FROM pull_requests WHERE id = ?").get(id);
-    return row ? detachAnatomia(parsePullRequestRecord(row.record)) : null;
+    return row ? detachHeavy(parsePullRequestRecord(row.record)) : null;
   }
 
   #getPullRequestRecord(database, id) {
     const loaded = this.#loadPullRequest(database, id);
-    return loaded ? attachAnatomia(loaded, database, id) : null;
+    return loaded ? attachHeavy(loaded, database, id) : null;
   }
 
   /**
-   * 記録を保存する。 解析結果は `anatomiaTouched` のときだけ書き直す — 状態遷移や
-   * イベント追記のたびに数 MB の解析結果を書き直さないため。
+   * 記録を保存する。 解析結果は `anatomiaTouched`、 審査レポートは `reviewReportTouched`
+   * のときだけ書き直す — 状態遷移やイベント追記のたびに数 MB を書き直さないため。
    */
-  #savePullRequest(database, record, { anatomiaTouched = true } = {}) {
-    const { light, anatomia } = detachAnatomia(record);
+  #savePullRequest(database, record, { anatomiaTouched = true, reviewReportTouched = true } = {}) {
+    const { light, anatomia, reviewReport } = detachHeavy(record);
     database
       .prepare("INSERT OR REPLACE INTO pull_requests (id, record) VALUES (?, ?)")
       .run(record.id, JSON.stringify(light));
     if (anatomiaTouched) writeAnatomia(database, record.id, anatomia);
+    if (reviewReportTouched) writeReviewReport(database, record.id, reviewReport);
+  }
+
+  /** 一覧の `include=reviewReport` 用。 指定した PR の本文だけを読む。 */
+  readReviewReports(ids) {
+    return readReviewReports(this.#db(), ids);
   }
 
   emitPullRequest(type, record) {
@@ -426,7 +473,7 @@ export class LocalPrStore {
     const outcome = this.#mutate((database) => {
       const loaded = this.#loadPullRequest(database, id);
       if (!loaded) throw new RevisorError(`Local PR '${id}' was not found.`);
-      const record = attachAnatomia(loaded, database, id);
+      const record = attachHeavy(loaded, database, id);
       // patch 関数へはコピーを渡す。 返り値だけが反映され、引数への直接変更は捨てられる
       // — という契約を JSON ファイル時代から変えない。
       const patch = createPatch(structuredClone(record));
@@ -434,9 +481,10 @@ export class LocalPrStore {
         return { pullRequest: record, updated: false };
       }
       const merged = { ...record, ...patch, id: record.id, updatedAt: this.now() };
-      // 本体に残っていた解析結果は、 この書き込みで別テーブルへ移す。
+      // 本体に残っていた解析結果・レポート本文は、 この書き込みで別テーブルへ移す。
       this.#savePullRequest(database, merged, {
         anatomiaTouched: loaded.inline || Object.hasOwn(patch, "anatomia"),
+        reviewReportTouched: loaded.reportInline || Object.hasOwn(patch, "reviewReport"),
       });
       return { pullRequest: merged, updated: true };
     });
@@ -448,7 +496,7 @@ export class LocalPrStore {
     const updated = this.#mutate((database) => {
       const loaded = this.#loadPullRequest(database, id);
       if (!loaded) throw new RevisorError(`Local PR '${id}' was not found.`);
-      const record = attachAnatomia(loaded, database, id);
+      const record = attachHeavy(loaded, database, id);
       const lifecycleEvents = Array.isArray(record.lifecycleEvents)
         ? record.lifecycleEvents
         : [];
@@ -460,7 +508,10 @@ export class LocalPrStore {
       });
       record.lifecycleEvents = lifecycleEvents.slice(-MAX_PULL_REQUEST_EVENTS);
       record.updatedAt = this.now();
-      this.#savePullRequest(database, record, { anatomiaTouched: loaded.inline });
+      this.#savePullRequest(database, record, {
+        anatomiaTouched: loaded.inline,
+        reviewReportTouched: loaded.reportInline,
+      });
       return record;
     });
     this.emitPullRequest("pull_request.updated", updated);

@@ -304,3 +304,36 @@ test("abandoning requires a local PR id and a reason", async () => {
     removeFixture(fixture.directory);
   }
 });
+
+test("queue state lists jobs without the review input payload", async () => {
+  const fixture = storeFixture();
+  try {
+    const previousReview = { reviewReport: { body: "x".repeat(10_000) } };
+    const { job } = await fixture.store.enqueue(request({ previousReview, reviewLane: "fast" }));
+    await fixture.store.enqueue(request({ localPrId: "pr-2", number: 2, headSha: "bbb" }));
+
+    const state = fixture.store.state();
+    assert.equal(state.queued, 2);
+    assert.equal(state.lanes.fast, 1);
+    assert.equal(state.lanes.standard, 1);
+    const listed = state.jobs.find((candidate) => candidate.id === job.id);
+    // 表示に要るのはリポジトリ・番号・レーンだけ。 審査の入力本体は含めない。
+    assert.deepEqual(listed.request, {
+      localPrId: "pr-1",
+      repository: "LUDIARS/Product",
+      number: 1,
+      reviewLane: "fast",
+    });
+    assert.equal(listed.status, "queued");
+    assert.equal(listed.reviewLane, "fast");
+    assert.ok(JSON.stringify(state).length < 2_000);
+    // 入力が要る処理は 1 件ずつ読む。
+    assert.deepEqual(fixture.store.get(job.id).request.previousReview, previousReview);
+    // 状態表示で入力を読まなくても、確保は全体を返す (worker が審査に使う)。
+    const claimed = await fixture.store.claimNext();
+    assert.equal(claimed.id, job.id);
+    assert.deepEqual(claimed.request.previousReview, previousReview);
+  } finally {
+    removeFixture(fixture.directory);
+  }
+});
