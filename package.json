@@ -13,7 +13,8 @@
     "scripts",
     "spec",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "lib/lapilli/packages/one-shot"
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
@@ -22,6 +23,9 @@
     "start": "node src/cli.mjs serve"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@ludiars/one-shot": "file:lib/lapilli/packages/one-shot"
   }
 }

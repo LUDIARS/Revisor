@@ -34,7 +34,8 @@
   ],
   "specRefs": [
     "runtime-execution — policy-neutral child-process boundary",
-    "SPEC-CODEX-SANDBOX-MODE: Windows native Codex sandbox launcher の回避"
+    "SPEC-CODEX-SANDBOX-MODE: Windows native Codex sandbox launcher の回避",
+    "spec/feature/shared-one-shot.md"
   ],
   "rationale": "Security-scan policy owns the meaning and lifecycle of CODEX_SECURITY_STATE_DIR. The generic process runner only forwards an optional environment and owns the spawned process lifecycle, so it remains reusable by CI and other adapters without importing review-gate policy. The WSL launch and Windows-native sandbox selections live here for the same reason as the cmd.exe shim: they answer \"how is a CLI started on this host\", not \"what should be reviewed\". Runtime defaults to native and sandboxing defaults to enabled; danger-full-access is restricted to the affected native Windows runtime."
 }

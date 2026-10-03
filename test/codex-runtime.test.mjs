@@ -77,6 +77,7 @@ test("builds a wsl.exe argv that cds into the converted worktree", () => {
   const args = buildWslCodexArgs({
     args: ["exec", "--model", "gpt-5.6-terra", "--sandbox", "workspace-write", "-"],
     cwd: "E:\\Document\\Ars\\work\\head",
+    sharedCliPath: "E:/library with spaces/cli.js",
     config: {
       runtime: "wsl",
       distro: "Ubuntu",
@@ -92,7 +93,7 @@ test("builds a wsl.exe argv that cds into the converted worktree", () => {
     "--",
     "bash",
     "-lc",
-    "cd '/mnt/e/Document/Ars/work/head' && \"$HOME\"'/.local/bin/codex' 'exec' '--model' "
+    "cd '/mnt/e/Document/Ars/work/head' && exec node '/mnt/e/library with spaces/cli.js' \"$HOME\"'/.local/bin/codex' 'exec' '--model' "
       + "'gpt-5.6-terra' '--sandbox' 'workspace-write' '-'",
   ]);
 });

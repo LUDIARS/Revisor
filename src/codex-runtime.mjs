@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { RevisorError } from "./errors.mjs";
 import { runNamedCli, runProcess } from "./process.mjs";
 
@@ -168,9 +169,14 @@ export function wslLauncherEnv(env) {
  *
  * @implements SPEC-CODEX-WSL-RUNTIME
  */
-export function buildWslCodexArgs({ args, cwd, config }) {
+export function buildWslCodexArgs({ args, cwd, config,
+  sharedCliPath = fileURLToPath(new URL("../lib/lapilli/packages/one-shot/src/cli.js", import.meta.url)),
+}) {
+  const libraryPath = /^[a-z]:/i.test(sharedCliPath) ? windowsPathToWslPath(sharedCliPath) : sharedCliPath;
   const command = [
     `cd ${posixShellQuote(windowsPathToWslPath(cwd))} &&`,
+    "exec node",
+    posixShellQuote(libraryPath),
     quoteWslBinary(config.binary),
     ...args.map((arg) => posixShellQuote(arg)),
   ].join(" ");

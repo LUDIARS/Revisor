@@ -91,3 +91,10 @@ test("still delivers input to commands that read it", async () => {
   assert.equal(result.ok, true, result.stderr);
   assert.equal(result.stdout, "PATCH");
 });
+
+test("shared launch preparation failure returns an explicit failed result", async () => {
+  const result = await runProcess({command: process.execPath, args: ["--print", "--model", "invalid model"], env: {}, oneShot: true});
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /Invalid one-shot model/);
+  assert.equal(result.exitCode, null);
+});

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { spawnOneShot } from "@ludiars/one-shot";
 import { isGitCommand, managedGitInvocation } from "./git-runtime.mjs";
 
 export async function runProcess({
@@ -8,6 +9,7 @@ export async function runProcess({
   stdin = "",
   timeoutMs = 10 * 60_000,
   env = process.env,
+  oneShot = false,
 }) {
   return new Promise((resolve) => {
     let stdout = "";
@@ -24,13 +26,19 @@ export async function runProcess({
     // 渡す入力が無いコマンド (git merge-base 等) には入力の口を開かない。開いて空文字を
     // 書くと、すぐ終わる子が先に口を閉じたとき EPIPE になり、成功 (exit 0) が失敗扱いになる。
     const hasInput = stdin !== undefined && stdin !== null && stdin !== "";
-    const child = spawn(invocation.command, invocation.args, {
-      cwd,
-      env: invocation.env,
-      windowsHide: true,
-      shell: false,
-      stdio: [hasInput ? "pipe" : "ignore", "pipe", "pipe"],
-    });
+    let child;
+    try {
+      child = (oneShot ? spawnOneShot : spawn)(invocation.command, invocation.args, {
+        cwd,
+        env: invocation.env,
+        windowsHide: true,
+        shell: false,
+        stdio: [hasInput ? "pipe" : "ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      resolve({ ok: false, stdout, stderr: error.message, exitCode: null });
+      return;
+    }
     const finish = (result) => {
       if (settled) return;
       settled = true;
@@ -78,6 +86,10 @@ export async function runProcess({
 // needs to add one variable must not have to reconstruct PATH (and ComSpec on
 // Windows), because a CLI launched without them cannot be found at all.
 export async function runNamedCli({ name, args, cwd, stdin, timeoutMs, env = process.env }) {
+  if ((name === "claude" && (args.includes("-p") || args.includes("--print"))) ||
+      (name === "codex" && args.includes("exec"))) {
+    return runProcess({ command: name, args, cwd, stdin, timeoutMs, env, oneShot: true });
+  }
   if (process.platform === "win32") {
     // npm-installed CLIs are .cmd shims on Windows. cmd.exe is required to
     // launch them; the command name and arguments are Revisor-owned constants.
