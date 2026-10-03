@@ -21,6 +21,20 @@ export function riskReassessmentAction(pr, enabled) {
   return pr.humanQuestion || isSoleGeniusHumanDecisionHold(pr) ? "hold" : "retry";
 }
 
+/**
+ * 人が求めた再審査で、 前のサイクルの記録を捨てる patch。
+ *
+ * サイクルは自動修正で HEAD が進んでも増やさない (上の 1 PR 1 サイクル)。 一方、 作成者の
+ * 出し直しや手動 retry は人の判断で始まる新しい審査で、 前の head の保留 (`held`) や
+ * 通知済み記録を引き継ぐと、 閾値内で通っても `needs_human` のまま自動マージが止まる
+ * (2026-10-03 LUDIARS/Revisor#2360: 登録テスト失敗で 100 超 → 保留、 出し直しで 60 でも保留)。
+ *
+ * @implements SPEC-RISK-REASSESSMENT
+ */
+export function resetRiskCycleProjection() {
+  return { riskReassessment: null, riskNotices: null };
+}
+
 /** @implements SPEC-RISK-REASSESSMENT */
 export async function notifyRiskOnce({ store, id, event, notify, now = () => new Date().toISOString() }) {
   let claimed = false;

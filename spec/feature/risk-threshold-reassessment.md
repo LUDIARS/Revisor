@@ -48,3 +48,9 @@ Rvの関連84テストと実Git再投入経路2テスト、Cc通知関連23テ�
 Ccのmention_admin受付・配送を先に反映してからRvを反映し、実設定の閾値を100へ変更する。旧Rvへの設定100適用は100点をマージ対象にするため先行しない。通知受付は配送完了ではない。unknown通知はCc記録を照合してから手動再送する。自動修正の予約後に停止した場合は結果不明として追加修正を自動起動しない。修正回数はPR単位で保持し、外部head更新による自動リセットもしない。人間は既存の明示再審査・マージ操作から復旧できる。
 
 提出依存: Concordia local PR #2022（commit ebc88d2）のmention_admin API。RvのAnatomia差分検査はrule_conformance/duplication/coupling_delta/convention_drift成功、spec_linkage警告が残る。仕様IDと実装注釈は追加済み。実Git検証は成功したがWindowsのfixture後始末でEPERMが出たため一時fixtureが残った。liveサービス再起動・本番設定変更・実メンション配送は未実施。
+
+明示再審査による復旧 (2026-10-03 neco 承認): 人が求めた再審査 (手動 retry、Concordia からの出し直し) は
+`riskReassessment` と `riskNotices` を消して新しいサイクルにする (`resetRiskCycleProjection`)。
+自動修正・内容変化 (stale)・中断復旧による再投入はサイクルを引き継ぐ。従来は明示再審査でも
+`held` が残り、閾値内で通った新しい審査が `needs_human` のまま自動マージされなかった
+(LUDIARS/Revisor#2360: 登録テスト失敗で 100 超 → 保留、出し直しの審査は 60 で Test OK)。

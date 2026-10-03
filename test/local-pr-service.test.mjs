@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { riskReassessmentAction } from "../src/risk-reassessment.mjs";
 import { MergeConflictError, StaleReviewError } from "../src/errors.mjs";
 import { LocalPrReporter } from "../src/local-reporter.mjs";
 import { LocalPrService } from "../src/local-pr-service.mjs";
@@ -2531,6 +2532,53 @@ test("a failing session notifier does not block the re-review", async () => {
     const retried = await service.retryPullRequest(pullRequest.id);
     assert.equal(retried.checkStatus, "queued");
     assert.equal(submitted.length, 2);
+  } finally {
+    removeFixture(fixture.directory);
+  }
+});
+
+test("a manual re-review drops the previous high-score hold so the new review decides alone", async () => {
+  const fixture = repositoryFixture();
+  const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });
+  const service = new LocalPrService({
+    store,
+    queue: {
+      async submit() {
+        return { id: "job" };
+      },
+    },
+    installGuard: async () => join(fixture.repoPath, ".git", "hooks", "pre-push"),
+  });
+  try {
+    await service.registerRepository({
+      repository: "LUDIARS/Product",
+      rootPath: fixture.repoPath,
+      baseRef: "main",
+      testCases: [{ name: "unit", command: "node", args: ["--test"], cwd: ".", timeoutMs: 60_000 }],
+    });
+    const pullRequest = await service.submitPullRequest({
+      repository: "LUDIARS/Product",
+      title: "Add product feature",
+      author: "neco",
+      headRef: "feat/local",
+    });
+    // 前の head の審査が登録テスト失敗で 100 を超え、保留になった状態。
+    store.updatePullRequest(pullRequest.id, {
+      checkStatus: "action_required",
+      riskReassessment: { state: "held", completedAt: "2026-10-03T09:18:22.652Z" },
+      riskNotices: { needs_human: { status: "accepted", at: "2026-10-03T09:11:12.414Z" } },
+    });
+
+    const retried = await service.retryPullRequest(pullRequest.id);
+
+    assert.equal(retried.riskReassessment, null);
+    assert.equal(retried.riskNotices, null);
+    assert.equal(store.getPullRequest(pullRequest.id).riskReassessment, null);
+    // 保留が無くなれば、次の審査結果のスコアだけで判定される。
+    assert.equal(
+      riskReassessmentAction({ ...retried, checkStatus: "test_ok", mergeRisk: { score: 60 } }, true),
+      "none",
+    );
   } finally {
     removeFixture(fixture.directory);
   }

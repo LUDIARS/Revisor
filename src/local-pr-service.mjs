@@ -1,6 +1,10 @@
 import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { handleRiskReassessment, notifyRiskOnce } from "./risk-reassessment.mjs";
+import {
+  handleRiskReassessment,
+  notifyRiskOnce,
+  resetRiskCycleProjection,
+} from "./risk-reassessment.mjs";
 import { effectiveMergeRisk } from "./merge-risk.mjs";
 import { autoMergeDecision, autoMergeRecord } from "./auto-merge.mjs";
 import { readSettings } from "./config.mjs";
@@ -613,6 +617,9 @@ export class LocalPrService {
         // leave the re-approved PR permanently un-mergeable on the board.
         mergeError: null,
         reviewLane: normalizeReviewLane(reviewLane),
+        // 人が求めた再審査 (作成者の出し直し・手動 retry) は新しい審査の起点。 前の head で
+        // 付いた高スコアの保留を引き継ぐと、閾値内で通っても自動マージが止まり続ける。
+        ...(reason === REVIEW_RESTART_REASONS.MANUAL ? resetRiskCycleProjection() : {}),
       }),
       // The refs may be unchanged, and the queue caches settled jobs by exact
       // head, so an unforced re-review would resolve to the run being retried.
