@@ -9,6 +9,20 @@
 HTTP 応答は、同じ判定済み一覧に対してのみ直列化済み JSON を再利用してよい。応答は
 従来どおり JSON とし、認可・Host 制限・`Cache-Control: no-store` の境界を変えてはならない。
 
+## SPEC-PR-LIST-REVISION: 一覧に関係する書き込みだけで無効化する
+
+一覧トークンの所有者はpersistent-review-state。共有SQLiteのmetaに単調増加する版を持ち、
+PR本体・解析結果・審査レポート・repositoryへのINSERT/UPDATE/DELETEと同じトランザクションで
+SQLite triggerが進める。別プロセス、旧版worker、直接SQLの書き込みも対象とする。
+rollbackした変更では版も戻り、未commitの変更を別接続の一覧へ公開しない。
+jobsや採番等の無関係なmetaだけの変更では版を変えない。判定設定のキーによる無効化は維持する。
+
+導入はLocalPrStoreの初回接続で、版と全triggerを一つのトランザクションで登録する。
+以後の接続は導入済みか読むだけで、毎回書き込みロックを取らない。既存レコードの移動・削除は不要。
+トークンは一覧を読む前に読む。並行commitで新しい版と古い一覧を組み合わせてはならない。
+旧コードに戻した場合は従来のdata_version検知で安全側に無効化でき、追加triggerは残してよい。
+schema/triggerを外す運用は対象プロセスが新トークンを利用していないことを別途確認してから行う。
+
 ## SPEC-PR-LIST-SLIM-RECORD: 一覧の記録は解析結果を持たない
 
 PR 記録の `anatomia` (Anatomia 差分解析の成果) は `pull_request_anatomia` テーブルに置き、

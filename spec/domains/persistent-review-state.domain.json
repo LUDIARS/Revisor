@@ -4,6 +4,8 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
+    { "pathPattern": "(^|/)src/pr-list-revision\\.mjs$" },
+    { "pathPattern": "(^|/)test/pr-list-revision\\.test\\.mjs$" },
     {
       "pathPattern": "(^|/)src/(?:revisor-db|state-store|job-store|pull-request-anatomia)\\.mjs$"
     },
@@ -29,6 +31,7 @@
     "terminal-job-state"
   ],
   "specRefs": [
+    "spec/feature/pr-list-cache.md#spec-pr-list-revision-一覧に関係する書き込みだけで無効化する",
     "daemonless-cli — PR 記録と審査キューは共有 SQLite database を正本とする",
     "daemonless-cli — read-modify-write は BEGIN IMMEDIATE、待ち上限は busy_timeout",
     "daemonless-cli — legacy JSON state/jobs は初回 open 時に一度だけ取り込む",

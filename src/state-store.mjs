@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { resolveConfigPath } from "./config.mjs";
 import { RevisorError } from "./errors.mjs";
+import { ensurePrListRevision, readPrListRevision } from "./pr-list-revision.mjs";
 import {
   archiveLegacyJson,
   displaceLegacyJson,
@@ -135,7 +136,6 @@ function attachHeavy(loaded, database, id) {
 
 export class LocalPrStore {
   #database = null;
-  #writes = 0;
 
   /** Release the connection owned by short-lived CLI operations. */
   close() {
@@ -166,6 +166,7 @@ export class LocalPrStore {
       // (JSON の上に SQLite は開けない)。 妥当な JSON だけが退避される。
       const displaced = displaceLegacyJson(this.path);
       const database = openRevisorDatabase(this.path);
+      ensurePrListRevision(database);
       this.#importLegacy(database, displaced);
       this.#splitAnatomia(database);
       this.#splitReviewReports(database);
@@ -233,7 +234,6 @@ export class LocalPrStore {
   #mutate(run) {
     const database = this.#db();
     const result = withImmediateTransaction(database, () => run(database));
-    this.#writes += 1;
     return result;
   }
 
@@ -454,14 +454,11 @@ export class LocalPrStore {
   }
 
   /**
-   * 一覧キャッシュの無効化トークン。data_version は他コネクションの commit で変わり、
-   * 自コネクションの書き込みでは変わらないため、自前の書き込み回数を併記する。
-   * PR 記録と審査キューは同じ database なので、どちらの変化でもトークンが変わる。
+   * 一覧に関係する永続状態の版。trigger が自/他接続の commit と同時に進める。
+   * 同じ database の jobs だけが変わっても、PR 一覧は再構築しない。
    */
   listVersion() {
-    const database = this.#db();
-    const { data_version: dataVersion } = database.prepare("PRAGMA data_version").get();
-    return `${dataVersion}:${this.#writes}`;
+    return readPrListRevision(this.#db());
   }
 
   updatePullRequest(id, patch) {
