@@ -4,6 +4,8 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
+    { "pathPattern": "(^|/)src/ui-visible-refresh-loop\\.mjs$" },
+    { "pathPattern": "(^|/)test/ui-dashboard-refresh\\.test\\.mjs$" },
     {
       "pathPattern": "(^|/)src/(?:ui-pr-board-page|ui-pr-view-script|ui-dashboard-page|ui-styles)\\.mjs$"
     },
@@ -27,6 +29,7 @@
     "responsive-two-pane-detail"
   ],
   "specRefs": [
+    "spec/feature/human-decision-board.md#運用ダッシュボードの取得範囲と更新",
     "human-decision-board — ページ構成",
     "human-decision-board — 並び順とプロジェクトフィルタ",
     "human-decision-board — カード表示",

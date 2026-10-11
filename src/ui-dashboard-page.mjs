@@ -1,6 +1,7 @@
 import { CLIENT_REQUEST_SOURCE } from "./ui-client-request.mjs";
 import { renderPage } from "./ui-layout.mjs";
 import { PR_VIEW_SOURCE } from "./ui-pr-view-script.mjs";
+import { createVisibleRefreshLoop } from "./ui-visible-refresh-loop.mjs";
 
 // PR のトリアージはトップページ (2 ペイン) が担う。 ここは運用の俯瞰 —
 // 登録リポジトリ・PR 作成・キュー — だけを持つ。テストワークフローは PR の
@@ -97,13 +98,16 @@ const CONTROLLER_SOURCE = `
   }
 
   async function refresh() {
-    try {
-      const [jobs, repositories, prs, releases] = await Promise.all([
+      const results = await Promise.allSettled([
         request('/api/jobs'),
         request('/api/repositories'),
-        request('/api/local-prs'),
+        request('/api/local-prs?view=summary&state=open'),
         request('/api/releases'),
       ]);
+      // A failed request must not release the refresh slot while peers still run.
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure) throw failure.reason;
+      const [jobs, repositories, prs, releases] = results.map((result) => result.value);
       queue.textContent = [
         'running: ' + jobs.running,
         'queued: ' + jobs.queued,
@@ -115,10 +119,14 @@ const CONTROLLER_SOURCE = `
             + job.request.repository + '#' + job.request.number + '  ' + job.id),
       ].join('\\n');
       renderRepositories(repositories.repositories, prs.pullRequests, releases.projects);
-    } catch (error) {
-      queue.textContent = error.message;
-    }
   }
+
+  const refreshLoop = createVisibleRefreshLoop({
+    refresh,
+    isVisible: () => !document.hidden,
+    onError: (error) => { queue.textContent = error.message; },
+  });
+  document.addEventListener('visibilitychange', () => { void refreshLoop.visibilityChanged(); });
 
   document.querySelector('#pr-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -139,17 +147,16 @@ const CONTROLLER_SOURCE = `
         }),
       });
       prMessage.textContent = 'PR を登録しました。';
-      await refresh();
+      await refreshLoop.requestRefresh();
     } catch (error) {
       prMessage.textContent = error.message;
     }
   });
 
-  refresh();
-  setInterval(refresh, 3000);
+  void refreshLoop.requestRefresh();
 `;
 
-const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}${CONTROLLER_SOURCE}`;
+const SCRIPT = `${CLIENT_REQUEST_SOURCE}${PR_VIEW_SOURCE}\n${createVisibleRefreshLoop.toString()}\n${CONTROLLER_SOURCE}`;
 
 export function renderDashboardPage(sessionToken) {
   return renderPage({
