@@ -101,6 +101,33 @@
       "module": "contracts/list-response-body-without-review-report.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-12",
+      "criterion": "C-12 containsPrivateIp(line): 10/8・172.16/12・192.168/16・100.64/10・169.254/16 の具体的なホストだけを真にし、127/8・0.0.0.0・文書用範囲・CIDR 表記は偽、値は返さない",
+      "symbol": "containsPrivateIp",
+      "file": "src/host-identifiers.mjs",
+      "module": "contracts/contains-private-ip.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-13",
+      "criterion": "C-13 containsLocalPath(line): ドライブ絶対パスと /Users/<名前>/・/home/<名前>/ を真にし、プレースホルダ・${VAR}・%VAR%・~ 始まりは偽、値は返さない",
+      "symbol": "containsLocalPath",
+      "file": "src/host-identifiers.mjs",
+      "module": "contracts/contains-local-path.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-14",
+      "criterion": "C-14 configuredConfidentialTermsOutcome(input): 種類つき所見は categories の扱い (既定 advisory) で振り分け、従来の語は enforcement のまま、文面は件数・場所・種類名だけで値を含まない",
+      "symbol": "configuredConfidentialTermsOutcome",
+      "file": "src/confidential-terms.mjs",
+      "module": "contracts/confidential-terms-outcome-by-kind.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

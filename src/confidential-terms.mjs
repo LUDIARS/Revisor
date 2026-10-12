@@ -1,5 +1,12 @@
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import {
+  KEYWORD_CATEGORY_KINDS,
+  enabledBuiltinDetectors,
+  normalizeCategoryModes,
+} from "./host-identifiers.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:bec15215 */
+import augurContract_de234b47 from '../contracts/confidential-terms-outcome-by-kind.contract.mjs'; /* augur-inject:contract-predicate:fd2c6bb9 */
 
 /**
  * 公開リポジトリへ入れてはいけない語 (未公開プロダクト名・顧客名・組織名) を
@@ -33,6 +40,14 @@ import { isAbsolute } from "node:path";
  * (マージ不可) にし、 squash commit の件名・本文もマージ直前に検査する。
  * 例外 (= 語を正当に扱う非公開リポジトリ) の一覧も語ファイル側に置く — 公開される
  * catalog や設定に非公開リポジトリ名を書かないため。 新しい公開リポジトリは既定で守られる。
+ *
+ * ## 種類つきの検出 (2026-10-13)
+ *
+ * IP・PC のフルパス・マシン名・拠点名も同じ経路で見る。 IP とパスは組込みの検出器
+ * (`host-identifiers.mjs`)、 マシン名・拠点名は keywords に `category` を付けた固定語。
+ * 語ファイルの `categories: { "<種類>": "advisory" | "enforce" | "off" }` で種類ごとに扱いを
+ * 選ぶ。 書かれていない種類は advisory。 category の無い従来の語は従来どおり
+ * `enforcement` に従う。 enforce の種類も `exceptRepositories` の例外は共有する。
  */
 
 const MAX_FINDINGS = 100;
@@ -49,7 +64,15 @@ function normalizeTerms(raw) {
     const value = typeof entry === "string" ? entry : entry?.value;
     const id = typeof entry === "string" ? null : entry?.id;
     if (typeof value !== "string" || !value.trim()) continue;
-    entries.push({ candidateId: typeof id === "string" ? id.trim() : null, value: value.trim().toLowerCase() });
+    const category = typeof entry === "string" ? undefined : entry?.category;
+    if (category !== undefined && !KEYWORD_CATEGORY_KINDS.includes(category)) {
+      throw new Error("A confidential keyword declares an unknown category.");
+    }
+    entries.push({
+      candidateId: typeof id === "string" ? id.trim() : null,
+      value: value.trim().toLowerCase(),
+      category: category ?? null,
+    });
   }
   const confidentialValues = entries.map(({ value }) => value);
   const candidateCounts = new Map();
@@ -66,7 +89,7 @@ function normalizeTerms(raw) {
     .map(({ candidateId }) => candidateId));
   const usedIds = new Set();
   let nextFallbackIndex = 1;
-  const terms = entries.map(({ candidateId, value }) => {
+  const terms = entries.map(({ candidateId, value, category }) => {
     // id 自体も永続化され得る。 制御文字や別の機密語を含む id は採用しない。
     const isSafeId = reservedIds.has(candidateId) && !usedIds.has(candidateId);
     let label = candidateId;
@@ -77,7 +100,7 @@ function normalizeTerms(raw) {
       } while (reservedIds.has(label) || usedIds.has(label));
     }
     usedIds.add(label);
-    return { id: label, value };
+    return category ? { id: label, value, category } : { id: label, value };
   });
   // 長い語を先に出し、包含関係にある語の所見を読みやすい順序に保つ。
   return terms.sort((left, right) => right.value.length - left.value.length);
@@ -142,7 +165,11 @@ export function loadConfidentialPolicy(path) {
   if (terms.length === 0) {
     throw new Error("The confidential terms file must contain at least one valid keyword.");
   }
-  return { terms, enforcement: normalizeEnforcement(parsed) };
+  return {
+    terms,
+    enforcement: normalizeEnforcement(parsed),
+    categories: normalizeCategoryModes(parsed.categories),
+  };
 }
 
 /** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
@@ -157,10 +184,38 @@ export function loadConfidentialTerms(path) {
  */
 export function isConfidentialTermsEnforced(policy, repository) {
   if (policy?.enforcement?.mode !== "enforce-except") return false;
+  return !isExceptedRepository(policy, repository);
+}
+
+/** リポジトリ名が分からないときは例外に当たると証明できないので false。
+ * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
+ */
+function isExceptedRepository(policy, repository) {
   const name = typeof repository === "string" ? repository.trim().toLowerCase() : "";
-  if (!name) return true;
-  return !policy.enforcement.exceptRepositories.some((pattern) =>
+  if (!name) return false;
+  return (policy?.enforcement?.exceptRepositories ?? []).some((pattern) =>
     pattern.endsWith("/*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern);
+}
+
+/**
+ * 所見の種類ごとに block するか。 category の無い従来の語は `enforcement` に従う。
+ * 種類つきは `categories` が enforce のときだけ、 例外リポジトリ以外で block する。
+ * @implements SPEC-CONFIDENTIAL-TERM-CATEGORIES
+ */
+export function isConfidentialKindEnforced(policy, repository, kind) {
+  if (!kind) return isConfidentialTermsEnforced(policy, repository);
+  return policy?.categories?.[kind] === "enforce" && !isExceptedRepository(policy, repository);
+}
+
+/** 有効な語と組込み検出器。 `off` の種類は外す。
+ * @implements SPEC-CONFIDENTIAL-TERM-CATEGORIES
+ */
+function activeMatchers(policy) {
+  const categories = policy?.categories ?? {};
+  return {
+    terms: (policy?.terms ?? []).filter((term) => !term.category || categories[term.category] !== "off"),
+    detectors: enabledBuiltinDetectors(categories),
+  };
 }
 
 /** 設定された語ファイルの場所。 未設定なら検査しない。
@@ -189,8 +244,14 @@ function diffPath(raw) {
  * 判る形が実在する。
  */
 /** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
-export function scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedPaths = [] } = {}) {
-  if (!Array.isArray(terms) || terms.length === 0) {
+export function scanAddedDiffForConfidentialTerms(
+  unifiedDiff,
+  terms,
+  { changedPaths = [], detectors = [] } = {},
+) {
+  const hasTerms = Array.isArray(terms) && terms.length > 0;
+  const hasDetectors = Array.isArray(detectors) && detectors.length > 0;
+  if (!hasTerms && !hasDetectors) {
     return { findings: [], totalFindings: 0, totalFiles: 0, truncated: false, scanned: false };
   }
   if (typeof unifiedDiff !== "string") {
@@ -206,7 +267,7 @@ export function scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedP
   let inHunk = false;
 
   /** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
-  const add = (termId, findingPath, line, shouldRedactPath = false) => {
+  const add = (termId, findingPath, line, shouldRedactPath = false, kind = null) => {
     const key = `${termId}\u0000${findingPath}\u0000${line}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -220,6 +281,7 @@ export function scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedP
         termId,
         path: redactedPaths.get(findingPath) ?? findingPath,
         line,
+        ...(kind ? { kind } : {}),
       };
     }
   };
@@ -228,8 +290,8 @@ export function scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedP
   const scanPath = (candidatePath) => {
     if (typeof candidatePath !== "string" || !candidatePath) return;
     const lowerPath = candidatePath.toLowerCase();
-    for (const term of terms) {
-      if (lowerPath.includes(term.value)) add(term.id, candidatePath, 0, true);
+    for (const term of hasTerms ? terms : []) {
+      if (lowerPath.includes(term.value)) add(term.id, candidatePath, 0, true, term.category);
     }
   };
 
@@ -260,15 +322,19 @@ export function scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedP
     }
     if (!inHunk || diffLine.startsWith("\\ No newline")) continue;
     if (diffLine.startsWith("+")) {
-      const lower = diffLine.slice(1).toLowerCase();
+      const content = diffLine.slice(1);
+      const lower = content.toLowerCase();
       // A path that could not be decoded must not make the content scan fail
       // open. Keep a non-sensitive location marker instead.
       const findingPath = path ?? "[unparsed-diff-path]";
       const unsafePath = /[\u0000-\u001f\u007f]/.test(findingPath);
-      for (const term of terms) {
-        if (lower.includes(term.value)) {
-          add(term.id, findingPath, addedLine, redactedPaths.has(findingPath) || unsafePath);
-        }
+      const redact = redactedPaths.has(findingPath) || unsafePath;
+      for (const term of hasTerms ? terms : []) {
+        if (lower.includes(term.value)) add(term.id, findingPath, addedLine, redact, term.category);
+      }
+      // 組込み検出器は本文だけを見る。 パスはリポジトリ相対なので IP・フルパスの形にならない。
+      for (const detector of hasDetectors ? detectors : []) {
+        if (detector.test(content)) add(detector.id, findingPath, addedLine, redact, detector.kind);
       }
       addedLine += 1;
       continue;
@@ -294,7 +360,27 @@ export function confidentialTermsAdvisory(result) {
   const shown = paths.slice(0, 5).join(", ");
   const totalFiles = Number.isInteger(result.totalFiles) ? result.totalFiles : paths.length;
   return `公開できない語を含む追加差分: ${result.totalFindings} 箇所 / ${totalFiles} ファイル`
-    + ` (${shown}${totalFiles > Math.min(paths.length, 5) ? ", ..." : ""})`;
+    + ` (${shown}${totalFiles > Math.min(paths.length, 5) ? ", ..." : ""})`
+    + kindBreakdown(result.findings);
+}
+
+/**
+ * 種類つきの所見があるときだけ種類別の件数を足す。 従来の語だけなら文言は変えない。
+ * 種類名は固定の語彙 (private-ip 等) なので、 値を含まない。
+ * @implements SPEC-CONFIDENTIAL-TERM-CATEGORIES
+ */
+function kindBreakdown(findings) {
+  const counts = new Map();
+  for (const finding of findings) {
+    if (finding.kind) counts.set(finding.kind, (counts.get(finding.kind) ?? 0) + 1);
+  }
+  if (counts.size === 0) return "";
+  const categorized = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  const parts = [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([kind, count]) => `${kind} ${count}`);
+  if (findings.length > categorized) parts.unshift(`語 ${findings.length - categorized}`);
+  return ` [種類: ${parts.join(", ")}]`;
 }
 
 /** 設定の読込失敗を含め、永続化してよい advisory だけを返す。
@@ -324,23 +410,29 @@ const CONFIGURATION_FAILURE = "公開できない語の検査を実行できま�
  * 追加差分と同じ扱いで公開面に出る。 所見の場所は固定ラベルと行番号だけ。
  * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
  */
-export function scanTextForConfidentialTerms(text, terms, label) {
+export function scanTextForConfidentialTerms(text, terms, label, detectors = []) {
   if (typeof text !== "string" || !text || !Array.isArray(terms)) return [];
   const findings = [];
   text.split(/\r?\n/).forEach((line, index) => {
     const lower = line.toLowerCase();
     for (const term of terms) {
-      if (lower.includes(term.value)) findings.push({ termId: term.id, path: label, line: index + 1 });
+      if (!lower.includes(term.value)) continue;
+      findings.push({
+        termId: term.id, path: label, line: index + 1, ...(term.category ? { kind: term.category } : {}),
+      });
+    }
+    for (const detector of detectors) {
+      if (detector.test(line)) findings.push({ termId: detector.id, path: label, line: index + 1, kind: detector.kind });
     }
   });
   return findings;
 }
 
 /** @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT */
-function pullRequestTextFindings(pullRequest, terms) {
+function pullRequestTextFindings(pullRequest, terms, detectors = []) {
   return [
-    ...scanTextForConfidentialTerms(pullRequest?.title, terms, "[pr-title]"),
-    ...scanTextForConfidentialTerms(pullRequest?.body, terms, "[pr-body]"),
+    ...scanTextForConfidentialTerms(pullRequest?.title, terms, "[pr-title]", detectors),
+    ...scanTextForConfidentialTerms(pullRequest?.body, terms, "[pr-body]", detectors),
   ];
 }
 
@@ -364,20 +456,47 @@ export function configuredConfidentialTermsOutcome({
     return { advisory: null, reason: CONFIGURATION_FAILURE };
   }
   if (!policy || typeof unifiedDiff !== "string") return { advisory: null, reason: null };
-  const diffResult = scanAddedDiffForConfidentialTerms(unifiedDiff, policy.terms, { changedPaths });
-  const textFindings = pullRequestTextFindings(pullRequest, policy.terms);
-  const textLabels = new Set(textFindings.map((finding) => finding.path));
-  const combined = {
-    scanned: true,
-    findings: [...diffResult.findings, ...textFindings].slice(0, MAX_FINDINGS),
-    totalFindings: diffResult.totalFindings + textFindings.length,
-    totalFiles: diffResult.totalFiles + textLabels.size,
+  const { terms, detectors } = activeMatchers(policy);
+  const diffResult = scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedPaths, detectors });
+  const textFindings = pullRequestTextFindings(pullRequest, terms, detectors);
+  const enforced = newFindingGroup();
+  const advisory = newFindingGroup();
+  for (const finding of [...diffResult.findings, ...textFindings]) {
+    addToGroup(isConfidentialKindEnforced(policy, repository, finding.kind) ? enforced : advisory, finding);
+  }
+  // 件数上限で落ちた差分所見は種類が分からない。 従来の語として数え、 従来の enforcement に
+  // 従わせる (黙って advisory に倒さない)。
+  const dropped = diffResult.totalFindings - diffResult.findings.length;
+  if (dropped > 0) (isConfidentialTermsEnforced(policy, repository) ? enforced : advisory).total += dropped;
+  const blocked = summarizeGroup(enforced);
+  return {
+    advisory: summarizeGroup(advisory),
+    reason: blocked ? `${blocked} — 公開できない語を消してから再提出してください` : null,
   };
-  const summary = confidentialTermsAdvisory(combined);
-  if (!summary) return { advisory: null, reason: null };
-  return isConfidentialTermsEnforced(policy, repository)
-    ? { advisory: null, reason: `${summary} — 公開できない語を消してから再提出してください` }
-    : { advisory: summary, reason: null };
+}
+// @ts-expect-error augur-inject
+configuredConfidentialTermsOutcome = contract(configuredConfidentialTermsOutcome, { ...augurContract_de234b47, contractId: 'C-14', mode: 'observe', sample: 1, where: 'src/confidential-terms.mjs:443', rule: 'contract-wrap', id: 'de234b47' }); /* augur-inject:contract-wrap:de234b47 */
+
+/** @implements SPEC-CONFIDENTIAL-TERM-CATEGORIES */
+function newFindingGroup() {
+  return { findings: [], total: 0, labels: new Set() };
+}
+
+/** @implements SPEC-CONFIDENTIAL-TERM-CATEGORIES */
+function addToGroup(group, finding) {
+  if (group.findings.length < MAX_FINDINGS) group.findings.push(finding);
+  group.total += 1;
+  group.labels.add(finding.path);
+}
+
+/** @implements SPEC-CONFIDENTIAL-TERM-CATEGORIES */
+function summarizeGroup(group) {
+  return confidentialTermsAdvisory({
+    scanned: true,
+    findings: group.findings,
+    totalFindings: group.total,
+    totalFiles: group.labels.size,
+  });
 }
 
 /**
@@ -393,8 +512,10 @@ export function assertCommitMessageFreeOfConfidentialTerms({ repository, title, 
   } catch {
     throw new Error("Merge blocked: the confidential term check could not run. Check its configuration.");
   }
-  if (!policy || !isConfidentialTermsEnforced(policy, repository)) return;
-  const findings = pullRequestTextFindings({ title, body }, policy.terms);
+  if (!policy) return;
+  const { terms, detectors } = activeMatchers(policy);
+  const findings = pullRequestTextFindings({ title, body }, terms, detectors)
+    .filter((finding) => isConfidentialKindEnforced(policy, repository, finding.kind));
   if (findings.length === 0) return;
   const termIds = [...new Set(findings.map((finding) => finding.termId))].join(", ");
   throw new Error(

@@ -107,6 +107,39 @@ binary file や Git が C-quote した非 ASCII パスも見落とさない。�
 件名・本文の件数計上、崩れた宣言の fail-closed、squash commit 本文の拒否 (バイパス時を含む) と base 不変、
 審査結果で reason へ振り替わることを検証する。
 
+## SPEC-CONFIDENTIAL-TERM-CATEGORIES: IP・PC のフルパス・マシン名・拠点名 (neco 指示 2026-10-13)
+
+公開リポジトリの手順書に、ホスト名・LAN IP・Tailscale IP・SSH ユーザ名が書かれたまま公開されかけた。
+資格情報の定型パターンと辞書の固定語だけでは素通りするため、同じ語ファイル・同じ経路で次の種類も検査する。
+
+| 種類 | 検出 | 対象外 |
+|---|---|---|
+| `private-ip` | 組込み (`src/host-identifiers.mjs`)。10/8、172.16/12、192.168/16、100.64/10 (Tailscale)、169.254/16 の具体的なホスト | 127/8・0.0.0.0・文書用範囲・公開アドレス・CIDR 表記 (`/24` 等)・末尾 `.0` / `.255` |
+| `local-path` | 組込み。Windows のドライブ絶対パス、`/Users/<名前>/`、`/home/<名前>/` | `<...>`・`${VAR}`・`%VAR%`・`{...}` のプレースホルダ、`~` 始まり、URL の一部 |
+| `machine-name` | keywords の `category: "machine-name"` の固定語 | — |
+| `site-name` | keywords の `category: "site-name"` の固定語 | — |
+
+```json
+{ "keywords": [ { "id": "machine-001", "value": "<固定語>", "category": "machine-name" } ],
+  "categories": { "private-ip": "advisory", "local-path": "advisory", "machine-name": "advisory", "site-name": "enforce" },
+  "enforcement": { "mode": "enforce-except", "exceptRepositories": ["owner/name"] } }
+```
+
+- 正規表現は語ファイルに書かせない。誤った式が黙って検査を無効にするため、形で分かる種類は組込みにする。
+- `categories` は種類ごとに `advisory` / `enforce` / `off`。書かれていない種類は **advisory** (新しい種類の既定)。
+  知らない種類名・扱いは読込失敗 (fail-closed) にし、綴り違いで検査が消えないようにする。
+- category の無い従来の語は従来どおり `enforcement` に従う。enforce の種類は `exceptRepositories` の例外を共有する。
+- 組込み検出器は追加行と PR 件名・本文だけを見る (リポジトリ相対のファイルパスは IP・フルパスの形にならない)。
+  固定語の種類はファイルパスも従来どおり見る。
+- 所見は `{ termId, path, line, kind }`。組込みの termId は種類名。値そのものは所見にも文面にも載せない。
+  文面は種類つきの所見があるときだけ末尾に `[種類: local-path 2, private-ip 1]` を足す (従来の語だけなら文言は不変)。
+- 1 回の審査で advisory と reason の両方が出ることがある (種類ごとに振り分けるため)。
+- squash commit 本文の最終検査も、enforce の種類だけで止める。
+- AIFormat の leak-checker が同じ規則を持つ。規則を変えるときは両方を揃える。
+
+登録テストは検出と対象外の境界、種類の既定 advisory、従来の語の enforcement 維持、enforce / off の切替、
+PR 本文と squash 本文での種類別の扱い、知らない種類・扱いの fail-closed、値の非表示を検証する。
+
 ## レビュー計画による降格 (neco 決定 2026-07-30)
 
 **決定的ルール**が `anatomia_code_analysis` を落とした審査では、
