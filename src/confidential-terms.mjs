@@ -58,6 +58,32 @@ import augurContract_de234b47 from '../contracts/confidential-terms-outcome-by-k
 const MAX_FINDINGS = 100;
 const MAX_TERMS_FILE_BYTES = 1024 * 1024;
 const SAFE_TERM_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+/**
+ * 語ごとの照合方法。 既定は部分一致。 `word` は前後が英数字でない位置だけで一致する。
+ * 短い固有名 (例: 3 文字の英大文字) を部分一致で登録すると一般語の一部に当たり、
+ * 公開リポジトリの PR が一斉に止まるため (neco 指示 2026-10-14)。
+ */
+const TERM_MATCH_MODES = ["substring", "word"];
+const wordPatterns = new WeakMap();
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * 1 行・1 パスに語が現れるか。 パス・追加差分・件名本文の全照合面で同じ規則を使う。
+ * @implements SPEC-CONFIDENTIAL-TERM-ADVISORY
+ */
+export function confidentialTermMatches(text, term) {
+  const haystack = term.caseSensitive ? text : text.toLowerCase();
+  if (term.match !== "word") return haystack.includes(term.value);
+  let pattern = wordPatterns.get(term);
+  if (!pattern) {
+    pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(term.value)}(?![\\p{L}\\p{N}])`, "u");
+    wordPatterns.set(term, pattern);
+  }
+  return pattern.test(haystack);
+}
 
 /** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
 function normalizeTerms(raw) {
@@ -73,13 +99,23 @@ function normalizeTerms(raw) {
     if (category !== undefined && !KEYWORD_CATEGORY_KINDS.includes(category)) {
       throw new Error("A confidential keyword declares an unknown category.");
     }
+    const match = typeof entry === "string" ? undefined : entry?.match;
+    if (match !== undefined && !TERM_MATCH_MODES.includes(match)) {
+      throw new Error("A confidential keyword declares an unknown match mode.");
+    }
+    const caseSensitive = typeof entry === "string" ? undefined : entry?.caseSensitive;
+    if (caseSensitive !== undefined && typeof caseSensitive !== "boolean") {
+      throw new Error("A confidential keyword declares a non-boolean caseSensitive.");
+    }
     entries.push({
       candidateId: typeof id === "string" ? id.trim() : null,
-      value: value.trim().toLowerCase(),
+      value: caseSensitive ? value.trim() : value.trim().toLowerCase(),
       category: category ?? null,
+      word: match === "word",
+      caseSensitive: caseSensitive === true,
     });
   }
-  const confidentialValues = entries.map(({ value }) => value);
+  const confidentialValues = entries.map(({ value }) => value.toLowerCase());
   const candidateCounts = new Map();
   for (const { candidateId } of entries) {
     if (candidateId) candidateCounts.set(candidateId, (candidateCounts.get(candidateId) ?? 0) + 1);
@@ -94,7 +130,7 @@ function normalizeTerms(raw) {
     .map(({ candidateId }) => candidateId));
   const usedIds = new Set();
   let nextFallbackIndex = 1;
-  const terms = entries.map(({ candidateId, value, category }) => {
+  const terms = entries.map(({ candidateId, value, category, word, caseSensitive }) => {
     // id 自体も永続化され得る。 制御文字や別の機密語を含む id は採用しない。
     const isSafeId = reservedIds.has(candidateId) && !usedIds.has(candidateId);
     let label = candidateId;
@@ -105,7 +141,14 @@ function normalizeTerms(raw) {
       } while (reservedIds.has(label) || usedIds.has(label));
     }
     usedIds.add(label);
-    return category ? { id: label, value, category } : { id: label, value };
+    // 既定 (部分一致・大文字小文字無視) の語は従来と同じ形のまま返す。
+    return {
+      id: label,
+      value,
+      ...(category ? { category } : {}),
+      ...(word ? { match: "word" } : {}),
+      ...(caseSensitive ? { caseSensitive: true } : {}),
+    };
   });
   // 長い語を先に出し、包含関係にある語の所見を読みやすい順序に保つ。
   return terms.sort((left, right) => right.value.length - left.value.length);
@@ -301,9 +344,8 @@ export function scanAddedDiffForConfidentialTerms(
   /** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
   const scanPath = (candidatePath) => {
     if (typeof candidatePath !== "string" || !candidatePath) return;
-    const lowerPath = candidatePath.toLowerCase();
     for (const term of hasTerms ? terms : []) {
-      if (lowerPath.includes(term.value)) add(term.id, candidatePath, 0, true, term.category);
+      if (confidentialTermMatches(candidatePath, term)) add(term.id, candidatePath, 0, true, term.category);
     }
   };
 
@@ -335,14 +377,13 @@ export function scanAddedDiffForConfidentialTerms(
     if (!inHunk || diffLine.startsWith("\\ No newline")) continue;
     if (diffLine.startsWith("+")) {
       const content = diffLine.slice(1);
-      const lower = content.toLowerCase();
       // A path that could not be decoded must not make the content scan fail
       // open. Keep a non-sensitive location marker instead.
       const findingPath = path ?? "[unparsed-diff-path]";
       const unsafePath = /[\u0000-\u001f\u007f]/.test(findingPath);
       const redact = redactedPaths.has(findingPath) || unsafePath;
       for (const term of hasTerms ? terms : []) {
-        if (lower.includes(term.value)) add(term.id, findingPath, addedLine, redact, term.category, content);
+        if (confidentialTermMatches(content, term)) add(term.id, findingPath, addedLine, redact, term.category, content);
       }
       // 組込み検出器は本文だけを見る。 パスはリポジトリ相対なので IP・フルパスの形にならない。
       for (const detector of hasDetectors ? detectors : []) {
@@ -427,12 +468,11 @@ export function scanTextForConfidentialTerms(text, terms, label, detectors = [],
   if (typeof text !== "string" || !text || !Array.isArray(terms)) return [];
   const findings = [];
   text.split(/\r?\n/).forEach((line, index) => {
-    const lower = line.toLowerCase();
     // 件名・本文はリポジトリのパスを持たないので、 効くのはワークスペースルートの規則だけ。
     const excluded = (kind) => Boolean(exclusions)
       && isExcludedHostFinding({ kind, path: label, lineText: line }, exclusions);
     for (const term of terms) {
-      if (!lower.includes(term.value) || excluded(term.category)) continue;
+      if (!confidentialTermMatches(line, term) || excluded(term.category)) continue;
       findings.push({
         termId: term.id, path: label, line: index + 1, ...(term.category ? { kind: term.category } : {}),
       });

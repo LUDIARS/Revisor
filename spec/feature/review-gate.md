@@ -75,6 +75,19 @@ complexity 差分・レビュアー出力・leakage スキャン・セキュリ�
 binary file や Git が C-quote した非 ASCII パスも見落とさない。本文側のパスを解釈できない
 場合も検査自体は継続し、所見のパスだけを固定の不透明ラベルへ置換する。
 
+語ごとに照合方法を選べる (neco 指示 2026-10-14)。短い固有名を部分一致で登録すると一般語の一部に当たり、
+公開リポジトリの PR が一斉に止まるためである。
+
+```json
+{ "id": "product-002", "value": "XYZ", "match": "word", "caseSensitive": true }
+```
+
+- `match`: `substring` (既定) は部分一致。`word` は前後が文字・数字でない位置だけで一致する
+  (`XYZ/` や `XYZ_` は一致、`XYZA` や `aXYZ` は不一致)。
+- `caseSensitive`: 既定 `false`。`true` のとき大文字小文字を区別する。
+- 未知の `match` と真偽値でない `caseSensitive` は設定エラーとして扱う。
+- パス・追加差分・件名本文・squash commit 本文のすべてで同じ規則 (`confidentialTermMatches`) を使う。
+
 提出後に test autofix またはレビュアーが変更した場合、advisory は提出時差分ではなく
 コミット対象の最終差分から作る。これにより自動修正が持ち込んだ公開不可語も検出する。
 登録テストは本文一致、パス一致時の秘匿、削除・文脈行の除外、大文字小文字、id の無害化、
