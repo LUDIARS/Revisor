@@ -4,7 +4,9 @@ import {
   KEYWORD_CATEGORY_KINDS,
   enabledBuiltinDetectors,
   normalizeCategoryModes,
+  normalizeWorkspaceRoots,
 } from "./host-identifiers.mjs";
+import { isExcludedHostFinding } from "./leak-exclusions.mjs";
 import { contract } from './contract-runtime.mjs'; /* augur-inject:import:bec15215 */
 import augurContract_de234b47 from '../contracts/confidential-terms-outcome-by-kind.contract.mjs'; /* augur-inject:contract-predicate:fd2c6bb9 */
 
@@ -48,6 +50,9 @@ import augurContract_de234b47 from '../contracts/confidential-terms-outcome-by-k
  * 語ファイルの `categories: { "<種類>": "advisory" | "enforce" | "off" }` で種類ごとに扱いを
  * 選ぶ。 書かれていない種類は advisory。 category の無い従来の語は従来どおり
  * `enforcement` に従う。 enforce の種類も `exceptRepositories` の例外は共有する。
+ *
+ * 種類つきの所見は、 生成レポート・テスト・ワークスペースルート配下だけを指す行を数えない
+ * (`leak-exclusions.mjs`)。 ルートは語ファイルの `workspaceRoots` で渡す。
  */
 
 const MAX_FINDINGS = 100;
@@ -169,6 +174,7 @@ export function loadConfidentialPolicy(path) {
     terms,
     enforcement: normalizeEnforcement(parsed),
     categories: normalizeCategoryModes(parsed.categories),
+    workspaceRoots: normalizeWorkspaceRoots(parsed.workspaceRoots),
   };
 }
 
@@ -215,6 +221,7 @@ function activeMatchers(policy) {
   return {
     terms: (policy?.terms ?? []).filter((term) => !term.category || categories[term.category] !== "off"),
     detectors: enabledBuiltinDetectors(categories),
+    exclusions: { workspaceRoots: policy?.workspaceRoots ?? [] },
   };
 }
 
@@ -247,7 +254,7 @@ function diffPath(raw) {
 export function scanAddedDiffForConfidentialTerms(
   unifiedDiff,
   terms,
-  { changedPaths = [], detectors = [] } = {},
+  { changedPaths = [], detectors = [], exclusions = null } = {},
 ) {
   const hasTerms = Array.isArray(terms) && terms.length > 0;
   const hasDetectors = Array.isArray(detectors) && detectors.length > 0;
@@ -262,12 +269,17 @@ export function scanAddedDiffForConfidentialTerms(
   const matchedPaths = new Set();
   const redactedPaths = new Map();
   let total = 0;
+  let excluded = 0;
   let path = null;
   let addedLine = 0;
   let inHunk = false;
 
   /** @implements SPEC-CONFIDENTIAL-TERM-ADVISORY */
-  const add = (termId, findingPath, line, shouldRedactPath = false, kind = null) => {
+  const add = (termId, findingPath, line, shouldRedactPath = false, kind = null, lineText = "") => {
+    if (exclusions && isExcludedHostFinding({ kind, path: findingPath, lineText }, exclusions)) {
+      excluded += 1;
+      return;
+    }
     const key = `${termId}\u0000${findingPath}\u0000${line}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -330,11 +342,11 @@ export function scanAddedDiffForConfidentialTerms(
       const unsafePath = /[\u0000-\u001f\u007f]/.test(findingPath);
       const redact = redactedPaths.has(findingPath) || unsafePath;
       for (const term of hasTerms ? terms : []) {
-        if (lower.includes(term.value)) add(term.id, findingPath, addedLine, redact, term.category);
+        if (lower.includes(term.value)) add(term.id, findingPath, addedLine, redact, term.category, content);
       }
       // 組込み検出器は本文だけを見る。 パスはリポジトリ相対なので IP・フルパスの形にならない。
       for (const detector of hasDetectors ? detectors : []) {
-        if (detector.test(content)) add(detector.id, findingPath, addedLine, redact, detector.kind);
+        if (detector.test(content)) add(detector.id, findingPath, addedLine, redact, detector.kind, content);
       }
       addedLine += 1;
       continue;
@@ -347,6 +359,7 @@ export function scanAddedDiffForConfidentialTerms(
     totalFindings: total,
     totalFiles: matchedPaths.size,
     truncated: total > findings.length,
+    excludedFindings: excluded,
     scanned: true,
   };
 }
@@ -410,29 +423,32 @@ const CONFIGURATION_FAILURE = "公開できない語の検査を実行できま�
  * 追加差分と同じ扱いで公開面に出る。 所見の場所は固定ラベルと行番号だけ。
  * @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT
  */
-export function scanTextForConfidentialTerms(text, terms, label, detectors = []) {
+export function scanTextForConfidentialTerms(text, terms, label, detectors = [], exclusions = null) {
   if (typeof text !== "string" || !text || !Array.isArray(terms)) return [];
   const findings = [];
   text.split(/\r?\n/).forEach((line, index) => {
     const lower = line.toLowerCase();
+    // 件名・本文はリポジトリのパスを持たないので、 効くのはワークスペースルートの規則だけ。
+    const excluded = (kind) => Boolean(exclusions)
+      && isExcludedHostFinding({ kind, path: label, lineText: line }, exclusions);
     for (const term of terms) {
-      if (!lower.includes(term.value)) continue;
+      if (!lower.includes(term.value) || excluded(term.category)) continue;
       findings.push({
         termId: term.id, path: label, line: index + 1, ...(term.category ? { kind: term.category } : {}),
       });
     }
     for (const detector of detectors) {
-      if (detector.test(line)) findings.push({ termId: detector.id, path: label, line: index + 1, kind: detector.kind });
+      if (detector.test(line) && !excluded(detector.kind)) findings.push({ termId: detector.id, path: label, line: index + 1, kind: detector.kind });
     }
   });
   return findings;
 }
 
 /** @implements SPEC-CONFIDENTIAL-TERM-ENFORCEMENT */
-function pullRequestTextFindings(pullRequest, terms, detectors = []) {
+function pullRequestTextFindings(pullRequest, terms, detectors = [], exclusions = null) {
   return [
-    ...scanTextForConfidentialTerms(pullRequest?.title, terms, "[pr-title]", detectors),
-    ...scanTextForConfidentialTerms(pullRequest?.body, terms, "[pr-body]", detectors),
+    ...scanTextForConfidentialTerms(pullRequest?.title, terms, "[pr-title]", detectors, exclusions),
+    ...scanTextForConfidentialTerms(pullRequest?.body, terms, "[pr-body]", detectors, exclusions),
   ];
 }
 
@@ -456,9 +472,9 @@ export function configuredConfidentialTermsOutcome({
     return { advisory: null, reason: CONFIGURATION_FAILURE };
   }
   if (!policy || typeof unifiedDiff !== "string") return { advisory: null, reason: null };
-  const { terms, detectors } = activeMatchers(policy);
-  const diffResult = scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedPaths, detectors });
-  const textFindings = pullRequestTextFindings(pullRequest, terms, detectors);
+  const { terms, detectors, exclusions } = activeMatchers(policy);
+  const diffResult = scanAddedDiffForConfidentialTerms(unifiedDiff, terms, { changedPaths, detectors, exclusions });
+  const textFindings = pullRequestTextFindings(pullRequest, terms, detectors, exclusions);
   const enforced = newFindingGroup();
   const advisory = newFindingGroup();
   for (const finding of [...diffResult.findings, ...textFindings]) {
@@ -513,8 +529,8 @@ export function assertCommitMessageFreeOfConfidentialTerms({ repository, title, 
     throw new Error("Merge blocked: the confidential term check could not run. Check its configuration.");
   }
   if (!policy) return;
-  const { terms, detectors } = activeMatchers(policy);
-  const findings = pullRequestTextFindings({ title, body }, terms, detectors)
+  const { terms, detectors, exclusions } = activeMatchers(policy);
+  const findings = pullRequestTextFindings({ title, body }, terms, detectors, exclusions)
     .filter((finding) => isConfidentialKindEnforced(policy, repository, finding.kind));
   if (findings.length === 0) return;
   const termIds = [...new Set(findings.map((finding) => finding.termId))].join(", ");

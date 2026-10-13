@@ -140,6 +140,31 @@ binary file や Git が C-quote した非 ASCII パスも見落とさない。�
 登録テストは検出と対象外の境界、種類の既定 advisory、従来の語の enforcement 維持、enforce / off の切替、
 PR 本文と squash 本文での種類別の扱い、知らない種類・扱いの fail-closed、値の非表示を検証する。
 
+## SPEC-CONFIDENTIAL-TERM-EXCLUSIONS: 種類つき所見の除外ルール (neco 決定 2026-10-13)
+
+公開リポ 273 checkout の監査で local-path 195,848 件・private-ip 1,368 件・machine-name 461 件が出て、
+大半が生成レポートとテストだった (private-ip はテストを除くと 181 件、machine-name は 450 件がテスト)。
+種類つきの所見 (`private-ip` / `local-path` / `machine-name` / `site-name`) に次の除外を入れる。
+判定は `src/leak-exclusions.mjs`。category の無い従来の語には使わない。
+
+| 除外 | 規則 | 対象の種類 |
+|---|---|---|
+| 生成レポート | `report/` 配下、`*.html` / `*.htm` / `*.html.json` | すべての種類つき |
+| テスト | `test/`・`tests/`・`__tests__/`・`fixture/`・`fixtures/` 配下、`*.test.*`・`*.spec.*` | すべての種類つき |
+| ワークスペースルート配下だけの行 | 行内の具体的な PC のフルパスが 1 つ以上あり、すべて `workspaceRoots` のどれかの配下 | `local-path` |
+
+- パス規則は監査の集計と同じ式。ワークスペースルートの定義も監査と同じ「行内のドライブパスがすべてルート配下」で、
+  加えて `/Users/<名前>/`・`/home/<名前>/` もルート外のパスとして数える (同じ行のホームのパスを一緒に除外しない)。
+- ルートは PC のフルパスなのでリポジトリに置かない。語ファイルの `workspaceRoots: ["<絶対パス>"]` で渡す。
+  書かれていなければワークスペースルートの規則は効かない。配列でない・ドライブ直下や `/` 直下の 1 段・相対パスは
+  読込失敗 (fail-closed)。
+- PR 件名・本文と squash commit 本文はリポジトリのパスを持たないので、効くのはワークスペースルートの規則だけ。
+- 除外した件数は差分検査の結果に `excludedFindings` として残す (値は持たない)。
+- AIFormat の leak-checker (`scripts/leak-checker/leak-exclusions.mjs`) が同じ規則を持つ。規則を変えるときは両方を揃える。
+
+登録テストはパス規則の境界、ルートの正規化と fail-closed、ルート配下判定 (ルート外・ホーム・兄弟フォルダの接頭辞)、
+従来の語を除外しないこと、enforce の種類がテスト・レポートでは止めないこと、PR 本文と squash 本文での扱いを検証する。
+
 ## レビュー計画による降格 (neco 決定 2026-07-30)
 
 **決定的ルール**が `anatomia_code_analysis` を落とした審査では、

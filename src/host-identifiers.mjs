@@ -99,6 +99,71 @@ export function containsLocalPath(line) {
 // @ts-expect-error augur-inject
 containsLocalPath = contract(containsLocalPath, { ...augurContract_f1715103, contractId: 'C-13', mode: 'observe', sample: 1, where: 'src/host-identifiers.mjs:90', rule: 'contract-wrap', id: 'f1715103' }); /* augur-inject:contract-wrap:f1715103 */
 
+const FULL_DRIVE_PATH = new RegExp(
+  String.raw`(?<![A-Za-z0-9_])[A-Za-z]:(?:(?:\\{1,2}|/)+${PATH_SEGMENT})*`,
+  "g",
+);
+const FULL_HOME_PATH = /(?<![\w.~\-/])\/(?:Users|home)\/[^/\s"'`<>]*(?:\/[^/\s"'`<>|*?:;,()[\]]*)*/g;
+
+/** 区切りを `/` にそろえ、 重複・末尾の区切りを落として小文字にする。 */
+function normalizePathForRoot(path) {
+  return path.replace(/\\+/g, "/").replace(/\/+/g, "/").replace(/\/$/, "").toLowerCase();
+}
+
+/**
+ * 語ファイルの `workspaceRoots` を検証して正規化する。 書かれていなければ空 (除外しない)。
+ * ルートは PC のフルパスそのものなので、 リポジトリに置かず語ファイルからだけ受け取る。
+ * 崩れた宣言は黙って捨てず読込失敗にする。
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeWorkspaceRoots(raw) {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) throw new Error("Confidential term workspaceRoots must be an array.");
+  return raw.map((value) => {
+    const root = typeof value === "string" ? normalizePathForRoot(value.trim()) : "";
+    // ドライブ直下や `/` 直下の 1 段をルートにすると、 ほとんどのパスが除外される。
+    if (!/^[a-z]:\/[^/]/.test(root) && !/^\/[^/]+\/[^/]/.test(root)) {
+      throw new Error("Confidential term workspaceRoots lists an invalid root.");
+    }
+    return root;
+  });
+}
+
+function isUnderRoot(path, roots) {
+  const normalized = normalizePathForRoot(path);
+  return roots.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+}
+
+/**
+ * 行の中の具体的な PC のフルパスが 1 つ以上あり、 そのすべてがワークスペースルート配下か。
+ *
+ * 定義は 2026-10-13 の公開リポ監査 (local-path 195,848 件の内訳を出した集計) と同じ
+ * 「行内のドライブパスがすべてワークスペースルート配下」。 ルート配下のパスはリポジトリの
+ * 並び (公開リポ名と同じ情報) しか持たない一方、 ルート外のパス (ホーム・別ドライブ) は
+ * 利用者名や機材の構成を表す。 監査はドライブパスだけを数えたが、 ここでは `/Users/<名前>/`
+ * 等も「ルート外のパス」として数える — 同じ行にあるホームのパスまで一緒に除外しないため。
+ * 値は返さない。
+ * @param {string} line
+ * @param {string[]} roots normalizeWorkspaceRoots の結果
+ * @returns {boolean}
+ */
+export function localPathsAllUnderRoots(line, roots) {
+  if (typeof line !== "string" || !Array.isArray(roots) || roots.length === 0) return false;
+  let concrete = 0;
+  for (const [path] of line.matchAll(FULL_DRIVE_PATH)) {
+    if (!hasConcreteDrivePath(path)) continue;
+    if (!isUnderRoot(path, roots)) return false;
+    concrete += 1;
+  }
+  for (const [path] of line.matchAll(FULL_HOME_PATH)) {
+    if (!hasConcreteHomePath(`${path}/`)) continue;
+    if (!isUnderRoot(path, roots)) return false;
+    concrete += 1;
+  }
+  return concrete > 0;
+}
+
 const DETECTOR_TESTS = Object.freeze({
   "private-ip": containsPrivateIp,
   "local-path": containsLocalPath,

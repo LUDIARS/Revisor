@@ -128,6 +128,15 @@
       "module": "contracts/confidential-terms-outcome-by-kind.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-15",
+      "criterion": "C-15 isExcludedHostFinding(finding): 種類つき所見だけを、生成レポート (report/ 配下・html)・テスト (test/・tests/・__tests__/・fixtures・*.test.*・*.spec.*)・行内のフルパスがすべてワークスペースルート配下の local-path 行のとき除外し、従来の語は除外しない",
+      "symbol": "isExcludedHostFinding",
+      "file": "src/leak-exclusions.mjs",
+      "module": "contracts/excluded-host-finding.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

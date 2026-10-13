@@ -17,10 +17,10 @@
       "namePattern": "runSecurityScan|scanArgs|scanEnv|extractFindings|sanitizeFinding|severityRank|skippedSecurityScan"
     },
     {
-      "pathPattern": "(^|/)src/(?:anatomia\\-review\\-gate|change\\-classification|ci|confidential\\-terms|host\\-identifiers|leakage|merge\\-risk)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:anatomia\\-review\\-gate|change\\-classification|ci|confidential\\-terms|host\\-identifiers|leak\\-exclusions|leakage|merge\\-risk)\\.mjs$"
     },
     {
-      "pathPattern": "(^|/)test/(?:anatomia\\-review\\-gate|change\\-classification|ci|confidential\\-terms|host\\-identifiers|leakage|merge\\-risk)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
+      "pathPattern": "(^|/)test/(?:anatomia\\-review\\-gate|change\\-classification|ci|confidential\\-terms|host\\-identifiers|leak\\-exclusions|leakage|merge\\-risk)(?:-[a-z0-9-]+)?\\.test\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/(?:review-gate|security-scan)\\.test\\.mjs$"
@@ -47,6 +47,7 @@
     "review-gate — SPEC-CONFIDENTIAL-TERM-ADVISORY",
     "review-gate — SPEC-CONFIDENTIAL-TERM-ENFORCEMENT",
     "review-gate — SPEC-CONFIDENTIAL-TERM-CATEGORIES",
+    "review-gate — SPEC-CONFIDENTIAL-TERM-EXCLUSIONS",
     "refactoring-proposal — SPEC-REFACTORING-PROPOSAL の complexity 非ブロック規則",
     "security-scan — codex-security スキャンの起動と結果の正規化 (終了コード→status、保持は severity/rule/file/line のみ)",
     "security-scan — 環境変数 CODEX_SECURITY_STATE_DIR (スキャンごとの専用 state ディレクトリ / 綴り違いの除去 / 削除失敗を握り潰す)"
