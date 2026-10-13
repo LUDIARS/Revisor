@@ -5,7 +5,7 @@
   "templateRules": [],
   "membership": [
     {
-      "pathPattern": "(^|/)src/(?:runtime-diagnostics|service-log)\\.mjs$"
+      "pathPattern": "(^|/)src/(?:runtime-diagnostics|service-log|contract-runtime)\\.mjs$"
     },
     {
       "pathPattern": "(^|/)test/(?:runtime-diagnostics|service-log|serve-exit-reason)\\.test\\.mjs$"

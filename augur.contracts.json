@@ -2,6 +2,7 @@
   "version": 1,
   "contractsDir": "contracts",
   "importFrom": "./contract-runtime.mjs",
+  "runtimeFile": "src/contract-runtime.mjs",
   "contracts": [
     {
       "id": "C-1",

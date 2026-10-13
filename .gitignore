@@ -10,3 +10,4 @@ coverage/
 .anatomia/*
 !.anatomia/layers.json
 .contracts-logs*/
+/logs/
