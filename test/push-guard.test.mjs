@@ -369,3 +369,61 @@ test("explicit Revisor workflow overrides the GitHub org default in the hook", a
     assert.deepEqual(result.blockedRefs, ["refs/heads/feat/private"]);
   } finally { removeFixture(state.directory); }
 });
+
+for (const surface of ["subject", "body"]) {
+  test(`blocks a secret in the ${surface} of an earlier outgoing commit`, async () => {
+    const state = fixture();
+    const statePath = join(state.directory, "state.json");
+    const store = new LocalPrStore({ path: statePath });
+    store.registerRepository({ repository: "LUDIARS/Product", rootPath: state.repoPath, baseRef: "main", testCases: [{ name: "unit" }] });
+    try {
+      const secret = "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz123456";
+      git(state.repoPath, "commit", "--allow-empty", "-m", surface === "subject" ? secret : "safe subject", ...(surface === "body" ? ["-m", secret] : []));
+      const leakySha = git(state.repoPath, "rev-parse", "HEAD");
+      git(state.repoPath, "commit", "--allow-empty", "-m", "safe later message");
+      const headSha = git(state.repoPath, "rev-parse", "HEAD");
+      const result = await guardMainPush({ repoPath: state.repoPath, statePath, input: `${headSha} ${headSha} refs/heads/main ${state.baseSha}\n`, authorizedPublication: true });
+      assert.equal(result.allowed, false);
+      assert.equal(result.amendRequired, true);
+      assert.ok(result.findings.some(f => f.rule === "github-token" && f.path === `commit/${leakySha}/message`));
+      assert.ok(!JSON.stringify(result).includes(secret));
+      assert.ok(!JSON.stringify(store.getRepository("LUDIARS/Product")).includes(secret));
+    } finally { removeFixture(state.directory); }
+  });
+}
+
+for (const remoteRef of ["refs/heads/main", "refs/heads/feature", "refs/tags/v1.0.0"]) {
+  test(`new ${remoteRef} scans inherited commit messages, including the root`, async () => {
+    const state = fixture();
+    const statePath = join(state.directory, "state.json");
+    const store = new LocalPrStore({ path: statePath });
+    store.registerRepository({ repository: "LUDIARS/Product", rootPath: state.repoPath, baseRef: "main", testCases: [{ name: "unit" }] });
+    try {
+      const secret = "gh" + "p_" + "abcdefghijklmnopqrstuvwxyz123456";
+      git(state.repoPath, "commit", "--amend", "-m", "base", "-m", secret);
+      const headSha = git(state.repoPath, "rev-parse", "HEAD");
+      const result = await guardMainPush({ repoPath: state.repoPath, statePath, input: `${headSha} ${headSha} ${remoteRef} ${"0".repeat(40)}\n`, authorizedPublication: true, authorizedBranchPublication: true });
+      assert.equal(result.allowed, false);
+      assert.equal(result.amendRequired, true);
+      git(state.repoPath, "commit", "--amend", "-m", "safe base");
+      const safeSha = git(state.repoPath, "rev-parse", "HEAD");
+      const safe = await guardMainPush({ repoPath: state.repoPath, statePath, input: `${safeSha} ${safeSha} ${remoteRef} ${"0".repeat(40)}\n`, authorizedPublication: true, authorizedBranchPublication: true });
+      assert.equal(safe.allowed, true);
+    } finally { removeFixture(state.directory); }
+  });
+}
+
+test("push fails closed when its configured confidential dictionary cannot be read", async () => {
+  const state = fixture();
+  const statePath = join(state.directory, "state.json");
+  const store = new LocalPrStore({ path: statePath });
+  store.registerRepository({ repository: "LUDIARS/Product", rootPath: state.repoPath, baseRef: "main", testCases: [{ name: "unit" }] });
+  try {
+    await assert.rejects(() => guardMainPush({
+      repoPath: state.repoPath, statePath,
+      input: `${state.baseSha} ${state.baseSha} refs/heads/main ${"0".repeat(40)}\n`,
+      authorizedPublication: true,
+      env: { REVISOR_CONFIDENTIAL_TERMS_FILE: join(state.directory, "missing-terms.json") },
+    }), /Cannot read the confidential terms file/);
+  } finally { removeFixture(state.directory); }
+});

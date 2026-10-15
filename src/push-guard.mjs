@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { resolveRepositoryWorkflow, WORKFLOW_GITHUB } from "./repository-workflow.mjs";
 import { BRANCH_PUSH_ENV_FLAG } from "./branch-push-flag.mjs";
-import { scanAddedDiffForLeaks } from "./leakage.mjs";
+import { scanOutgoingHistory } from "./outgoing-history.mjs";
 import { LocalPrStore, redirectLegacyStorePath } from "./state-store.mjs";
 import { git } from "./workspace.mjs";
 import { runProcess } from "./process.mjs";
@@ -194,37 +194,6 @@ function parsePushLines(input) {
       record.localRef && record.localSha && record.remoteRef && record.remoteSha);
 }
 
-async function forkPoint(repoPath, baseRef, localSha) {
-  try {
-    return await git(repoPath, ["merge-base", `refs/heads/${baseRef}`, localSha]);
-  } catch {
-    // base がまだ無い / 到達しない (孤立ブランチ) 場合は分岐点が無い。
-    return null;
-  }
-}
-
-async function pushDiff(repoPath, record, baseRef) {
-  let range;
-  if (ZERO_SHA.test(record.remoteSha)) {
-    // 新規 ref には remote 側の比較対象が無い。 base からの分岐点まで遡って走査する。
-    // 分岐点が無い孤立履歴は、到達可能な全コミットを走査する。
-    const fork = baseRef ? await forkPoint(repoPath, baseRef, record.localSha) : null;
-    range = fork ? `${fork}..${record.localSha}` : record.localSha;
-  } else {
-    range = `${record.remoteSha}..${record.localSha}`;
-  }
-  // A final-tree diff misses a secret added and later deleted in the same
-  // branch. GitHub receives every commit in this range, so scan every patch.
-  return git(repoPath, [
-    "log",
-    "--format=",
-    "--patch",
-    "--no-ext-diff",
-    range,
-    "--",
-  ]);
-}
-
 export async function guardMainPush({
   repoPath,
   statePath,
@@ -291,11 +260,9 @@ export async function guardMainPush({
   let scannedAddedLines = 0;
   const findings = [];
   // Ordinary GitHub pushes still scan outgoing history, including tag targets.
-  const scannedPushes = githubWorkflow
-    ? pushes.filter((record) => !ZERO_SHA.test(record.localSha))
-    : [...mainPushes, ...(allowsBranchPush ? branchPushes : [])];
+  const scannedPushes = pushes.filter((record) => !ZERO_SHA.test(record.localSha));
   for (const record of scannedPushes) {
-    const result = scanAddedDiffForLeaks(await pushDiff(repoPath, record, repository.baseRef));
+    const result = await scanOutgoingHistory(repoPath, record, { repository: repository.repository, env });
     scannedAddedLines += result.scannedAddedLines;
     findings.push(...result.findings);
   }

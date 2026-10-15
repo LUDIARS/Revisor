@@ -214,3 +214,20 @@ Missing App credentials, installation access, permissions, remote divergence,
 tag collision, push failure, and Release failure fail explicitly. The error
 remains visible until publication succeeds. There is no PAT, anonymous, or
 local-only fallback.
+
+## Outgoing commit message leakage gate
+
+Before any authorized ref update, scan the subject and complete body of every
+outgoing commit with the credential rules used for patch additions. A finding
+blocks publication and records only the rule, commit SHA and message line.
+A new ref has no remote baseline, so its entire reachable history is checked;
+a local base or merge-base must not suppress inherited messages. Authorized
+tag targets receive the same gate. Deletions have no outgoing commits.
+Unreadable history or malformed message records fail closed.
+
+Commit messages also use the configured confidential-term policy, including its
+category modes, workspace-root exclusions and repository exceptions. Only
+enforced findings block push; values and message text are never retained.
+An unreadable configured dictionary fails closed. As with the existing review
+gate, an unset dictionary disables that optional policy. Tag annotations remain
+a separate surface outside this commit-message check.
