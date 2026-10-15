@@ -29,14 +29,37 @@ export async function readChangedPaths(cwd, mergeBase) {
   return [...new Set(outputs.flatMap((output) => output.split("\0").filter(Boolean)))];
 }
 
+const GITLINK_MODE = "160000";
+
+// `--raw -z` emits `:<old mode> <new mode> <old sha> <new sha> <status>` and the
+// path as separate NUL-terminated fields. The mode is the only reliable mark of
+// a submodule pointer: its path looks like any extensionless source file, and
+// the unified diff's `Subproject commit` body changes with `diff.submodule`.
+export function parseGitlinkPaths(rawDiff) {
+  const fields = String(rawDiff ?? "").split("\0");
+  const paths = [];
+  for (let index = 0; index < fields.length - 1; index += 1) {
+    if (!fields[index].startsWith(":")) continue;
+    const [oldMode, newMode] = fields[index].slice(1).split(" ");
+    if (oldMode === GITLINK_MODE || newMode === GITLINK_MODE) paths.push(fields[index + 1]);
+    index += 1;
+  }
+  return paths;
+}
+
+export async function readGitlinkPaths(cwd, mergeBase) {
+  return parseGitlinkPaths(await git(cwd, ["diff", "--raw", "-z", "--no-renames", mergeBase, "--"]));
+}
+
 export async function readChangeProfile(cwd, mergeBase) {
-  const [unifiedDiff, changedPaths] = await Promise.all([
+  const [unifiedDiff, changedPaths, gitlinkPaths] = await Promise.all([
     readUnifiedDiff(cwd, mergeBase),
     readChangedPaths(cwd, mergeBase),
+    readGitlinkPaths(cwd, mergeBase),
   ]);
   return {
     unifiedDiff,
     changedPaths,
-    classification: classifyChange({ changedPaths, unifiedDiff }),
+    classification: classifyChange({ changedPaths, unifiedDiff, gitlinkPaths }),
   };
 }

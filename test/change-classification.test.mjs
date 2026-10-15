@@ -87,6 +87,24 @@ test("treats a change as dependency-only only when every path is a dependency ma
   assert.equal(classifyChange({ changedPaths: ["src/a.ts"] }).dependencyOnly, false);
 });
 
+// submodule の参照だけを進める変更は依存の更新。 拡張子の無いパスが code と
+// 分類され、 対象ドメインが決まらず動作ブロックが必ず落ちていた (Praeforma#25)。
+test("treats a submodule pointer as a dependency update, not as code", () => {
+  const profile = classifyChange({ changedPaths: ["lib/lapilli"], gitlinkPaths: ["lib/lapilli"] });
+  assert.deepEqual(profile.kinds, ["config"]);
+  assert.equal(profile.dependencyOnly, true);
+  assert.equal(profile.codeDomainRequired, false);
+  assert.equal(profile.docsOrConfigOnly, false);
+  assert.deepEqual(profile.runtimeSurfaces, []);
+  assert.equal(isDependencyOnlyChange(["lib/lapilli", "package.json"], ["lib/lapilli"]), true);
+  // gitlink と分からなければ従来どおり code。
+  assert.equal(classifyChange({ changedPaths: ["lib/lapilli"] }).codeDomainRequired, true);
+  // ソースが混ざれば通常の実装変更としてドメインを要求する。
+  const mixed = classifyChange({ changedPaths: ["lib/lapilli", "src/a.mjs"], gitlinkPaths: ["lib/lapilli"] });
+  assert.equal(mixed.dependencyOnly, false);
+  assert.equal(mixed.codeDomainRequired, true);
+});
+
 test("treats a change as docs-only only when every path is documentation", () => {
   assert.equal(isDocsOnlyChange(["README.md", "spec/architecture.md"]), true);
   assert.equal(isDocsOnlyChange(["README.md", "src/runner.mjs"]), false);

@@ -171,20 +171,30 @@ export function isDocsOrConfigOnlyChange(changedPaths) {
  * 「実行コードを含む / 含まない」の二分では両方を同じ扱いにしてしまうため、
  * 独立した profile として持つ。
  */
-export function isDependencyOnlyChange(changedPaths) {
-  return changedPaths.length > 0 && changedPaths.every((path) => DEPENDENCY_MANIFEST.test(path));
+//
+// submodule の参照 (gitlink) を進める変更も同じ形。 パスに拡張子が無いので
+// classifyPath では code になり、 関数を含まないので対象ドメインも決まらず、
+// 動作ブロックが必ず error で落ちていた (Praeforma#25)。 gitlink はパスでは
+// 見分けられないので、 git のモード (160000) で判定した一覧を受け取る。
+export function isDependencyOnlyChange(changedPaths, gitlinkPaths = []) {
+  const gitlinks = new Set(gitlinkPaths);
+  return changedPaths.length > 0
+    && changedPaths.every((path) => DEPENDENCY_MANIFEST.test(path) || gitlinks.has(path));
 }
 
-export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
+export function classifyChange({ changedPaths = [], unifiedDiff = "", gitlinkPaths = [] } = {}) {
+  const gitlinks = new Set(gitlinkPaths);
   const files = changedPaths.map((path) => {
-    const kind = classifyPath(path);
+    // A submodule pointer pulls vendored code into the build the way a manifest
+    // bump does, so it takes the manifest's kind rather than the extensionless `code`.
+    const kind = gitlinks.has(path) ? "config" : classifyPath(path);
     return {
       path,
       kind,
       // Generated output can have an executable-looking filename (for example,
       // `report/*.html` or `dist/server.js`) without being a product surface a
       // human must exercise. The source that produces it owns that obligation.
-      runtimeSurfaces: kind === "generated" ? [] : runtimeSurfacesOf(path),
+      runtimeSurfaces: kind === "generated" || gitlinks.has(path) ? [] : runtimeSurfacesOf(path),
     };
   });
   const counts = {};
@@ -199,7 +209,7 @@ export function classifyChange({ changedPaths = [], unifiedDiff = "" } = {}) {
     ...stats,
     docsOnly: isDocsOnlyChange(changedPaths),
     docsOrConfigOnly: isDocsOrConfigOnlyChange(changedPaths),
-    dependencyOnly: isDependencyOnlyChange(changedPaths),
+    dependencyOnly: isDependencyOnlyChange(changedPaths, gitlinkPaths),
     // Anatomia domains describe production behaviour. Tests, operational
     // manifests, documentation and generated assets may contain parseable
     // functions, but assigning those helpers to an application domain invents
