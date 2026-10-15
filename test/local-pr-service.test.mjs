@@ -121,6 +121,29 @@ test("reuses the list until store data or decision settings change", () => {
   assert.notStrictEqual(service.listPullRequests(), afterWrite);
 });
 
+test("repositories reuse stored PR records until the store data changes", () => {
+  let version = "1:0";
+  let reads = 0;
+  const service = new LocalPrService({
+    store: {
+      listVersion: () => version,
+      listRepositories: () => [],
+      listPullRequests: () => {
+        reads += 1;
+        return [];
+      },
+    },
+    queue: {},
+    loadSettings: () => ({}),
+  });
+  service.listRepositories();
+  service.listRepositories();
+  assert.strictEqual(reads, 1);
+  version = "1:1";
+  service.listRepositories();
+  assert.strictEqual(reads, 2);
+});
+
 test("registers tests, queues a local-only PR, and squash merges it", async () => {
   const fixture = repositoryFixture();
   const store = new LocalPrStore({ path: join(fixture.directory, "state.json") });

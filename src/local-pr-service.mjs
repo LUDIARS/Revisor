@@ -181,6 +181,9 @@ export class LocalPrService {
   // まだ走っているうちに次を重ねると、同じ候補を二重に処理しにいく。
   #sweeping = false;
   #listCache = new PrListCache();
+  // repositories API が使う未加工の PR 記録。 一覧と同じ版数で使い回し、 呼ぶたびに
+  // 全件を SELECT・parse しない (2026-09-11 実測で 1 回約 0.25 秒)。
+  #storedListCache = new PrListCache();
   // 一覧の記録は解析結果を持たないので、 提案の根拠 PR だけ 1 件ずつ読む。
   #refactoringProposals = new RefactoringProposalCache(
     (id) => this.store.getPullRequestAnatomia?.(id) ?? null,
@@ -227,8 +230,17 @@ export class LocalPrService {
   listRepositories() {
     return this.#refactoringProposals.project(
       this.store.listRepositories(),
-      this.store.listPullRequests(),
+      this.#storedPullRequests(),
     );
+  }
+
+  // Returned records are shared with later calls. Callers must not mutate them.
+  #storedPullRequests() {
+    return this.#storedListCache.read({
+      version: this.store.listVersion?.() ?? null,
+      settingsKey: null,
+      build: () => this.store.listPullRequests(),
+    });
   }
 
   getRepository(repository) {
