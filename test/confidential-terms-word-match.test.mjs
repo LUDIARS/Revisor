@@ -59,6 +59,28 @@ test("keeps substring matching as the default", () => {
   assert.equal(confidentialTermMatches("ZQXservice", SUBSTRING), true);
 });
 
+test("loads the existing token dictionary mode without changing word semantics", () => {
+  const [term] = loadTerms([{ id: "product-token", value: "ZQX", match: "token" }]);
+  assert.deepEqual(term, { id: "product-token", value: "zqx", match: "token" });
+  assert.equal(confidentialTermMatches("fix ZQX", term), true);
+  assert.equal(confidentialTermMatches("Assets/ZQX/a.cs", term), true);
+  assert.equal(confidentialTermMatches("prefixZQX", term), false);
+  assert.equal(confidentialTermMatches("ZQX1", term), false);
+  assert.equal(confidentialTermMatches("ZQX_HUD", term), false);
+  assert.equal(confidentialTermMatches("_ZQX", term), false);
+  assert.equal(confidentialTermMatches("前ZQX後", term), false);
+  assert.equal(confidentialTermMatches("ZQX_HUD", WORD), true);
+});
+
+test("token mode preserves explicit case sensitivity on message and diff surfaces", () => {
+  const terms = loadTerms([{ id: "product-token", value: "ZQX", match: "token", caseSensitive: true }]);
+  assert.deepEqual(scanTextForConfidentialTerms("zqx\nZQX_HUD\nfix ZQX", terms, "[message]"), [
+    { termId: "product-token", path: "[message]", line: 3 },
+  ]);
+  const result = scanAddedDiffForConfidentialTerms("+++ b/plan.md\n@@ -0,0 +1,3 @@\n+zqx\n+ZQX_HUD\n+fix ZQX\n", terms);
+  assert.deepEqual(result.findings, [{ termId: "product-token", path: "plan.md", line: 3 }]);
+});
+
 test("applies the word rule to added lines, paths and the pull request text", () => {
   const result = scanAddedDiffForConfidentialTerms([
     "+++ b/docs/ZQX/plan.md",

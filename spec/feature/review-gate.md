@@ -84,6 +84,7 @@ binary file や Git が C-quote した非 ASCII パスも見落とさない。�
 
 - `match`: `substring` (既定) は部分一致。`word` は前後が文字・数字でない位置だけで一致する
   (`XYZ/` や `XYZ_` は一致、`XYZA` や `aXYZ` は不一致)。
+- `token`: 既存の共有辞書との互換指定。前後が文字・数字・アンダースコアでない位置だけで一致する。`word` はアンダースコアを区切りとして扱うため、両者を区別する。
 - `caseSensitive`: 既定 `false`。`true` のとき大文字小文字を区別する。
 - 未知の `match` と真偽値でない `caseSensitive` は設定エラーとして扱う。
 - パス・追加差分・件名本文・squash commit 本文のすべてで同じ規則 (`confidentialTermMatches`) を使う。

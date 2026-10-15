@@ -59,12 +59,13 @@ const MAX_FINDINGS = 100;
 const MAX_TERMS_FILE_BYTES = 1024 * 1024;
 const SAFE_TERM_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 /**
- * 語ごとの照合方法。 既定は部分一致。 `word` は前後が英数字でない位置だけで一致する。
+ * 語ごとの照合方法。 既定は部分一致。 `word` は文字・数字、 `token` は文字・数字・
+ * アンダースコアを識別子の構成要素として境界を判定する。
  * 短い固有名 (例: 3 文字の英大文字) を部分一致で登録すると一般語の一部に当たり、
  * 公開リポジトリの PR が一斉に止まるため (neco 指示 2026-10-14)。
  */
-const TERM_MATCH_MODES = ["substring", "word"];
-const wordPatterns = new WeakMap();
+const TERM_MATCH_MODES = ["substring", "word", "token"];
+const boundaryPatterns = new WeakMap();
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -76,11 +77,13 @@ function escapeRegExp(value) {
  */
 export function confidentialTermMatches(text, term) {
   const haystack = term.caseSensitive ? text : text.toLowerCase();
-  if (term.match !== "word") return haystack.includes(term.value);
-  let pattern = wordPatterns.get(term);
+  if (term.match !== "word" && term.match !== "token") return haystack.includes(term.value);
+  let pattern = boundaryPatterns.get(term);
   if (!pattern) {
-    pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(term.value)}(?![\\p{L}\\p{N}])`, "u");
-    wordPatterns.set(term, pattern);
+    // The existing dictionary uses token boundaries, where underscores remain part of identifiers.
+    const boundary = term.match === "token" ? "[\\p{L}\\p{N}_]" : "[\\p{L}\\p{N}]";
+    pattern = new RegExp(`(?<!${boundary})${escapeRegExp(term.value)}(?!${boundary})`, "u");
+    boundaryPatterns.set(term, pattern);
   }
   return pattern.test(haystack);
 }
@@ -111,7 +114,7 @@ function normalizeTerms(raw) {
       candidateId: typeof id === "string" ? id.trim() : null,
       value: caseSensitive ? value.trim() : value.trim().toLowerCase(),
       category: category ?? null,
-      word: match === "word",
+      matchMode: match === "word" || match === "token" ? match : null,
       caseSensitive: caseSensitive === true,
     });
   }
@@ -130,7 +133,7 @@ function normalizeTerms(raw) {
     .map(({ candidateId }) => candidateId));
   const usedIds = new Set();
   let nextFallbackIndex = 1;
-  const terms = entries.map(({ candidateId, value, category, word, caseSensitive }) => {
+  const terms = entries.map(({ candidateId, value, category, matchMode, caseSensitive }) => {
     // id 自体も永続化され得る。 制御文字や別の機密語を含む id は採用しない。
     const isSafeId = reservedIds.has(candidateId) && !usedIds.has(candidateId);
     let label = candidateId;
@@ -146,7 +149,7 @@ function normalizeTerms(raw) {
       id: label,
       value,
       ...(category ? { category } : {}),
-      ...(word ? { match: "word" } : {}),
+      ...(matchMode ? { match: matchMode } : {}),
       ...(caseSensitive ? { caseSensitive: true } : {}),
     };
   });
