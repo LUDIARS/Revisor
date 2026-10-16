@@ -84,7 +84,7 @@ their severity, but never source excerpts or reproduction steps.
 
 ## Requirements
 
-- Node.js 22.5 or newer
+- Node.js 22.12.0 or newer (see `package.json` engines)
 - Git
 - authenticated `codex` and `claude` CLIs
 - the `codex-security` CLI (`npm install -g @openai/codex-security`) signed in
