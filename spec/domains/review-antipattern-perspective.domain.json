@@ -1,0 +1,17 @@
+{
+  "name": "review-antipattern-perspective",
+  "description": "Elegantia のアンチパターン一覧を審査観点として取得 (catalog 解決のポート・短い timeout・前回結果のキャッシュ) し、レビュー指示への埋め込み、AP ID 付き指摘の抽出、reviewReport 用の観点ブロック (取得失敗の明示を含む) を作る境界。審査の合否判定、Elegantia への書き込みは持たない。",
+  "presetRules": [],
+  "templateRules": [],
+  "membership": [
+    { "pathPattern": "(^|/)src/elegantia-antipatterns\.mjs$" },
+    { "pathPattern": "(^|/)src/antipattern-review\.mjs$" },
+    { "pathPattern": "(^|/)test/elegantia-antipatterns\.test\.mjs$" },
+    { "pathPattern": "(^|/)test/antipattern-review\.test\.mjs$" },
+    { "namePattern": "^(?:fetchElegantiaAntipatterns|normalizeAntipattern|antipatternInstruction|antipatternFindings|antipatternReportBlock)$" }
+  ],
+  "cardTemplate": "Summarise the review-antipattern-perspective domain: Elegantia anti-pattern catalog fetched with short timeout and cache, injected into the reviewer prompt, AP-ID findings and explicit fetch failure recorded in reviewReport.",
+  "mechanics": ["bounded-external-fetch", "stale-cache-fallback", "explicit-unavailable-report"],
+  "specRefs": ["elegantia-antipattern-review — Elegantia アンチパターンの審査観点"],
+  "rationale": "外部サービスの観点取得と整形を review runner から分離し、Elegantia 不達でも審査を止めず、無言で観点を省かない。"
+}

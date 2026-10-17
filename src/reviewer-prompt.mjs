@@ -4,6 +4,7 @@ import {
   needsTargetDomain,
 } from "./review-gate.mjs";
 import { stageEnabled } from "./review-plan.mjs";
+import { antipatternInstruction } from "./antipattern-review.mjs";
 
 // A docs-only, configuration-only or otherwise non-code change must not be asked
 // for a code domain: the reviewer would report PR_GATE_NEEDS_HUMAN, which blocks
@@ -99,6 +100,8 @@ export function buildReviewerPrompt({
   docsOrConfigOnly = docsOnly,
   codeDomainRequired = true,
   plan = null,
+  // Elegantia perspective from fetchElegantiaAntipatterns; null when the caller did not fetch one.
+  antipatterns = null,
 }) {
   return [
     `Review and autofix PR ${request.repository}#${request.number}.`,
@@ -117,6 +120,7 @@ export function buildReviewerPrompt({
     stageEnabled(plan, "anatomia_code_analysis")
       ? "Report high complexity and fragmented or orphaned code as advisory refactoring suggestions. Complexity alone must never require a fix, runtime verification, or human approval for merging."
       : null,
+    antipatterns ? antipatternInstruction(antipatterns) : null,
     runtimeCheckInstruction(),
     plan ? planInstruction(plan) : null,
     `Original author provider: ${authorContext?.provider ?? "(unavailable; configured fallback reviewer is in use)"}`,

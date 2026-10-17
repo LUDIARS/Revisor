@@ -67,3 +67,6 @@ callback を使う。Augur の動作ブロックは並行に走り個別の開�
 `tests` 段階は Augur のドメイン別 run を動作ブロックとして保持する。各 run は domain、passed、failed、durationMs、runId を日本語の報告に出す。Augur 台帳を持たないリポジトリは「台帳未整備」と出し、全体スイートの通過を Augur の動作証跡に読み替えない。
 
 対象 head の `.augur/runs`（互換の `runs.jsonl` を含む）に evidence 配列があるときだけ体験ブロックを「記録済み」とし、件数を出す。存在しない・空・読めない場合は「未確認」とし、成功表示にしない。完了通知も同じブロックを Concordia へ返す。
+
+Elegantia のアンチパターン観点 (`antipatterns`) は `stage:review` の完了記録と最終結果の content に載せる。
+取得失敗は `アンチパターン観点: 取得失敗` と明示する (spec/feature/elegantia-antipattern-review.md)。

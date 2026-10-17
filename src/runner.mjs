@@ -28,6 +28,8 @@ import {
   runReviewer,
 } from "./reviewer.mjs";
 import { buildReviewerPrompt } from "./reviewer-prompt.mjs";
+import { fetchElegantiaAntipatterns } from "./elegantia-antipatterns.mjs";
+import { antipatternReportBlock } from "./antipattern-review.mjs";
 import {
   assertMeaningfulReviewDiff,
   investigationPrompt,
@@ -263,6 +265,8 @@ function buildGateResult({
   security,
   humanReviewRequired = false,
   geniusGuidance = null,
+  // Elegantia perspective block (antipatternReportBlock); informational, never a gate input.
+  antipatterns = null,
   intentReviewCompleted = false,
   anatomiaGate = null,
   analysisSource = "anatomia-cli",
@@ -375,6 +379,7 @@ function buildGateResult({
     mergeRisk,
     geniusGuidance,
     anatomiaGate,
+    antipatterns,
   };
 }
 
@@ -682,6 +687,7 @@ export async function runPartialVerification({
     security,
     intentReviewCompleted: actuallyReusedStages.includes("review")
       || previous.intentReviewCompleted === true,
+    antipatterns: previous.antipatterns ?? null,
   });
   // autofix が入った head は審査時の内容と別物なので、 引き継ぎの前提が消える。
   const runtimeVerification = sameReviewedHead && !autofixApplied
@@ -776,6 +782,7 @@ export function createPrReviewRunner({
   onReviewCiStarted = null,
   onReviewCiResult = null,
   onNarrativeReconciled = null,
+  fetchAntipatterns = fetchElegantiaAntipatterns,
 } = {}) {
   return async (request) => {
     if (request.repository !== request.headRepository) {
@@ -1262,6 +1269,9 @@ export function createPrReviewRunner({
           );
         }
       }
+      // Elegantia is a review perspective only. Its failure never stops the
+      // review; the report states it instead (spec/feature/elegantia-antipattern-review.md).
+      const antipatternPerspective = await fetchAntipatterns({ cwd: workspaceRoot });
       const baseReviewPrompt = buildReviewerPrompt({
         request,
         analysis: initial,
@@ -1272,6 +1282,7 @@ export function createPrReviewRunner({
         docsOrConfigOnly,
         codeDomainRequired,
         plan,
+        antipatterns: antipatternPerspective,
       });
       // The judge may edit the review worktree. Only an unchanged worktree can
       // prove that its completed review applies to request.headSha; if a crash
@@ -1300,7 +1311,14 @@ export function createPrReviewRunner({
       // this point is cheap to repeat; this is not. Recording it here is what
       // lets an interrupted review resume in verification mode instead of
       // paying for the model review again after every restart.
-      await checkpoint("review", { reviewer, plan, reviewerOutput: redactedReviewerOutput(reviewResult.stdout) });
+      const antipatterns = antipatternReportBlock(antipatternPerspective, reviewResult.stdout);
+      gateInput = { ...gateInput, antipatterns };
+      await checkpoint("review", {
+        reviewer,
+        plan,
+        reviewerOutput: redactedReviewerOutput(reviewResult.stdout),
+        antipatterns,
+      });
       // レビュアーは worktree を書き換えられる。 ここから先の段階の通過は
       // request.headSha の内容が通ったことにならないので記録しない。
       worktreeMatchesHead = false;

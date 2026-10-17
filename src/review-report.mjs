@@ -165,6 +165,7 @@ export function reviewReportEntry(stage, payload) {
       reviewer: payload?.reviewer ?? null,
       plan: payload?.plan ?? null,
       reviewerOutput: payload?.reviewerOutput ?? null,
+      antipatterns: payload?.antipatterns ?? null,
     },
   };
 }
@@ -189,6 +190,7 @@ export function finalReviewReportEntry(result, error = null) {
       security: result?.security ?? null,
       ci: result?.ci ?? [],
       anatomiaGate: result?.anatomiaGate ?? null,
+      antipatterns: result?.antipatterns ?? null,
     },
   };
 }

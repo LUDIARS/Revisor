@@ -138,6 +138,24 @@
       "module": "contracts/excluded-host-finding.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-16",
+      "criterion": "C-16 fetchElegantiaAntipatterns(options): Elegantia GET /api/antipatterns を catalog 解決のポートと短い timeout で取得し、新しい結果を再利用、失敗時は例外を投げず前回結果 (stale) か空 (unavailable) と理由を返す",
+      "symbol": "fetchElegantiaAntipatterns",
+      "file": "src/elegantia-antipatterns.mjs",
+      "module": "contracts/fetch-elegantia-antipatterns.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-17",
+      "criterion": "C-17 antipatternReportBlock(perspective, reviewerOutput): 取得失敗を『アンチパターン観点: 取得失敗』と明示し、指摘は catalog にある AP ID 付きの行だけを拾う",
+      "symbol": "antipatternReportBlock",
+      "file": "src/antipattern-review.mjs",
+      "module": "contracts/antipattern-report-block.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }
