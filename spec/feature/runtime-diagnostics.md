@@ -17,6 +17,21 @@ updated: 2026-09-04
 
 # runtime-diagnostics — how the service ended, in its own log
 
+## SPEC-REVIEWER-FAILURE-DIAGNOSTICS
+
+Failed investigation and final-review invocations remain failed reviews. The
+public error and `reviewer_invocation_failed` serviceLog event retain only an
+allowlisted stage/provider, numeric exit code (or unknown), and fixed category.
+Categories inferred from provider output are diagnostic hints, not proof of the
+cause or authority to retry/bypass review. Unknown stays unknown. Never retain
+prompt, stdout, stderr, environment, paths or credentials in this summary.
+Logging failure must not replace the review failure. Capacity fallback, forced
+model selection, risk holds and merge gates remain unchanged.
+
+Acceptance: timeout, capacity, authentication, launch, permission and unknown
+failures can be distinguished without exposing arbitrary output. Both failure
+branches use this boundary. Previously discarded output cannot be recovered.
+
 Revisor は 1 日に 20 回以上再起動していたが、 プロセスログには例外が 1 件も残って
 いなかった。 「落ちた」 のか 「止められた」 のかが区別できない限り、 再起動ループの
 原因は推測にしかならない。 この責務は、 終わり方そのものを記録することだけを担う。

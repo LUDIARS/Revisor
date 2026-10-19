@@ -1,4 +1,5 @@
 import { compareComplexity } from "./complexity-comparison.mjs";
+import { reviewerFailureError } from "./reviewer-failure.mjs";
 import { analyzePr, ensureInitialAnalysis, resolveAnatomiaCli } from "./anatomia.mjs";
 import {
   evaluateAnatomiaReviewGate,
@@ -1264,9 +1265,7 @@ export function createPrReviewRunner({
         });
         reviewer = investigation.reviewer;
         if (!investigation.ok) {
-          throw new Error(
-            "Review investigation failed; output was withheld from the Check Run.",
-          );
+          throw reviewerFailureError("investigation", investigation);
         }
       }
       // Elegantia is a review perspective only. Its failure never stops the
@@ -1301,7 +1300,7 @@ export function createPrReviewRunner({
       });
       reviewer = reviewResult.reviewer;
       if (!reviewResult.ok) {
-        throw new Error("Opposite-model reviewer failed; output was withheld from the Check Run.");
+        throw reviewerFailureError("review", reviewResult);
       }
       if (reviewInputFingerprint !== null) {
         const reviewOutputFingerprint = await worktreeChangeFingerprint(worktrees.head);

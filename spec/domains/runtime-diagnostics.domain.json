@@ -4,6 +4,8 @@
   "presetRules": [],
   "templateRules": [],
   "membership": [
+    { "pathPattern": "(^|/)src/reviewer-failure\\.mjs$" },
+    { "pathPattern": "(^|/)test/reviewer-failure\\.test\\.mjs$" },
     {
       "pathPattern": "(^|/)src/(?:runtime-diagnostics|service-log|contract-runtime)\\.mjs$"
     },
@@ -36,6 +38,7 @@
     "worker-lifecycle-observation"
   ],
   "specRefs": [
+    "runtime-diagnostics — SPEC-REVIEWER-FAILURE-DIAGNOSTICS",
     "runtime-diagnostics — how the service ended, in its own log",
     "runtime-diagnostics — event inventory and secret-safe output boundary",
     "runtime-diagnostics — heartbeat interval and event-loop lag contract",
