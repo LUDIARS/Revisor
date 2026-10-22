@@ -9,6 +9,7 @@ import { contract } from './contract-runtime.mjs'; /* augur-inject:import:61c7a4
 import augurContract_81e33a0d from '../contracts/run-planned-tests-augur-domain-bundles.contract.mjs'; /* augur-inject:contract-predicate:caf0700f */
 import { experienceEvidenceFor } from "./augur-evidence.mjs";
 import { runSetupTestCases, setupTestCases } from "./setup-test-cases.mjs";
+import { registeredTestEnvironment } from "./test-environment.mjs";
 
 function testCwd(worktreePath, configuredCwd) {
   const path = resolve(worktreePath, configuredCwd);
@@ -52,6 +53,8 @@ export async function runRegisteredTests({
   if (!Array.isArray(testCases) || testCases.length === 0) {
     throw new Error("リポジトリに登録テストがありません");
   }
+  // 本番向けの NODE_ENV / npm の dev 省略を外す (test-environment.mjs)。
+  const testEnv = registeredTestEnvironment(env);
   const results = [];
   for (const test of testCases) {
     await onCheckStarted({ name: test.name });
@@ -59,7 +62,7 @@ export async function runRegisteredTests({
     const result = await execute(configuredProcess(
       test,
       testCwd(worktreePath, test.cwd),
-      env,
+      testEnv,
     ));
     const outcome = {
       name: test.name,
@@ -200,6 +203,8 @@ export async function runPlannedTests({
   if (!Array.isArray(testCases) || testCases.length === 0) {
     throw new Error("リポジトリに登録テストがありません");
   }
+  // 準備段・登録テスト・動作ブロックのどれにも本番向けの設定を渡さない (test-environment.mjs)。
+  env = registeredTestEnvironment(env);
   const ledgerPresent = existsSync(join(worktreePath, ".augur", "tests.jsonl"));
   // This is an explicit non-code plan, not recovery from a missing code domain.
   // Keep the registered selection (including justified skips) for this route.
