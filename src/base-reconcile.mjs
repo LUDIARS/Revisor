@@ -27,11 +27,16 @@ import {
 
 /**
  * GitHub の base branch をローカル base branch へ取り込む。
- * 返り値の action: "none" (取り込み不要) / "fast_forward" / "merge"。
+ * 返り値の action: "none" (取り込み不要) / "fast_forward" / "merge" /
+ * "diverged" (`fastForwardOnly` で分岐していたため何もしなかった)。
+ *
+ * `fastForwardOnly` は publish 以外の経路 (審査の差分起点の追随) 向け。 merge commit を
+ * 作るのは publish の直前だけに限り、 それ以外では base を ff でしか動かさない。
  */
 export async function reconcileBaseWithRemote({
   repository,
   baseRef,
+  fastForwardOnly = false,
   env = process.env,
   runGit = git,
   runRemoteGit = runAuthenticatedGit,
@@ -75,6 +80,7 @@ export async function reconcileBaseWithRemote({
     await advanceLocalBranch(rootPath, baseRef, localSha, remoteSha, { run: runGit });
     return { action: "fast_forward", localSha: remoteSha, remoteSha };
   }
+  if (fastForwardOnly) return { action: "diverged", localSha, remoteSha };
 
   // 双方に固有コミットがある。使い捨て worktree で merge commit を作り、クリーンに
   // 解決できたときだけ base を前進させる (監視 checkout は触らない)。

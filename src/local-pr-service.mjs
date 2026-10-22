@@ -27,6 +27,7 @@ import {
 } from "./checkout-sync.mjs";
 import { mergeFailureMessage, writeMergeFailureLog } from "./merge-failure-log.mjs";
 import { prepareMergeRepository } from "./merge-repository.mjs";
+import { refreshReviewBase } from "./review-base-refresh.mjs";
 import { probeBaseMergeability } from "./submit-probe.mjs";
 import {
   approvedPullRequestForManualMerge,
@@ -128,6 +129,7 @@ export class LocalPrService {
     guardNeedsInstall = pushGuardNeedsInstall,
     merge = squashMergeLocalPullRequest,
     prepareMerge = prepareMergeRepository,
+    refreshReviewBase: refreshBase = refreshReviewBase,
     probeMergeability = probeBaseMergeability,
     logMergeFailure = writeMergeFailureLog,
     syncCheckout = syncSourceCheckout,
@@ -157,6 +159,7 @@ export class LocalPrService {
     this.guardNeedsInstall = guardNeedsInstall;
     this.merge = merge;
     this.prepareMerge = prepareMerge;
+    this.refreshReviewBase = refreshBase;
     this.probeMergeability = probeMergeability;
     this.logMergeFailure = logMergeFailure;
     this.syncCheckout = syncCheckout;
@@ -742,6 +745,14 @@ export class LocalPrService {
         repository,
         pullRequest,
         statePath: this.store.path,
+      });
+      // 別拠点が GitHub へ publish したぶんを取り込んでから差分を取る。 取り込めなくても
+      // 審査は止めない (`review-base-refresh.mjs`)。
+      await this.refreshReviewBase({
+        repository: reviewRepository,
+        baseRef: pullRequest.baseRef,
+        env: this.env,
+        log: this.log,
       });
       await this.queue.submit(
         reviewRequest(repository, reviewRepository, pullRequest, requestOptions),
