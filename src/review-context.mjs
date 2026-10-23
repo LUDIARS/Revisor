@@ -18,6 +18,7 @@ import { postDiscordWebhook } from "./discord-webhook.mjs";
 import { notifyRepositoryEvent } from "./repository-notification.mjs";
 import { PublicationCoordinator } from "./publication-coordinator.mjs";
 import { notifyReviewCompletion } from "./review-completion-notice.mjs";
+import { deliverCompletionNotice } from "./completion-notice-delivery.mjs";
 import { notifyReviewRestart } from "./review-restart-notice.mjs";
 import { resolveDbPath } from "./revisor-db.mjs";
 import { LocalPrStore } from "./state-store.mjs";
@@ -52,10 +53,13 @@ export function createReviewContext({
   // 後付けで束ねる: reporter はマージを持つサービスより先に組み上がるが、審査が着地した
   // 瞬間に自動マージへ進む必要がある。
   let localPrService;
-  const announceCompletion = (pullRequest) => notifyReviewCompletion({
-    pullRequest,
-    baseUrl: optionalConcordiaUrl(cwd, readSettings(env).concordiaContextEnabled),
-    notify: notifyConcordia,
+  const announceCompletion = (pullRequest) => deliverCompletionNotice({
+    store, pullRequest,
+    send: (current) => notifyReviewCompletion({
+      pullRequest: current,
+      baseUrl: optionalConcordiaUrl(cwd, readSettings(env).concordiaContextEnabled),
+      notify: notifyConcordia,
+    }),
   });
   const announceLifecycle = async (event, pullRequest) => {
     if (event === "merged" || event === "bypass_merged") {
