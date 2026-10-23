@@ -192,6 +192,12 @@ annotated tag in one atomic push; the Release API call follows after its target
 is reachable. A private `refs/revisor/prepared/*` ref keeps tagged and untagged
 prepared merge commits reachable until local base advancement finishes. Retry
 reuses the same `Revisor-Local-PR` commit and completes publication idempotently.
+A prepared merge whose parent is no longer the local base is reused only when
+GitHub already contains it; an unpublished one is discarded and rebuilt on the
+current base. Because the merge repository fast-forwards its base to the
+registered checkout before each merge (`local-workspace.md`), a registered
+checkout caught up to GitHub makes an unpublished prepared merge stale instead
+of leaving it on a base that still looks current.
 
 The managed pre-push guard scans the remote base update. A tag ref is allowed
 during a Release but never substitutes for the base scan.

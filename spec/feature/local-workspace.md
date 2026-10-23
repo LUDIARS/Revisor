@@ -171,9 +171,14 @@ Revisor は `revisor.state.json` と同じ data directory の `merge-repositorie
 降りてこない。降ろす条件と担当は `spec/feature/checkout-publication.md` で定義する
 (常時追従はしない。本ブランチが base ref のときだけ fast-forward)。
 
-merge の直前に source から対象 head ref だけを clone へ fetch する。base ref は clone 作成時
-だけ source から初期化し、以後は Revisor の publish または GitHub reconcile だけが CAS で
-前進させる。squash worktree、prepared ref、release version、tag、push はすべて clone 上で
+merge の直前に source から対象 head ref を clone へ fetch する。base ref は clone 作成時に
+source から初期化し、以後は Revisor の publish、GitHub reconcile、および登録 checkout への
+追従だけが CAS で前進させる。追従は merge 準備のたびに source の base を private ref へ
+fetch し、source の base が clone の base を祖先に含むとき**だけ** fast-forward する
+(2026-10-23、Praeforma #3386: 人が登録 checkout を `git merge --ff-only origin/main` で進めても
+clone の base が古いまま残り、古い base 上の prepared merge が「現在の base 上」と判定されて
+再利用され、publish が恒久的に失敗した)。clone が先行しているのは publication 前の正常状態、
+分岐は `readBaseDivergence` の診断対象なので、どちらも base を動かさない。squash worktree、prepared ref、release version、tag、push はすべて clone 上で
 処理する。したがって merge 準備と merge 処理では、登録 checkout に tracked edit、untracked
 file、ignored build tree があっても、Revisor は status/stash/checkout/reset を実行せず、それらを
 merge 成否の条件にしない。merge 完了後に登録 checkout を前進させる任意の publication は

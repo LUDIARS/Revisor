@@ -156,6 +156,15 @@
       "module": "contracts/antipattern-report-block.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-18",
+      "criterion": "C-18 catchUpMergeBaseFromSource(input): 登録 checkout の base が merge repository の base を祖先に含むときだけ CAS で fast-forward し、 同一・登録側が遅れ・分岐では base を動かさず状態を返す",
+      "symbol": "catchUpMergeBaseFromSource",
+      "file": "src/merge-repository.mjs",
+      "module": "contracts/catch-up-merge-base-from-source.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

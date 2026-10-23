@@ -3,6 +3,8 @@ import { access, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { withFileLock } from "./file-lock.mjs";
 import { assertSafeRef, git } from "./workspace.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:fc2a4ae0 */
+import augurContract_7759205e from '../contracts/catch-up-merge-base-from-source.contract.mjs'; /* augur-inject:contract-predicate:a927f86d */
 
 const MERGE_REPOSITORIES_DIRECTORY = "merge-repositories";
 const SOURCE_REMOTE = "revisor-source";
@@ -145,9 +147,70 @@ async function assertMergeRepositoryIdentity(mergeRoot, repository, runGit) {
   }
 }
 
+async function isAncestorOrFalse(runGit, rootPath, ancestor, descendant) {
+  try {
+    await runGit(rootPath, ["merge-base", "--is-ancestor", ancestor, descendant]);
+    return true;
+  } catch {
+    // Any failure, not only "not an ancestor", must keep the base where it is.
+    return false;
+  }
+}
+
+/**
+ * Fast-forward the merge repository's base to the registered checkout's base.
+ *
+ * The registered checkout is the local source of truth for the base branch.
+ * When it has moved ahead (for example `git merge --ff-only origin/main` after
+ * GitHub advanced), merges must start from it; otherwise a prepared merge built
+ * on the old base is classified as current and publication keeps comparing
+ * GitHub against a base it no longer descends from. The base only moves when
+ * the source base contains the current one, and moves with a compare-and-swap.
+ *
+ * @returns {Promise<{status: "advanced"|"already"|"source_behind"|"diverged", mergeBaseSha: string, sourceBaseSha: string}>}
+ */
+export async function catchUpMergeBaseFromSource({
+  mergeRoot,
+  sourceRoot,
+  baseRef,
+  sourceDirectories,
+  runGit = git,
+}) {
+  assertSafeRef(baseRef, "base_ref");
+  const ref = `refs/heads/${baseRef}`;
+  const stagingRef = `refs/revisor/source-base/${baseRef}`;
+  try {
+    await runGit(mergeRoot, sourceGitArgs(sourceDirectories, [
+      "fetch",
+      "--no-tags",
+      "--force",
+      portableAbsolutePath(sourceRoot),
+      `+${ref}:${stagingRef}`,
+    ]), 300_000);
+    const sourceBaseSha = await runGit(mergeRoot, ["rev-parse", "--verify", stagingRef]);
+    const mergeBaseSha = await runGit(mergeRoot, ["rev-parse", "--verify", ref]);
+    if (mergeBaseSha.toLowerCase() === sourceBaseSha.toLowerCase()) {
+      return { status: "already", mergeBaseSha, sourceBaseSha };
+    }
+    if (await isAncestorOrFalse(runGit, mergeRoot, mergeBaseSha, sourceBaseSha)) {
+      await runGit(mergeRoot, ["update-ref", ref, sourceBaseSha, mergeBaseSha]);
+      return { status: "advanced", mergeBaseSha: sourceBaseSha, sourceBaseSha };
+    }
+    const status = await isAncestorOrFalse(runGit, mergeRoot, sourceBaseSha, mergeBaseSha)
+      ? "source_behind"
+      : "diverged";
+    return { status, mergeBaseSha, sourceBaseSha };
+  } finally {
+    await runGit(mergeRoot, ["update-ref", "-d", stagingRef]).catch(() => undefined);
+  }
+}
+// @ts-expect-error augur-inject
+catchUpMergeBaseFromSource = contract(catchUpMergeBaseFromSource, { ...augurContract_7759205e, contractId: 'C-18', mode: 'observe', sample: 1, where: 'src/merge-repository.mjs:170', rule: 'contract-wrap', id: '7759205e' }); /* augur-inject:contract-wrap:7759205e */
+
 /**
  * Prepare Revisor's persistent, independent merge repository for one local PR.
- * Only Git metadata and objects are read from the registered source checkout;
+ * Only Git metadata and objects are read from the registered source checkout,
+ * and the clone's base is fast-forwarded when the source base has moved ahead;
  * its worktree, refs, index, branch, stash, hooks, and ignored files are never changed.
  */
 export async function prepareMergeRepository({
@@ -209,14 +272,19 @@ export async function prepareMergeRepository({
       SOURCE_REMOTE,
       `+refs/heads/${pullRequest.headRef}:refs/heads/${pullRequest.headRef}`,
     ]), 300_000);
-    // The merge base is initialized once and thereafter owned by Revisor. It is
-    // deliberately never refreshed from the registered checkout; publication and
-    // GitHub reconciliation are the only operations allowed to advance it.
-    await runGit(mergeRoot, [
-      "rev-parse",
-      "--verify",
-      `refs/heads/${pullRequest.baseRef}`,
-    ]);
+    // The merge base is owned by Revisor, but it must not fall behind the
+    // registered checkout. A human fast-forwarding the checkout to GitHub was
+    // otherwise invisible here: the clone kept the old base, a prepared merge on
+    // that base still looked current, and publication failed forever (Praeforma
+    // #3386). Only a fast-forward is taken; a clone ahead of the checkout is the
+    // normal pre-publication state, and a divergence is left for diagnosis.
+    await catchUpMergeBaseFromSource({
+      mergeRoot,
+      sourceRoot: repository.rootPath,
+      baseRef: pullRequest.baseRef,
+      sourceDirectories,
+      runGit,
+    });
     return {
       ...repository,
       registeredRootPath: repository.rootPath,
@@ -228,8 +296,8 @@ export async function prepareMergeRepository({
 /**
  * Revisor 所有の merge repository が持つ base と、 登録元 checkout の base の関係を読む。
  *
- * merge base は一度初期化したら Revisor の所有物で、 登録元から refresh されない
- * (`prepareMergeRepository` の注釈)。 その前提が崩れて両者が別系列になると、 載せ替えは
+ * merge base は Revisor の所有物で、 登録元からは fast-forward で追従するときしか動かない
+ * (`catchUpMergeBaseFromSource`)。 両者が別系列になると追従もできず、 載せ替えは
  * 「誰も持っていない base」の上で走り続け、 提出元をいくら rebase しても直らない衝突を
  * 出し続ける。 起きていることを名指しできるように、 関係だけを読んで返す。
  *
@@ -273,9 +341,11 @@ export async function readBaseDivergence({ repository, baseRef }) {
  * `.revisor-version` の初期化コミットを、 merge repository の base にも同じ SHA で載せる。
  *
  * 初期化 (`initializeLocalVersion`) は登録 checkout の base branch へ直接コミットする。
- * merge repository の base は「初期化後は Revisor の所有物で、 登録元から refresh しない」
- * ので、 そのままでは初期化コミットが merge repository に永遠に届かず、 次のマージで
- * 2 つの base が別系列になる (2026-09-21 の点検で 84 件中 25 件がこれで分岐していた)。
+ * 当時の merge repository の base は登録元から refresh しなかったので、 初期化コミットが
+ * merge repository に永遠に届かず、 次のマージで 2 つの base が別系列になった
+ * (2026-09-21 の点検で 84 件中 25 件がこれで分岐していた)。 現在は merge 準備の
+ * fast-forward 追従 (`catchUpMergeBaseFromSource`) でも届くが、 初期化直後に揃える
+ * この経路はそのまま残す。
  *
  * そこで初期化コミットを積んだ直後に限り、 merge repository の base が**その親と同じ**
  * (= 初期化直前まで揃っていた) ときだけ、 同じコミットへ fast-forward する。 CAS で
