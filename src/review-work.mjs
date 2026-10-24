@@ -1,6 +1,6 @@
 /** @implements SPEC-COMPLETE-DISCORD-REVIEW-REPORT */
 import { analyzePr, ensureInitialAnalysis } from "./anatomia.mjs";
-import { runPlannedTests } from "./ci.mjs";
+import { runSecurePlannedTests as runPlannedTests } from "./praesidium-ci.mjs";
 import { configuredForcedReviewEffort } from "./forced-review-effort.mjs";
 import { configuredForcedReviewModel } from "./forced-review-model.mjs";
 import { runReviewer } from "./reviewer.mjs";

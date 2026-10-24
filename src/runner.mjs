@@ -14,7 +14,8 @@ import {
 } from "./concordia-context.mjs";
 import { readSettings } from "./config.mjs";
 import { reconcileNarrativeForReview } from "./pr-narrative.mjs";
-import { runPlannedTests, testsPassed } from "./ci.mjs";
+import { testsPassed } from "./ci.mjs";
+import { runSecurePlannedTests as runPlannedTests } from "./praesidium-ci.mjs";
 import { scanAddedDiffForLeaks } from "./leakage.mjs";
 import { redactedReviewerOutput } from "./review-report.mjs";
 import { configuredConfidentialTermsOutcome } from "./confidential-terms.mjs";

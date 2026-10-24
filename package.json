@@ -6,7 +6,8 @@
   "license": "MIT",
   "bin": {
     "revisor": "src/cli.mjs",
-    "dw": "src/cli.mjs"
+    "dw": "src/cli.mjs",
+    "praesidium": "src/praesidium/cli.mjs"
   },
   "files": [
     "src",
