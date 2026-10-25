@@ -127,12 +127,42 @@ or Augur domain bundles. Failed/error/unrecognized/thrown results prevent those 
 The existing `testsPassed` gate blocks the returned failure. A test selector cannot remove this
 preflight when the test stage runs. A wholly skipped registered-tests stage does not run it;
 the existing mandatory registered-test selection for executable/dependency changes remains intact.
-Existing LLM security scan, leakage checks and merge gates are preserved. No service setting or
-registered repository record is changed by installation; the built-in test result is added when
-the updated Revisor runner is deployed. No service restart is performed by this change.
+Existing LLM security scan, leakage checks and merge gates are preserved. The built-in preflight
+result is added when the updated Revisor runner is deployed. The optional HTTP server only enqueues
+jobs: `worker-spawn.mjs` starts `cli.mjs run-worker`, which imports `runner.mjs` and owns the stage
+workers. A newly spawned worker reads the merged modules; no server restart is required for this change.
 
-Tests: `test/praesidium-{input,scan,files,ci}.test.mjs`, discovered by Revisor's existing `node --test
-test/*.test.mjs` registration. Local syntax verification is distinct from executing those tests.
+Tests: `test/praesidium-{input,scan,files,ci}.test.mjs`. The repository's npm test script discovers
+them, but the live Revisor registry previously selected only `one-shot-runtime-tests`
+(`test/process.test.mjs`, `test/codex-runtime.test.mjs`), not the whole npm suite. Therefore #3444's
+Test OK is evidence for those existing registered checks, **not** a passing Praesidium regression suite.
+
+The existing `LUDIARS/Revisor` registration was updated through the authenticated registration API
+and read back, preserving all four prior cases and notification/workflow settings. Added case:
+
+```json
+{
+  "name": "praesidium-regression-tests",
+  "command": "node",
+  "args": ["--test", "test/praesidium-input.test.mjs", "test/praesidium-scan.test.mjs", "test/praesidium-files.test.mjs", "test/praesidium-ci.test.mjs", "test/ui.test.mjs", "test/ui-dashboard-refresh.test.mjs", "test/refactoring-proposal-cache.test.mjs"],
+  "cwd": ".", "timeout_ms": 120000, "always": true, "runtime": false
+}
+```
+
+These tests require only Node and Git, not installed npm packages or initialized submodules.
+The CI adapter lazily imports the existing dependency-bearing runner only when actually running
+registered tests after a passing scan; its injected regression tests never load that runner.
+This permits the always-on case to run even for docs-only changes whose dependency setup is skipped.
+The registry lives in Revisor's state, not in package.json; recreating a registration must preserve
+this named case. Read-back proves registration, not execution. Later review CI results are the
+execution evidence; syntax verification alone is not a test pass.
+
+Review #3445 initially stopped in the deployed preflight before registered tests ran.
+Read-only collection reproduced `non-text source`: `src/refactoring-proposal-cache.mjs`
+contained one literal NUL byte inside the cache-key template literal. Representing that
+separator as the JavaScript `\0` escape preserves the runtime key while making the source
+text inspectable. The collector still rejects raw NUL bytes; a regression fixture checks
+both escaped and raw representations. Passing delegated review remains required.
 
 ## Melpomene replacement decision
 
@@ -163,3 +193,14 @@ Primary references:
 - https://clang.llvm.org/docs/analyzer/checkers.html
 - https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
 - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+
+## UI test integration correction
+
+The next review of #3445 reached all 349 files and rejected 12 dynamic-code calls
+in existing UI tests. Following explicit human approval, UI views, actions, filters,
+client requests and dashboard lifecycle are ordinary exported functions. Browser
+source is serialized from these same functions; behavioral tests import them directly.
+Syntax-only checks use node:vm Script compilation without invoking a run method.
+No source-policy exclusions or weaker detection rules are introduced.
+The registered Praesidium case also includes UI, dashboard-refresh and cache regression
+files so these changes receive delegated execution. Local checks are syntax-only.

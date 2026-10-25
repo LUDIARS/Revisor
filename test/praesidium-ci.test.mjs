@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runSecurePlannedTests } from "../src/praesidium-ci.mjs";
-import { testsPassed } from "../src/ci.mjs";
 
 test("mandatory security result precedes every registered/Augur execution", async () => {
   const events = [];
@@ -14,7 +13,8 @@ test("mandatory security result precedes every registered/Augur execution", asyn
   });
   assert.deepEqual(events, ["Praesidium security preflight", "passed", "registered"]);
   assert.equal(outcomes.length, 2);
-  assert.equal(testsPassed(outcomes), true);
+  assert.equal(outcomes[0].status, "passed");
+  assert.equal(outcomes[1].name, "unit");
 });
 
 test("findings, unavailable scan and unknown results block before setup/install", async () => {
@@ -23,7 +23,7 @@ test("findings, unavailable scan and unknown results block before setup/install"
     const outcomes = await runSecurePlannedTests({ worktreePath: "/fixture" }, {
       scan, runTests: async () => { assert.fail("must not run setup or tests"); },
     });
-    assert.equal(testsPassed(outcomes), false);
+    assert.ok(["failed", "error"].includes(outcomes[0].status));
     assert.equal(outcomes.length, 1);
   }
 });

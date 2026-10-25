@@ -32,3 +32,13 @@ test("rejects non-text, oversized and invalid UTF-8 sources rather than truncati
   assert.throws(() => containedFile(root, root));
   assert.throws(() => containedFile(root, ".."));
 });
+
+test("accepts an escaped NUL in text without accepting raw NUL bytes", (t) => {
+  const root = repository(t);
+  const path = join(root, "key.js");
+  const source = 'export const key = `${id}\\0${updatedAt}`;\n';
+  writeFileSync(path, source);
+  assert.deepEqual(trackedSources(root), [{ file: "key.js", source }]);
+  writeFileSync(path, source.replace("\\0", "\0"));
+  assert.throws(() => trackedSources(root), /non-text source/);
+});

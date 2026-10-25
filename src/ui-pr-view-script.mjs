@@ -1,9 +1,6 @@
-// Client-side rendering for the pull-request board. Loaded before the dashboard
-// controller and shares its scope, so the DOM helpers live here with the views
-// that use them. Everything is built with createElement and textContent: values
-// come from local review output, and string HTML would make that a template
-// injection surface for a PR title.
-export const PR_VIEW_SOURCE = `
+// Shared DOM views: normal functions for both browser serialization and direct tests.
+export function createPrViews(document, externalVerificationClears) {
+
   function text(value) {
     return String(value ?? '');
   }
@@ -315,8 +312,8 @@ export const PR_VIEW_SOURCE = `
         continue;
       }
       if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
-      const looksLikePullRequest = /\\/pull\\/\\d+(?:\\/|$)/.test(parsed.pathname)
-        || /(?:pull request|\\bpr\\b)/i.test(text(link.label));
+      const looksLikePullRequest = /\/pull\/\d+(?:\/|$)/.test(parsed.pathname)
+        || /(?:pull request|\bpr\b)/i.test(text(link.label));
       if (looksLikePullRequest) return parsed.href;
     }
     return null;
@@ -462,4 +459,8 @@ export const PR_VIEW_SOURCE = `
     ));
     return wrapper;
   }
-`;
+
+  return { text, element, cell, definition, block, paragraph, prContentOf, listOf, sourceLinksOf, badge, externalVerificationBadgeOf, contractsBadgeOf, menuDecisionLabel, prCard, decisionOf, contractsSummaryText, factorsOf, runtimeOf, planOf, overviewOf, failedTestOutputs, testsOf, sourcePullRequestUrl, workflowLogOf, reviewOf, analysisOf };
+}
+
+export const PR_VIEW_SOURCE = `const { text, element, cell, definition, block, paragraph, prContentOf, listOf, sourceLinksOf, badge, externalVerificationBadgeOf, contractsBadgeOf, menuDecisionLabel, prCard, decisionOf, contractsSummaryText, factorsOf, runtimeOf, planOf, overviewOf, failedTestOutputs, testsOf, sourcePullRequestUrl, workflowLogOf, reviewOf, analysisOf } = (${createPrViews.toString()})(document, externalVerificationClears);`;

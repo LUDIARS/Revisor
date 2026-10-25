@@ -1,3 +1,7 @@
+import { PR_ACTION_SOURCE } from "./ui-pr-actions.mjs";
+export { PR_ACTION_SOURCE };
+import { PR_FILTER_SOURCE } from "./ui-pr-filters.mjs";
+export { PR_FILTER_SOURCE };
 import { CLIENT_REQUEST_SOURCE } from "./ui-client-request.mjs";
 import { PR_DIFF_VIEW_SOURCE } from "./ui-pr-diff-view-script.mjs";
 import { renderPage } from "./ui-layout.mjs";
@@ -81,46 +85,9 @@ const BODY = `
 // 一覧に何を出すかの規則は DOM に触らない純関数として切り出す。 コントローラは
 // これを DOM へ結ぶだけになり、 フィルタの意味 (未選択は全件・複数選択は和集合・
 // 件数もフィルタ後の集合) を生成ソースの正規表現ではなく振る舞いで検証できる。
-export const PR_FILTER_SOURCE = `
-  function projectsOf(pullRequests) {
-    return [...new Set(pullRequests.map((pr) => pr.repository))]
-      .sort((left, right) => left.localeCompare(right));
-  }
-
-  function keepKnownProjects(selectedProjects, projects) {
-    return new Set([...selectedProjects].filter((project) => projects.includes(project)));
-  }
-
-  function sameProjectOptions(options, projects) {
-    return projects.length === options.length
-      && projects.every((project, index) => options[index].value === project);
-  }
-
-  function boardView(pullRequests, selectedProjects, humanOnly) {
-    const projectFiltered = selectedProjects.size === 0
-      ? pullRequests
-      : pullRequests.filter((pr) => selectedProjects.has(pr.repository));
-    const needsHuman = projectFiltered.filter((pr) => pr.decision.state === 'needs_human');
-    return { projectFiltered, needsHuman, visible: humanOnly ? needsHuman : projectFiltered };
-  }
-`;
 
 // 取り下げだけは監査用の理由が必要。DOM 操作と切り離して、キャンセル・空白・JSON
 // request の契約を生成ソースの文字列照合ではなく振る舞いで検証できるようにする。
-export const PR_ACTION_SOURCE = `
-  function actionRequestOptions(action, promptForReason) {
-    if (action !== 'close') return { method: 'POST' };
-    const entered = promptForReason('取り下げ理由を入力してください。');
-    if (entered === null) return null;
-    const reason = entered.trim();
-    if (!reason) throw new Error('取り下げ理由を入力してください。');
-    return {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
-    };
-  }
-`;
 
 const CONTROLLER_SOURCE = `
   const prCards = document.querySelector('#pr-cards');

@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderDashboardPage } from "../src/ui-dashboard-page.mjs";
 import {
-  PR_ACTION_SOURCE,
-  PR_FILTER_SOURCE,
   renderPrBoardPage,
 } from "../src/ui-pr-board-page.mjs";
 import { renderSettingsPage } from "../src/ui-settings-page.mjs";
 import { renderReleasePage } from "../src/ui-release-page.mjs";
-import { PR_VIEW_SOURCE } from "../src/ui-pr-view-script.mjs";
+import { createPrViews } from "../src/ui-pr-view-script.mjs";
+import { Script } from "node:vm";
+import { actionRequestOptions } from "../src/ui-pr-actions.mjs";
+import { projectsOf, keepKnownProjects, sameProjectOptions, boardView } from "../src/ui-pr-filters.mjs";
 import { externalVerificationClears } from "../src/external-verification.mjs";
 import {
   isAllowedHost,
@@ -60,8 +61,7 @@ test("the PR board exposes decision, plan, test, review and diff analysis detail
 });
 
 function boardActions() {
-  return new Function(`${PR_ACTION_SOURCE}
-    return { actionRequestOptions };`)();
+  return { actionRequestOptions };
 }
 
 test("closing from the PR board requires and sends a trimmed reason", () => {
@@ -127,15 +127,14 @@ test("the generated PR board script stays syntactically valid", () => {
   const page = renderPrBoardPage("session-nonce");
   const script = page.match(/<script nonce="session-nonce">([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script, "expected the PR board page to include its inline script");
-  assert.doesNotThrow(() => new Function(script));
+  assert.doesNotThrow(() => new Script(script));
 });
 
 // The filter rules are pure, so they are exercised as functions instead of being
 // matched in the generated source: a regex over the script passes for code that
 // never runs, and breaks on a rename that changes nothing the operator sees.
 function boardFilters() {
-  return new Function(`${PR_FILTER_SOURCE}
-    return { projectsOf, keepKnownProjects, sameProjectOptions, boardView };`)();
+  return { projectsOf, keepKnownProjects, sameProjectOptions, boardView };
 }
 
 function fakePr(id, repository, state) {
@@ -234,7 +233,7 @@ test("the dashboard keeps the operational panels and hands PR triage to the top 
   assert.match(page, /## 受け入れ条件/);
   const script = page.match(/<script nonce="session-nonce">([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script);
-  assert.doesNotThrow(() => new Function(script));
+  assert.doesNotThrow(() => new Script(script));
 });
 
 test("the PR board receives realtime status events and logs them below the detail", () => {
@@ -280,7 +279,7 @@ test("the Releases tab exposes deferred, initialized, and immediate publication"
   assert.match(page, /\/api\/releases\/.*\/publish/);
   const script = page.match(/<script nonce="session-nonce">([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script);
-  assert.doesNotThrow(() => new Function(script));
+  assert.doesNotThrow(() => new Script(script));
 });
 
 test("the dashboard keeps configuration on the settings page", () => {
@@ -431,7 +430,7 @@ function fakeDocument() {
 }
 
 function renderTests(pr) {
-  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn testsOf;`);
+  const view = (document) => createPrViews(document, externalVerificationClears).testsOf;
   return view(fakeDocument())(pr);
 }
 
@@ -440,7 +439,7 @@ function renderedText(node) {
 }
 
 test("the PR detail renders the Anatomia front-gate outcome", () => {
-  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn reviewOf;`);
+  const view = (document) => createPrViews(document, externalVerificationClears).reviewOf;
   const rendered = view(fakeDocument())({
     anatomiaGate: {
       status: "blocked",
@@ -454,25 +453,22 @@ test("the PR detail renders the Anatomia front-gate outcome", () => {
 });
 
 function renderCard(pr) {
-  const view = new Function(
-    "document",
-    `${externalVerificationClears.toString()}\n${PR_VIEW_SOURCE}\nreturn prCard;`,
-  );
+  const view = (document) => createPrViews(document, externalVerificationClears).prCard;
   return view(fakeDocument())(pr, null, () => {});
 }
 
 function renderDecision(pr) {
-  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn decisionOf;`);
+  const view = (document) => createPrViews(document, externalVerificationClears).decisionOf;
   return view(fakeDocument())(pr);
 }
 
 function renderOverview(pr) {
-  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn overviewOf;`);
+  const view = (document) => createPrViews(document, externalVerificationClears).overviewOf;
   return view(fakeDocument())(pr);
 }
 
 function renderAnalysis(pr) {
-  const view = new Function("document", `${PR_VIEW_SOURCE}\nreturn analysisOf;`);
+  const view = (document) => createPrViews(document, externalVerificationClears).analysisOf;
   return view(fakeDocument())(pr);
 }
 

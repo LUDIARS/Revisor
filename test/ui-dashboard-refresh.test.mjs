@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createVisibleRefreshLoop } from "../src/ui-visible-refresh-loop.mjs";
-import { renderDashboardPage } from "../src/ui-dashboard-page.mjs";
+import { startDashboard } from "../src/ui-dashboard-controller.mjs";
+import { createClientRequest } from "../src/ui-client-request.mjs";
+import { createPrViews } from "../src/ui-pr-view-script.mjs";
+import { externalVerificationClears } from "../src/external-verification.mjs";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 function deferred() {
@@ -101,7 +104,7 @@ function element() {
   };
 }
 
-test("generated dashboard uses open summaries and waits for sibling requests even when one fails", async () => {
+test("dashboard uses open summaries and waits for sibling requests even when one fails", async (t) => {
   const time = clock();
   const elements = new Map();
   const document = {
@@ -125,8 +128,11 @@ test("generated dashboard uses open summaries and waits for sibling requests eve
           : { pullRequests: [{ repository: "org/repo", status: "open" }] };
     return { ok: true, json: async () => data };
   };
-  const script = renderDashboardPage("nonce").match(/<script nonce="nonce">([\s\S]*?)<\/script>/)[1];
-  new Function("document", "fetch", "setTimeout", "clearTimeout", script)(document, fetch, time.schedule, time.cancel);
+  const loop = startDashboard({ document, request: createClientRequest("nonce", fetch),
+    views: createPrViews(document, externalVerificationClears), createVisibleRefreshLoop,
+    schedule: time.schedule, cancel: time.cancel });
+  t.after(() => loop.stop());
+
   await flush();
   assert.equal(calls.length, 4);
   assert.ok(calls.some(({ path }) => path === "/api/local-prs?view=summary&state=open"));

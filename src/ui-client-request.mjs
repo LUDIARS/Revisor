@@ -1,7 +1,6 @@
-// Browser-side helper source shared by every Revisor UI page. The UI session
-// token never leaves the page, so each request carries it as a header instead
-// of the local workflow API token.
-export const CLIENT_REQUEST_SOURCE = `
+// The browser and tests share the same request implementation.
+export function createClientRequest(sessionToken, fetch) {
+
   const sessionHeaders = { 'X-Revisor-Session': sessionToken };
 
   async function request(path, options = {}) {
@@ -13,4 +12,8 @@ export const CLIENT_REQUEST_SOURCE = `
     if (!response.ok) throw new Error(body.error || 'Request failed');
     return body;
   }
-`;
+
+  return request;
+}
+
+export const CLIENT_REQUEST_SOURCE = `const request = (${createClientRequest.toString()})(sessionToken, fetch);`;
