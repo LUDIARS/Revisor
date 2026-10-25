@@ -15,7 +15,7 @@ function configuration(root) {
   return config;
 }
 
-export async function scanRepository({ root, collect = trackedSources, nativeExecute, now = Date.now }) {
+export async function scanRepository({ root, collect = trackedSources, nativeExecute, nativeHost, env = process.env, now = Date.now }) {
   const started = now();
   try {
     const sources = collect(root), config = configuration(root);
@@ -26,7 +26,7 @@ export async function scanRepository({ root, collect = trackedSources, nativeExe
       findings.push(...sourceFindings(file, source).slice(0, 1000 - findings.length));
       inspectedFiles++;
     }
-    const native = await analyzeNative(root, sources, config.native, nativeExecute);
+    const native = await analyzeNative(root, sources, config.native, nativeExecute, { host: nativeHost, env, now });
     const web = checkWebContracts(config.web);
     const checks = [...native, ...web];
     const status = checks.some(check => check.status === "error") ? "error"

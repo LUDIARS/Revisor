@@ -3,6 +3,8 @@ import { execFile } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { resolve, relative, isAbsolute } from "node:path";
 import { containedFile } from "./files.mjs";
+import { nativePackageIncludes, readNativeHost } from "./native-host.mjs";
+import { analyzeNativeBatch } from "./native-batch.mjs";
 
 export function analyzeProcess(command, args, cwd) {
   return new Promise((done) => {
@@ -14,8 +16,8 @@ export function analyzeProcess(command, args, cwd) {
   });
 }
 
-export function nativeInvocation(root, unit) {
-  if (!unit || Object.keys(unit).some(key => !["file", "standard", "includes", "defines"].includes(key))) throw new Error("invalid native unit");
+export function nativeInvocation(root, unit, host = {}) {
+  if (!unit || Object.keys(unit).some(key => !["file", "standard", "includes", "defines", "packages"].includes(key))) throw new Error("invalid native unit");
   const c = /\.c$/i.test(unit.file ?? "");
   if (!/\.(?:c|cc|cpp|cxx)$/i.test(unit.file ?? "")) throw new Error("translation unit required");
   if (!(c ? ["c11", "c17", "c23"] : ["c++17", "c++20", "c++23"]).includes(unit.standard)) throw new Error("explicit supported standard required");
@@ -34,12 +36,12 @@ export function nativeInvocation(root, unit) {
     if (typeof define !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*(?:=[A-Za-z0-9_]+)?$/.test(define)) throw new Error("invalid define");
     args.push(`-D${define}`);
   }
+  for (const include of nativePackageIncludes(unit.packages ?? [], host)) args.push("-I", include);
   args.push("--", file);
-  return { command: c ? "clang" : "clang++", args, cwd: root };
+  return { command: host.compilers?.[c ? "c" : "cpp"] ?? (c ? "clang" : "clang++"), args, cwd: root };
 }
 
-export async function analyzeNative(root, sources, units = [], execute = analyzeProcess) {
-  const startedAt = Date.now();
+export async function analyzeNative(root, sources, units = [], execute = analyzeProcess, options = {}) {
   const nativeFiles = sources.filter(({ file }) => /\.(?:c|cc|cpp|cxx)$/i.test(file)).map(({ file }) => file);
   const headers = sources.some(({ file }) => /\.(?:h|hh|hpp|hxx)$/i.test(file));
   if (!Array.isArray(units) || units.length > 256) throw new Error("invalid native configuration");
@@ -47,17 +49,12 @@ export async function analyzeNative(root, sources, units = [], execute = analyze
     return [{ rule: "native.configuration-required", status: "error" }];
   }
   if (new Set(units.map(unit => unit.file)).size !== units.length) throw new Error("duplicate native unit");
-  const outcomes = [];
-  for (const unit of units) {
-    if (Date.now() - startedAt > 120_000) {
-      outcomes.push({ rule: "native.analysis-budget", status: "error" });
-      break;
-    }
+  if (!units.length) return [];
+  const host = options.host ?? readNativeHost(root, options.env);
+  // Validate every invocation before any compiler starts, so a later invalid unit cannot orphan workers.
+  const invocations = units.map(unit => {
     if (!nativeFiles.includes(unit.file)) throw new Error("untracked translation unit");
-    const invocation = nativeInvocation(root, unit);
-    const result = await execute(invocation.command, invocation.args, invocation.cwd);
-    outcomes.push({ rule: "native.clang-analysis", file: unit.file,
-      status: result.ok && !result.diagnostics ? "passed" : result.exitCode === null ? "error" : "failed" });
-  }
-  return outcomes;
+    return { ...nativeInvocation(root, unit, host), file: unit.file };
+  });
+  return analyzeNativeBatch(invocations, execute, options.now);
 }

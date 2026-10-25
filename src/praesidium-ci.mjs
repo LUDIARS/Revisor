@@ -5,7 +5,7 @@ export async function runSecurePlannedTests(options, { scan = scanRepository, ru
   const name = "Praesidium security preflight";
   await options.onCheckStarted?.({ name });
   let report;
-  try { report = await scan({ root: options.worktreePath }); }
+  try { report = await scan({ root: options.worktreePath, env: options.env }); }
   catch { report = { status: "error", reason: "security inspection failed" }; }
   const status = ["passed", "failed", "error"].includes(report?.status) ? report.status : "error";
   const result = { name, status, durationMs: report?.durationMs ?? 0,

@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { sourceFindings } from "../src/praesidium/rules.mjs";
 import { scanRepository } from "../src/praesidium/scan.mjs";
 import { nativeInvocation, analyzeNative } from "../src/praesidium/native.mjs";
+import { readNativeHost } from "../src/praesidium/native-host.mjs";
+import { analyzeNativeBatch } from "../src/praesidium/native-batch.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "praesidium-"));
@@ -62,4 +64,68 @@ test("safe supported code reports limited coverage, not whole-program security",
   assert.equal(result.coverage.webContracts, 0);
   writeFileSync(join(root, "praesidium.json"), '{"version":1,"unknown":true}');
   assert.equal((await scanRepository({ root, collect: () => [] })).status, "error");
+});
+
+test("host-owned packages resolve without running repository setup or accepting external PR paths", (t) => {
+  const root = fixture(t), hostRoot = fixture(t);
+  writeFileSync(join(root, "unit.cpp"), "int main() {}\n");
+  const compiler = join(hostRoot, "compiler");
+  writeFileSync(compiler, "fixture only; never executed");
+  const configPath = join(hostRoot, "praesidium.host.json");
+  const env = { REVISOR_CONFIG_PATH: join(hostRoot, "revisor.config.json") };
+  const config = { version: 1, compilers: { cpp: compiler }, includePackages: { tela: hostRoot } };
+  writeFileSync(configPath, JSON.stringify(config));
+  const host = readNativeHost(root, env);
+  const unit = { file: "unit.cpp", standard: "c++20", packages: ["tela"] };
+  const invocation = nativeInvocation(root, unit, host);
+  assert.equal(invocation.command, compiler);
+  assert.ok(invocation.args.includes(hostRoot));
+  assert.throws(() => nativeInvocation(root, { ...unit, includes: [hostRoot] }, host));
+  assert.throws(() => nativeInvocation(root, { ...unit, packages: ["missing"] }, host));
+  assert.throws(() => nativeInvocation(root, { ...unit, packages: ["../tela"] }, host));
+  assert.throws(() => nativeInvocation(root, { ...unit, packages: ["tela", "tela"] }, host));
+  writeFileSync(configPath, JSON.stringify({ ...config, includePackages: { tela: "relative" } }));
+  assert.throws(() => readNativeHost(root, env));
+  writeFileSync(join(root, "praesidium.host.json"), JSON.stringify(config));
+  assert.throws(() => readNativeHost(root, { REVISOR_CONFIG_PATH: join(root, "config.json") }));
+});
+
+test("missing host packages fail before any compiler is started", async (t) => {
+  const root = fixture(t);
+  writeFileSync(join(root, "unit.cpp"), "int main() {}\n");
+  const units = [{ file: "unit.cpp", standard: "c++20", packages: ["uninstalled"] }];
+  let calls = 0;
+  await assert.rejects(analyzeNative(root, [{ file: "unit.cpp" }], units,
+    async () => { calls++; return { ok: true }; }, { host: {} }));
+  assert.equal(calls, 0);
+});
+
+test("native batch keeps at most two compilers alive and reports all units in input order", async () => {
+  let active = 0, peak = 0;
+  const units = Array.from({ length: 7 }, (_, index) => ({ file: `${index}.cpp`, command: "fixture", args: [index], cwd: "." }));
+  const outcomes = await analyzeNativeBatch(units, async (_command, [index]) => {
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setImmediate(resolve));
+    active--;
+    if (index === 2) throw new Error("private compiler failure");
+    return { ok: true, exitCode: 0, diagnostics: index === 4 };
+  });
+  assert.equal(peak, 2);
+  assert.equal(active, 0);
+  assert.deepEqual(outcomes.map(item => item.file), units.map(item => item.file));
+  assert.deepEqual(outcomes.map(item => item.status), ["passed", "passed", "error", "passed", "failed", "passed", "passed"]);
+  assert.ok(!JSON.stringify(outcomes).includes("private compiler failure"));
+});
+
+test("expired native scheduling budget explicitly reports every unstarted unit", async () => {
+  let clock = 0, calls = 0;
+  const units = ["a", "b", "c"].map(file => ({ file, command: "fixture", args: [], cwd: "." }));
+  const outcomes = await analyzeNativeBatch(units, async () => {
+    calls++; clock = 120001;
+    return { ok: true, exitCode: 0 };
+  }, () => clock);
+  assert.equal(calls, 1);
+  assert.deepEqual(outcomes.map(item => item.status), ["passed", "error", "error"]);
+  assert.equal(outcomes[1].rule, "native.analysis-budget");
+  assert.equal(outcomes[2].rule, "native.analysis-budget");
 });

@@ -96,7 +96,8 @@ Without web contracts the report explicitly has `webContracts: 0`; no claim of p
 
 When C/C++ translation units or headers exist, explicit native configuration is required. Every
 listed translation unit must have an entry; headers require at least one translation unit.
-The host needs `clang` / `clang++` on its trusted PATH. Praesidium never installs them automatically.
+The host needs `clang` / `clang++` on its trusted PATH or explicitly configured absolute compiler
+paths in its host configuration. Praesidium never installs them automatically.
 
 ```json
 {"version":1,"native":[{"file":"src/parser.cpp","standard":"c++20","includes":["include"],"defines":["FEATURE=1"]}],"web":[]}
@@ -105,9 +106,26 @@ The host needs `clang` / `clang++` on its trusted PATH. Praesidium never install
 The adapter invokes Clang's analyzer with `core,unix,security`, text diagnostics, `-Wall -Wextra
 -Werror`, a fixed language standard and validated include/define arguments. It never links or runs
 a binary, runs build/install scripts, loads analyzer plugins or accepts arbitrary compiler options.
-Includes are restricted to directories within the repository; definitions have a narrow grammar.
-Per-process timeout is 60 seconds / output cap 2 MiB; the serial batch stops before starting another
-unit after 120 seconds. Missing compiler, invalid/missing configuration, timeout, output overflow
+Repository-supplied include paths remain restricted to directories within the repository;
+definitions have a narrow grammar. Host-installed libraries can be requested by package name
+using `"packages":["tela"]` on a native unit. Only the administrator-owned `praesidium.host.json`
+next to the resolved Revisor config can map these names to absolute include directories:
+
+```json
+{"version":1,"compilers":{"cpp":"C:/Program Files/LLVM/bin/clang++.exe"},"includePackages":{"tela":"C:/installed/tela/include"}}
+```
+
+The host config must be outside the reviewed repository, has a 64 KiB limit and at most 64
+packages, and all configured locations must exist. Unknown packages fail closed. PR configuration
+cannot supply host paths, executable names, install commands or compiler flags. Host libraries
+are trusted toolchain inputs like SDK headers; their source and updates are an operator concern,
+not a claim of inspected third-party code. No repository setup runs before security preflight.
+This supports a cold checkout without running installers or copying unchecked code into it.
+
+Per-process timeout is 60 seconds / output cap 2 MiB; at most two compiler workers run concurrently.
+The shared batch stops scheduling units after 120 seconds, reports every unstarted unit as an error,
+and awaits all in-flight compilers. Configuration is validated in full before workers start.
+Missing compiler, invalid/missing configuration, timeout, output overflow
 or diagnostic errors do not pass. Warnings fail even when Clang returns exit 0. Diagnostics are
 not retained, because they can contain secrets from source/header content.
 
