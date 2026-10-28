@@ -121,11 +121,25 @@ test("expired native scheduling budget explicitly reports every unstarted unit",
   let clock = 0, calls = 0;
   const units = ["a", "b", "c"].map(file => ({ file, command: "fixture", args: [], cwd: "." }));
   const outcomes = await analyzeNativeBatch(units, async () => {
-    calls++; clock = 120001;
+    calls++; clock = 1_000_000;
     return { ok: true, exitCode: 0 };
   }, () => clock);
   assert.equal(calls, 1);
   assert.deepEqual(outcomes.map(item => item.status), ["passed", "error", "error"]);
   assert.equal(outcomes[1].rule, "native.analysis-budget");
   assert.equal(outcomes[2].rule, "native.analysis-budget");
+});
+
+test("large native batches inspect every unit beyond the old two-minute cutoff", async () => {
+  let clock = 0, calls = 0;
+  const units = Array.from({ length: 8 }, (_, index) => ({
+    file: `unit-${index}.cpp`, command: "fixture", args: [], cwd: ".",
+  }));
+  const outcomes = await analyzeNativeBatch(units, async () => {
+    calls++; clock += 25_000;
+    return { ok: true, exitCode: 0 };
+  }, () => clock);
+  assert.equal(calls, units.length);
+  assert.equal(outcomes.length, units.length);
+  assert.ok(outcomes.every(check => check.status === "passed"));
 });

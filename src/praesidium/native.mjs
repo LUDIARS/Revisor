@@ -5,11 +5,12 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { containedFile } from "./files.mjs";
 import { nativePackageIncludes, readNativeHost } from "./native-host.mjs";
 import { analyzeNativeBatch } from "./native-batch.mjs";
+import { NATIVE_COMPILER_TIMEOUT_MS } from "./native-limits.mjs";
 
 export function analyzeProcess(command, args, cwd) {
   return new Promise((done) => {
     execFile(command, args, { cwd, encoding: "utf8", windowsHide: true, shell: false,
-      timeout: 60_000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
+      timeout: NATIVE_COMPILER_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 }, (error, stdout, stderr) => {
       done({ ok: !error, exitCode: typeof error?.code === "number" ? error.code : error ? null : 0,
         diagnostics: /\b(?:warning|error):/.test(`${stdout}\n${stderr}`) });
     });
