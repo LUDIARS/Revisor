@@ -1,3 +1,5 @@
+import { isJavaScriptEvaluation } from "./javascript-evaluation.mjs";
+
 /** @implements RV-PRAESIDIUM-01 — bounded syntactic tripwires, not a full parser. */
 // Keep newlines/offsets so a finding never needs to retain source text or secrets.
 export function maskCommentsAndLiterals(source) {
@@ -13,7 +15,7 @@ export function sourceFindings(file, source) {
   const rules = native ? [
     ["native.unbounded-copy", /\b(?:gets|strcpy|strcat|sprintf|vsprintf|wcscpy|wcscat)\s*\(/g],
   ] : [
-    ["web.dynamic-code", /\b(?:eval|Function)\s*\(/g],
+    ["web.dynamic-code", /\b(?:eval|Function)\s*(?:\?\.)?\s*\(/g],
     ["web.request-to-html", /\.innerHTML\s*=\s*(?:req|request|ctx|location)\s*[.[]/g],
     ["web.request-to-shell", /\b(?:exec|execSync)\s*\(\s*(?:req|request|ctx)\s*[.[]/g],
   ];
@@ -21,6 +23,7 @@ export function sourceFindings(file, source) {
   for (const [rule, pattern] of rules) {
     let cursor = 0, line = 1;
     for (const match of code.matchAll(pattern)) {
+      if (rule === "web.dynamic-code" && !isJavaScriptEvaluation(code, match)) continue;
       // Advance once per character rather than rescanning the prefix for each finding.
       while (cursor < match.index) if (code[cursor++] === "\n") line++;
       findings.push({ rule, file, line, severity: "high" });

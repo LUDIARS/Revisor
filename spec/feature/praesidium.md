@@ -32,6 +32,21 @@ complex control flow and unsupported languages can evade them. No findings is no
 Whole-template masking deliberately avoids false positives in generated source text; actual
 template-expression execution remains a coverage gap, covered by other reviews, not by this scanner.
 
+### JS evaluator identity versus service methods
+
+`web.dynamic-code` identifies bare `eval` / `Function` calls and calls qualified by
+`globalThis`, `window`, `self` or `global`, including optional-call syntax. A method
+on another receiver (such as Redis `eval`, which executes Lua on Redis rather than
+JavaScript in the process) is not a direct JS evaluator. Typed TS parameter
+declarations are not runtime calls. These distinctions apply uniformly, with no
+repository/path allowlist or configurable finding suppression. Aliases and arbitrary
+object properties that refer to a built-in remain outside this syntactic rule;
+this is not a semantic proof of their safety. Other review stages still apply.
+
+Regression coverage preserves direct/global calls, object and ternary arguments,
+comment-separated globals, line attribution, Redis calls and typed test doubles.
+This correction addresses Actio `23bc8364-69fb-40bc-9c0a-401700bde8ea` / Cernere PR3494.
+
 ## RV-PRAESIDIUM-02: Compile web field contracts once; reject at runtime ingress
 
 `src/praesidium/input-guard.mjs` exports `compileRouteGuard(contract)`. Compile at service startup,

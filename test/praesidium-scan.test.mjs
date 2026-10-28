@@ -34,6 +34,23 @@ test("unconfigured native sources and failed collection never become passes", as
   assert.equal(JSON.stringify(unreadable).includes("SECRET"), false);
 });
 
+test("JS evaluation keeps bare and global calls blocked without conflating Redis methods or TS declarations", () => {
+  for (const code of ["eval(input)", "new Function(input)", "Function(input)",
+    "globalThis.eval(input)", "window . eval(input)", "self.eval(input)",
+    "global.eval(input)", "globalThis?.eval?.(input)", "eval?.(input)",
+    "window.Function(input)", "eval({ script: input })", "eval(flag ? a : b)",
+    "globalThis /* receiver */ . /* member */ eval(input)"]) {
+    assert.equal(sourceFindings("source.ts", code)[0]?.rule, "web.dynamic-code", code);
+  }
+  for (const code of ["await redis.eval(SCRIPT, 1, key)",
+    "await this.client.eval(SCRIPT, 2, first, second)",
+    "interface RedisPort { eval(script: string, numKeys: number): Promise<unknown>; }",
+    "class Fake { async eval(script: string, numKeys: number) { return 1; } }"]) {
+    assert.deepEqual(sourceFindings("source.ts", code), [], code);
+  }
+  assert.equal(sourceFindings("source.ts", "redis.eval(SCRIPT);\neval(input)")[0].line, 2);
+});
+
 test("finding flood is bounded and remains a failing inspection", () => {
   const findings = sourceFindings("flood.js", "eval(input);\n".repeat(1000));
   assert.equal(findings.length, 201);
