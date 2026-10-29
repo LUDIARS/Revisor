@@ -12,7 +12,7 @@ status: implemented
 ## RV-PRAESIDIUM-01: Offline source policy and explicit coverage
 
 Praesidium (Latin: protection) is an independently callable CLI shipped with Revisor.
-`node src/praesidium/cli.mjs --repo <repository>` or installed `praesidium --repo <repository>`
+`node src/praesidium/cli.mjs --repo <repository> [--base <ref>]` or installed `praesidium --repo <repository>`
 emits one JSON object; exit 0 is the configured checks passing, 1 is findings/failing checks,
 2 is an incomplete inspection. It uses no LLM, remote API, new npm dependency or application launch.
 
@@ -109,8 +109,26 @@ Without web contracts the report explicitly has `webContracts: 0`; no claim of p
 
 ## RV-PRAESIDIUM-03: Native compile-time analysis
 
-When C/C++ translation units or headers exist, explicit native configuration is required. Every
-listed translation unit must have an entry; headers require at least one translation unit.
+Native configuration is required for the C/C++ files the reviewed change touches, not for every
+native file in the repository. The review test stage passes the PR's changed set: paths added or
+modified in the worktree relative to its merge base with the base branch, plus nonignored new files;
+deleted paths are excluded (`changedSourcePaths` in `files.mjs`, wired through `mergeBase` in the
+`runner.mjs` test-stage options and `praesidium-ci.mjs`). With that set:
+
+- every changed translation unit must have a `native` entry, otherwise `native.configuration-required`;
+- a changed header requires at least one configured unit (scoped fail-closed check). A header-only
+  change compiles no unit, because header-to-unit inclusion is not derived; it is a coverage gap,
+  not a pass claim on including units;
+- only configured units whose file is in the changed set are compiled. Entries for unchanged files are
+  still validated for shape (keys, standard, include/define grammar, duplicates, tracked file) but are
+  neither compiled nor resolved against host packages;
+- the 256 limit applies to the number of analyzed units, not to the length of `native`.
+
+Policy rules (RV-PRAESIDIUM-01) still scan every collected source; only native analysis is scoped.
+Fail closed: without a merge base, or when Git cannot compute the changed set, the scan falls back to
+the whole-repository requirement (every tracked unit configured and compiled). The report's
+`coverage.nativeScope` is `changed` or `repository` accordingly. The CLI keeps the whole-repository
+scope unless `--base <ref>` is given: `praesidium --repo <repository> --base origin/main`.
 The host needs `clang` / `clang++` on its trusted PATH or explicitly configured absolute compiler
 paths in its host configuration. Praesidium never installs them automatically.
 
@@ -140,6 +158,8 @@ This supports a cold checkout without running installers or copying unchecked co
 Per-process timeout is 60 seconds / output cap 2 MiB; at most two compiler workers run concurrently.
 The shared batch stops scheduling units after 120 seconds, reports every unstarted unit as an error,
 and awaits all in-flight compilers. Configuration is validated in full before workers start.
+Actio `bb56075c-dbb1-4f6e-8aec-47e5f3fd7d28` scoped native analysis to the changed set after
+Figmentum (464 native sources) and Pictor (288) could never pass the whole-repository requirement.
 Missing compiler, invalid/missing configuration, timeout, output overflow
 or diagnostic errors do not pass. Warnings fail even when Clang returns exit 0. Diagnostics are
 not retained, because they can contain secrets from source/header content.

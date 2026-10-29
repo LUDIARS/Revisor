@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { containedFile, trackedSources } from "../src/praesidium/files.mjs";
+import { changedSourcePaths, containedFile, trackedSources } from "../src/praesidium/files.mjs";
 
 function repository(t) {
   const root = mkdtempSync(join(tmpdir(), "praesidium-files-"));
@@ -41,4 +41,22 @@ test("accepts an escaped NUL in text without accepting raw NUL bytes", (t) => {
   assert.deepEqual(trackedSources(root), [{ file: "key.js", source }]);
   writeFileSync(path, source.replace("\\0", "\0"));
   assert.throws(() => trackedSources(root), /non-text source/);
+});
+
+test("changed paths include added, modified and new files but never deletions", (t) => {
+  const root = repository(t);
+  const git = (...args) => execFileSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args],
+    { cwd: root, windowsHide: true, encoding: "utf8" }).trim();
+  for (const file of ["kept.cpp", "edited.cpp", "removed.cpp"]) writeFileSync(join(root, file), "int f();\n");
+  git("add", "--all");
+  git("commit", "--quiet", "-m", "base");
+  const base = git("rev-parse", "HEAD");
+  writeFileSync(join(root, "edited.cpp"), "int g();\n");
+  rmSync(join(root, "removed.cpp"));
+  writeFileSync(join(root, "added.cpp"), "int h();\n");
+  git("add", "added.cpp");
+  writeFileSync(join(root, "untracked.h"), "int i();\n");
+  assert.deepEqual(changedSourcePaths(root, base).sort(), ["added.cpp", "edited.cpp", "untracked.h"]);
+  assert.throws(() => changedSourcePaths(root, "--output=x"));
+  assert.throws(() => changedSourcePaths(root, "missing-ref"));
 });

@@ -108,8 +108,8 @@ function changeKindsDiffer(before, after) {
     || beforeKinds.some((kind) => !afterKinds.includes(kind));
 }
 
-async function verifyAutofixPlan({ worktreePath, testCases, plan, targetDomains, augurFolder, env, runTests = runPlannedTests }) {
-  const ci = await runTests({ worktreePath, testCases, plan, targetDomains, augurFolder, env });
+async function verifyAutofixPlan({ worktreePath, mergeBase, testCases, plan, targetDomains, augurFolder, env, runTests = runPlannedTests }) {
+  const ci = await runTests({ worktreePath, mergeBase, testCases, plan, targetDomains, augurFolder, env });
   if (!testsPassed(ci)) {
     throw new Error(
       "Test autofix changed the review plan and the newly selected registered tests do not pass.",
@@ -175,6 +175,7 @@ async function autofixFailingTests({
     },
     runTests: () => runTests({
       worktreePath,
+      mergeBase,
       testCases,
       plan,
       targetDomains,
@@ -524,6 +525,7 @@ export async function runPartialVerification({
   let ci = targets.has("tests")
     ? await runTests({
         worktreePath: worktrees.head,
+        mergeBase: worktrees.mergeBase,
         testCases: request.testCases,
         plan,
         targetDomains: testTargetDomains,
@@ -579,6 +581,7 @@ export async function runPartialVerification({
         });
         ci = await verifyAutofixPlan({
           worktreePath: worktrees.head,
+          mergeBase: worktrees.mergeBase,
           testCases: request.testCases,
           plan,
           targetDomains: testTargetDomains,
@@ -1017,6 +1020,7 @@ export function createPrReviewRunner({
       plan = { ...plan, reviewStrategy };
       let initialCi = await executeTests({
         worktreePath: worktrees.head,
+        mergeBase: worktrees.mergeBase,
         testCases: request.testCases,
         plan,
         targetDomains: initial.domain.targetDomains,
@@ -1147,6 +1151,7 @@ export function createPrReviewRunner({
           }), settings);
           initialCi = await verifyAutofixPlan({
             worktreePath: worktrees.head,
+            mergeBase: worktrees.mergeBase,
             testCases: request.testCases,
             plan,
             env,
@@ -1364,6 +1369,7 @@ export function createPrReviewRunner({
         : initialSecurity;
       let finalCi = await executeTests({
         worktreePath: worktrees.head,
+        mergeBase: worktrees.mergeBase,
         testCases: request.testCases,
         plan: finalPlan,
         targetDomains: initial.domain.targetDomains,
@@ -1432,6 +1438,7 @@ export function createPrReviewRunner({
         if (reviewPlanChanged) {
           finalCi = await verifyAutofixPlan({
             worktreePath: worktrees.head,
+            mergeBase: worktrees.mergeBase,
             testCases: request.testCases,
             plan: finalPlan,
             targetDomains: initial.domain.targetDomains,

@@ -165,6 +165,24 @@
       "module": "contracts/catch-up-merge-base-from-source.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-19",
+      "criterion": "C-19 analyzeNative(root, sources, units, execute, options): 変更集合があるときは変更された翻訳単位だけを構成必須として解析し (上限 256)、変更集合が無いときは全翻訳単位を対象にする",
+      "symbol": "analyzeNative",
+      "file": "src/praesidium/native.mjs",
+      "module": "contracts/analyze-native-changed-scope.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-20",
+      "criterion": "C-20 changedSourcePaths(root, base): merge base から追加・変更されたパスと未追跡の新規パスを重複なく返し、削除されたパスを含めない",
+      "symbol": "changedSourcePaths",
+      "file": "src/praesidium/files.mjs",
+      "module": "contracts/changed-source-paths.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

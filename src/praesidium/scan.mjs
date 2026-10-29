@@ -15,7 +15,9 @@ function configuration(root) {
   return config;
 }
 
-export async function scanRepository({ root, collect = trackedSources, nativeExecute, nativeHost, env = process.env, now = Date.now }) {
+// `changedPaths` scopes native analysis to the reviewed change. Undefined or invalid
+// means the change is unknown, so native analysis keeps its whole-repository scope.
+export async function scanRepository({ root, collect = trackedSources, changedPaths, nativeExecute, nativeHost, env = process.env, now = Date.now }) {
   const started = now();
   try {
     const sources = collect(root), config = configuration(root);
@@ -26,7 +28,9 @@ export async function scanRepository({ root, collect = trackedSources, nativeExe
       findings.push(...sourceFindings(file, source).slice(0, 1000 - findings.length));
       inspectedFiles++;
     }
-    const native = await analyzeNative(root, sources, config.native, nativeExecute, { host: nativeHost, env, now });
+    const changed = Array.isArray(changedPaths) && changedPaths.every(path => typeof path === "string")
+      ? new Set(changedPaths) : null;
+    const native = await analyzeNative(root, sources, config.native, nativeExecute, { host: nativeHost, env, now, changed });
     const web = checkWebContracts(config.web);
     const checks = [...native, ...web];
     const status = checks.some(check => check.status === "error") ? "error"
@@ -34,7 +38,7 @@ export async function scanRepository({ root, collect = trackedSources, nativeExe
     return { tool: "Praesidium", version: 1, status, findings, checks,
       coverage: { sourceFiles: sources.length, policyInspectedFiles: inspectedFiles,
         findingsLimited: findings.length >= 1000 || findings.some(item => item.rule === "inspection.finding-limit"),
-        nativeUnits: native.filter(item => item.file).length,
+        nativeUnits: native.filter(item => item.file).length, nativeScope: changed ? "changed" : "repository",
         webContracts: web.length, webRuntimeWiring: "not-verified", scope: "tracked and nonignored new source files; submodules and unsupported languages are not analyzed" },
       durationMs: Math.max(0, now() - started) };
   } catch {

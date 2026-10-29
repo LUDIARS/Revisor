@@ -2,6 +2,8 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { resolve, relative, isAbsolute } from "node:path";
+import { contract } from '../contract-runtime.mjs'; /* augur-inject:import:57936444 */
+import augurContract_76cae6ab from '../../contracts/changed-source-paths.contract.mjs'; /* augur-inject:contract-predicate:d1406037 */
 
 export function containedFile(root, file) {
   if (typeof file !== "string" || !file || isAbsolute(file)) throw new Error("relative file required");
@@ -30,3 +32,22 @@ export function trackedSources(root) {
     return { file, source };
   });
 }
+
+function gitPaths(root, args) {
+  const listing = execFileSync("git", args, {
+    cwd: root, encoding: "utf8", windowsHide: true, shell: false,
+    timeout: 10_000, maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
+  });
+  return listing.split("\0").filter(Boolean);
+}
+
+/** Paths added or modified since `base` plus nonignored new files; deletions are excluded. */
+export function changedSourcePaths(root, base) {
+  if (typeof base !== "string" || !base || base.startsWith("-")) throw new Error("base ref required");
+  return [...new Set([
+    ...gitPaths(root, ["diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", base, "--"]),
+    ...gitPaths(root, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ])];
+}
+// @ts-expect-error augur-inject
+changedSourcePaths = contract(changedSourcePaths, { ...augurContract_76cae6ab, contractId: 'C-20', mode: 'observe', sample: 1, where: 'src/praesidium/files.mjs:43', rule: 'contract-wrap', id: '76cae6ab' }); /* augur-inject:contract-wrap:76cae6ab */

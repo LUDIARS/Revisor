@@ -27,3 +27,19 @@ test("findings, unavailable scan and unknown results block before setup/install"
     assert.equal(outcomes.length, 1);
   }
 });
+
+test("review merge base scopes the scan to changed paths and falls back when unknown", async () => {
+  const seen = [];
+  const scan = async (input) => { seen.push(input.changedPaths); return { status: "passed" }; };
+  const runTests = async () => [];
+  await runSecurePlannedTests({ worktreePath: "/fixture", mergeBase: "abc123" }, {
+    scan, runTests, changes: (root, base) => { assert.deepEqual([root, base], ["/fixture", "abc123"]); return ["a.cpp"]; },
+  });
+  await runSecurePlannedTests({ worktreePath: "/fixture", mergeBase: "abc123" }, {
+    scan, runTests, changes: () => { throw new Error("git unavailable"); },
+  });
+  await runSecurePlannedTests({ worktreePath: "/fixture" }, {
+    scan, runTests, changes: () => assert.fail("no base means no changed set"),
+  });
+  assert.deepEqual(seen, [["a.cpp"], undefined, undefined]);
+});
