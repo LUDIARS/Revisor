@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli.mjs";
 import { removeFixture } from "./helpers/fixture-cleanup.mjs";
+
+// The CLI finds the local API port in the Excubitor catalog above its cwd. Give it
+// one inside the fixture instead of depending on where the checkout happens to live
+// (the review runs the suite from a scratch directory with no workspace around it).
+function workspaceWithCatalog(directory) {
+  mkdirSync(join(directory, "Excubitor", "catalog"), { recursive: true });
+  writeFileSync(
+    join(directory, "Excubitor", "catalog", "services.yaml"),
+    "services:\n  - code: revisor\n    port: 17999\n",
+    "utf8",
+  );
+  return directory;
+}
 
 function response(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -21,7 +34,7 @@ test("release CLI sends a confirmed file-backed request to the local API", async
       "release", "LUDIARS/Product", "--kind", "minor", "--title", "Product 1.5",
       "--notes-file", notesFile, "--expected-version", "1.4.8", "--json",
     ], {
-      cwd: process.cwd(),
+      cwd: workspaceWithCatalog(directory),
       stdout: { write: (value) => { output += value; return true; } },
       fetchImpl: async (url, options) => {
         received = { url, options };
@@ -46,11 +59,11 @@ test("release CLI surfaces local API conflict and validation messages", async ()
   const args = ["release", "LUDIARS/Product", "--kind", "major", "--title", "Product 2", "--notes-file", notesFile, "--expected-version", "1.4.8"];
   try {
     await assert.rejects(
-      main(args, { cwd: process.cwd(), fetchImpl: async () => response(409, { error: "Version changed." }) }),
+      main(args, { cwd: workspaceWithCatalog(directory), fetchImpl: async () => response(409, { error: "Version changed." }) }),
       /Version changed/,
     );
     await assert.rejects(
-      main(args, { cwd: process.cwd(), fetchImpl: async () => response(400, { error: "kind is invalid." }) }),
+      main(args, { cwd: workspaceWithCatalog(directory), fetchImpl: async () => response(400, { error: "kind is invalid." }) }),
       /kind is invalid/,
     );
   } finally {
@@ -69,7 +82,7 @@ test("release CLI sends githubRelease=false for --no-github-release", async () =
       "release", "MELPOT/Game", "--kind", "minor", "--title", "Game 0.9",
       "--notes-file", notesFile, "--expected-version", "0.8.0", "--no-github-release",
     ], {
-      cwd: process.cwd(),
+      cwd: workspaceWithCatalog(directory),
       stdout: { write: (value) => { output += value; return true; } },
       fetchImpl: async (_url, options) => {
         body = JSON.parse(options.body);

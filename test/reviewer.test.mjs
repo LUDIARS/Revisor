@@ -9,12 +9,16 @@ import {
   runReviewer,
 } from "../src/reviewer.mjs";
 
+// The default sandbox mode, independent of REVISOR_CODEX_SANDBOX in the environment
+// that runs these tests (the review service itself may set it).
+const SANDBOXED = Object.freeze({});
+
 test("reviews with the strong model on both reviewer providers", () => {
   assert.deepEqual(reviewerInvocation("claude-opus"), {
     name: "claude",
     args: ["--model", "opus", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
   });
-  assert.deepEqual(reviewerInvocation("codex-sol"), {
+  assert.deepEqual(reviewerInvocation("codex-sol", { env: SANDBOXED }), {
     name: "codex",
     args: ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "workspace-write", "-"],
   });
@@ -75,7 +79,7 @@ test("keeps plan-only calls read-only without downgrading the model", () => {
   assert.deepEqual(reviewerInvocation("claude-opus", { readOnly: true }).args, [
     "--model", "opus", "--effort", "medium", "--permission-mode", "plan", "--print",
   ]);
-  assert.deepEqual(reviewerInvocation("codex-sol", { readOnly: true }).args, [
+  assert.deepEqual(reviewerInvocation("codex-sol", { readOnly: true, env: SANDBOXED }).args, [
     "exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "read-only", "-",
   ]);
 });
@@ -86,7 +90,7 @@ test("carries the requested effort through to both reviewer providers", () => {
     ["--model", "opus", "--effort", "high", "--permission-mode", "acceptEdits", "--print"],
   );
   assert.deepEqual(
-    reviewerInvocation("codex-sol", { effort: "high" }).args,
+    reviewerInvocation("codex-sol", { effort: "high", env: SANDBOXED }).args,
     ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high", "--sandbox", "workspace-write", "-"],
   );
 });

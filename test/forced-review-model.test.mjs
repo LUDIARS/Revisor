@@ -55,7 +55,7 @@ test("keeps auxiliary models independent of review overrides", () => {
     ["--model", "sonnet", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
   );
   assert.deepEqual(
-    reviewerInvocation("codex-sol", { purpose: "auxiliary", forcedModel: "gpt-5.6-sol" }).args,
+    reviewerInvocation("codex-sol", { purpose: "auxiliary", forcedModel: "gpt-5.6-sol", env: {} }).args,
     [
       "exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium",
       "--sandbox", "workspace-write", "-",

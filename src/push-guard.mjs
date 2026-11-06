@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { constants } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { resolveRepositoryWorkflow, WORKFLOW_GITHUB } from "./repository-workflow.mjs";
 import { BRANCH_PUSH_ENV_FLAG } from "./branch-push-flag.mjs";
 import { scanOutgoingHistory } from "./outgoing-history.mjs";
@@ -32,12 +32,23 @@ function gitEnvironment() {
 
 async function unconfiguredGit(repoPath, args) {
   const result = await runProcess({ command: "git", args, cwd: repoPath, env: gitEnvironment() });
-  if (!result.ok) throw new Error(`git ${args[0]} failed: ${result.stderr.trim() || result.stdout.trim()}`);
+  if (!result.ok) {
+    // Callers tell "git config --get: key not set" (exit 1) from a real failure by this code.
+    throw Object.assign(
+      new Error(`git ${args[0]} failed: ${result.stderr.trim() || result.stdout.trim()}`),
+      { exitCode: result.exitCode },
+    );
+  }
   return result.stdout.trim();
 }
 
-function unsafeOriginalHookDirectory(directory) {
+// A hooks directory injected from outside (a session's core.hooksPath under TEMP)
+// must not be captured as the original hook. The repository's own git directory is
+// never injected, even when the repository itself lives under TEMP.
+function unsafeOriginalHookDirectory(directory, commonDirectory) {
   const normalized = resolve(directory).toLowerCase();
+  const own = resolve(commonDirectory).toLowerCase();
+  if (normalized === own || normalized.startsWith(`${own}${sep}`)) return false;
   return normalized.startsWith(resolve(tmpdir()).toLowerCase()) || normalized.includes("concordia-session-hooks");
 }
 
@@ -95,7 +106,7 @@ export async function installPushGuard({
       .catch((error) => error.exitCode === 1 ? "" : Promise.reject(error));
     sourceDirectory = globalPath ? resolve(repoPath, globalPath) : null;
   }
-  if (sourceDirectory && unsafeOriginalHookDirectory(sourceDirectory)) {
+  if (sourceDirectory && unsafeOriginalHookDirectory(sourceDirectory, commonDirectory)) {
     throw new Error(`Refusing temporary or Concordia-injected original hooks directory: ${sourceDirectory}`);
   }
   if (existing && !managedExisting && !sourceDirectory) {

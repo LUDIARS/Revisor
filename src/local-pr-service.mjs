@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   handleRiskReassessment,
@@ -116,6 +116,10 @@ function validationModeSkips(settings) {
   ].sort();
 }
 
+async function comparablePath(path) {
+  return (await realpath(path)).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
 function sameValidationMode(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
@@ -201,10 +205,9 @@ export class LocalPrService {
   async registerRepository(registration) {
     await access(registration.rootPath);
     const topLevel = await git(registration.rootPath, ["rev-parse", "--show-toplevel"]);
-    if (
-      topLevel.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
-      !== registration.rootPath.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
-    ) {
+    // git prints the long form of the path, while the caller may hold a Windows
+    // 8.3 short name (TEMP often holds a `~1` segment): compare where both lead.
+    if (await comparablePath(topLevel) !== await comparablePath(registration.rootPath)) {
       throw new Error("root_path must be the root of a Git working tree.");
     }
     await git(registration.rootPath, [

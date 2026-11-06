@@ -131,10 +131,11 @@ test("verification keeps disposable worktrees until registered tests settle", as
       }],
     });
 
-    assert.equal(result.ci.length, 1);
-    assert.equal(result.ci[0].name, "worktree-lifetime");
-    assert.equal(result.ci[0].status, "passed");
-    assert.equal(result.ci[0].exitCode, 0);
+    // The Praesidium preflight row runs ahead of the registered tests; this test is about the latter.
+    const registered = result.ci.filter((row) => row.name === "worktree-lifetime");
+    assert.equal(registered.length, 1);
+    assert.equal(registered[0].status, "passed");
+    assert.equal(registered[0].exitCode, 0);
   } finally {
     removeFixture(fixture.directory);
   }

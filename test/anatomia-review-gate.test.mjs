@@ -42,7 +42,7 @@ test("blocks LLM review before it starts when Anatomia finds a violation", async
     }),
   });
   assert.equal(result.status, "blocked");
-  assert.match(result.reasons[0], /architecture rule violation/);
+  assert.match(result.reasons[0], /アーキテクチャルール違反/);
   assert.match(result.reasons.at(-1), /forbidden dependency/);
 });
 
@@ -112,7 +112,7 @@ test("carries an advisory dual-layer finding through the front gate without bloc
   assert.equal(result.status, "passed");
   assert.deepEqual(result.reasons, []);
   assert.deepEqual(result.advisories, [
-    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+    "Anatomia 二層ドメイン（プログラム）: 1 件の変更アンカーが未分類",
   ]);
 });
 
@@ -125,6 +125,6 @@ test("blocks at the front gate when the enforced dual-layer gate is blocking", a
   const result = await gate({ analyze: async () => analysis });
   assert.equal(result.status, "blocked");
   assert.deepEqual(result.reasons, [
-    "Anatomia dual-layer (program): 1 changed anchor(s) unclassified",
+    "Anatomia 二層ドメイン（プログラム）: 1 件の変更アンカーが未分類",
   ]);
 });

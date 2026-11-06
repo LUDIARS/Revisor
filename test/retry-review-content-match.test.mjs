@@ -38,7 +38,7 @@ test("the same head still inherits without a caller decision", () => {
 // モデルレビュー自身が問題を指摘した審査は、内容が同じでも引き継がない。
 test("a reviewer-reported hold is not inherited by a re-landed head", () => {
   const scope = retryReviewScope(
-    reviewed({ reasons: ["reviewer reported PR_GATE_NEEDS_HUMAN"] }),
+    reviewed({ reasons: ["レビュアーが安全なドメイン／仕様定義に必要な情報が不足していると報告しました"] }),
     "b".repeat(40),
     { reviewedContentUnchanged: true },
   );
