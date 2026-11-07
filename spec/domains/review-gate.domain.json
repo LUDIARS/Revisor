@@ -8,6 +8,9 @@
       "pathPattern": "(^|/)(src/praesidium/|src/praesidium-ci\\.mjs$|test/praesidium-[a-z-]+\\.test\\.mjs$)"
     },
     {
+      "pathPattern": "(^|/)(src/cpp-code-checks/|src/cpp-code-check-ci\\.mjs$|test/cpp-code-checks\\.test\\.mjs$)"
+    },
+    {
       "pathPattern": "src/review-gate"
     },
     {

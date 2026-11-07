@@ -108,8 +108,8 @@ function changeKindsDiffer(before, after) {
     || beforeKinds.some((kind) => !afterKinds.includes(kind));
 }
 
-async function verifyAutofixPlan({ worktreePath, mergeBase, testCases, plan, targetDomains, augurFolder, env, runTests = runPlannedTests }) {
-  const ci = await runTests({ worktreePath, mergeBase, testCases, plan, targetDomains, augurFolder, env });
+async function verifyAutofixPlan({ worktreePath, mergeBase, testCases, plan, targetDomains, augurFolder, anatomiaFolder, env, runTests = runPlannedTests }) {
+  const ci = await runTests({ worktreePath, mergeBase, testCases, plan, targetDomains, augurFolder, anatomiaFolder, env });
   if (!testsPassed(ci)) {
     throw new Error(
       "Test autofix changed the review plan and the newly selected registered tests do not pass.",
@@ -142,6 +142,7 @@ async function autofixFailingTests({
   plan,
   targetDomains,
   augurFolder,
+  anatomiaFolder,
   env,
   runReview,
   runTests = runPlannedTests,
@@ -180,6 +181,7 @@ async function autofixFailingTests({
       plan,
       targetDomains,
       augurFolder,
+      anatomiaFolder,
       env,
     }),
   });
@@ -530,6 +532,7 @@ export async function runPartialVerification({
         plan,
         targetDomains: testTargetDomains,
         augurFolder: settings.augurFolder,
+        anatomiaFolder: settings.anatomiaFolder,
         env,
       })
     : previous.ci;
@@ -558,6 +561,7 @@ export async function runPartialVerification({
       plan,
       targetDomains: testTargetDomains,
       augurFolder: settings.augurFolder,
+      anatomiaFolder: settings.anatomiaFolder,
       env,
       runReview,
       runTests,
@@ -586,6 +590,7 @@ export async function runPartialVerification({
           plan,
           targetDomains: testTargetDomains,
           augurFolder: settings.augurFolder,
+          anatomiaFolder: settings.anatomiaFolder,
           env,
           runTests,
         });
@@ -968,6 +973,7 @@ export function createPrReviewRunner({
         testCases: request.testCases,
         cwd: worktrees.head,
         augurFolder: settings.augurFolder,
+        anatomiaFolder: settings.anatomiaFolder,
         reviewer: externalReviewer,
         runReview: executeReview,
         leakageClear: initialLeakage.totalFindings === 0,
@@ -1026,6 +1032,7 @@ export function createPrReviewRunner({
         targetDomains: initial.domain.targetDomains,
         headSha: request.headSha,
         augurFolder: settings.augurFolder,
+        anatomiaFolder: settings.anatomiaFolder,
         env,
       });
       if (testsPassed(initialCi)) await checkpoint("tests", { ci: initialCi });
@@ -1109,6 +1116,7 @@ export function createPrReviewRunner({
           plan,
           targetDomains: initial.domain.targetDomains,
           augurFolder: settings.augurFolder,
+          anatomiaFolder: settings.anatomiaFolder,
           env,
           runReview: executeReview,
           runTests: executeTests,
@@ -1154,6 +1162,7 @@ export function createPrReviewRunner({
             mergeBase: worktrees.mergeBase,
             testCases: request.testCases,
             plan,
+            anatomiaFolder: settings.anatomiaFolder,
             env,
             runTests: executeTests,
           });
@@ -1375,6 +1384,7 @@ export function createPrReviewRunner({
         targetDomains: initial.domain.targetDomains,
         headSha: request.headSha,
         augurFolder: settings.augurFolder,
+        anatomiaFolder: settings.anatomiaFolder,
         env,
       });
       if (!testsPassed(finalCi)) {
@@ -1389,6 +1399,7 @@ export function createPrReviewRunner({
           plan: finalPlan,
           targetDomains: initial.domain.targetDomains,
           augurFolder: settings.augurFolder,
+          anatomiaFolder: settings.anatomiaFolder,
           env,
           runReview: executeReview,
           runTests: executeTests,
@@ -1443,6 +1454,7 @@ export function createPrReviewRunner({
             plan: finalPlan,
             targetDomains: initial.domain.targetDomains,
             augurFolder: settings.augurFolder,
+            anatomiaFolder: settings.anatomiaFolder,
             env,
             runTests: executeTests,
           });
