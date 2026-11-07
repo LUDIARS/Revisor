@@ -14,7 +14,8 @@ export async function runCppCheckedTests(options, { check = runCppCodeChecks, ru
   const result = await check(options);
   if (result) await options.onCheckResult?.(result);
   // Loaded lazily like the Praesidium wrapper does, so this module stays cheap to import.
-  const executeTests = runTests ?? (await import("./ci.mjs")).runPlannedTests;
+  // The C++ dependency vulnerability row (RV-NATIVE-DEPS-03) comes next, then the tests.
+  const executeTests = runTests ?? (await import("./native-deps-ci.mjs")).runNativeDependencyCheckedTests;
   const tests = await executeTests(options);
   return result ? [result, ...tests] : tests;
 }

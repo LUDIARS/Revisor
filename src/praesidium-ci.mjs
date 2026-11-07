@@ -28,7 +28,8 @@ export async function runSecurePlannedTests(options, { scan = scanRepository, ch
   if (status !== "passed") return [result];
   // Load the dependency-bearing runner only after preflight passes. The small
   // policy/adapter regression suite must also run in a docs-only cold checkout.
-  // The C++ code checks (RV-CPP-CODE-CHECKS-03) sit between this preflight and the tests.
+  // The C++ code checks (RV-CPP-CODE-CHECKS-03) and then the C++ dependency row (RV-NATIVE-DEPS-03)
+  // sit between this preflight and the tests.
   const executeTests = runTests ?? (await import("./cpp-code-check-ci.mjs")).runCppCheckedTests;
   return [result, ...await executeTests(options)];
 }

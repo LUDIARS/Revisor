@@ -11,6 +11,9 @@
       "pathPattern": "(^|/)(src/cpp-code-checks/|src/cpp-code-check-ci\\.mjs$|test/cpp-code-checks\\.test\\.mjs$)"
     },
     {
+      "pathPattern": "(^|/)(src/native-deps/|src/native-deps-ci\\.mjs$|test/native-deps\\.test\\.mjs$)"
+    },
+    {
       "pathPattern": "src/review-gate"
     },
     {
