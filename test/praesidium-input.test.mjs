@@ -30,6 +30,14 @@ test("rejects malformed/ambiguous targets, unknown fields and scalar boundary at
     '[]', 'null', '{"name":"x"', 'x'.repeat(129)]) {
     assert.equal(guard({ ...request, bodyText }).ok, false, bodyText);
   }
+  // A 1 MiB body of escaped quotes opens a string that never closes: it is rejected
+  // without the duplicate-key scan rescanning the rest from every quote.
+  const large = compileRouteGuard({ ...contract, maxBodyBytes: 1_048_576 });
+  for (const bodyText of ['"' + '\\"'.repeat(524_287), '{"name":"' + '\\"'.repeat(524_280) + '"}', '{"name":"' + '\\"'.repeat(524_270) + '","name":"y"}']) {
+    const started = performance.now();
+    assert.equal(large({ ...request, bodyText }).reason, bodyText.endsWith('"}') && !bodyText.includes(',"name"') ? "schema" : "malformed-input");
+    assert.ok(performance.now() - started < 1_000, `${performance.now() - started} ms`);
+  }
   assert.equal(guard({ ...request, method: "GET" }).status, 405);
   assert.equal(guard({ ...request, contentType: "text/plain" }).status, 415);
   assert.equal(guard({ ...request, bodyText: "あ".repeat(50) }).status, 413);

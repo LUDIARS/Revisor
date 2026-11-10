@@ -30,12 +30,52 @@ updated: 2026-09-04
 `src/change-classification.mjs` がパス集合と unified diff から作る。
 
 - **種別 (kind)**: 1 パス 1 種別。優先順で最初に一致したものを採る。
-  `generated` → `test` → `docs` → `infra` → `asset` → `config` → `code`。
+  (C/C++ のビルド定義、ビルドツリーのスクリプト) → `generated` → `test` → (`.txt` 名の依存マニフェスト) → `docs` → `infra` →
+  (同梱アーカイブ) → `asset` → `config` → `code`。
   lock ファイルは config より先に generated、workflow は config より先に infra、
   拡張子が `.mjs` でも `test/` 配下なら test、と順序自体が判断になっている。
+  C/C++ のビルド定義 (`CMakeLists.txt` / `*.cmake` / `*.cmake.in` / `meson.build` / `meson_options.txt` /
+  `*.vcxproj` / `*.vcproj` / `*.sln` / `*.props` / `*.targets` / `*.gn` / `*.gni` / `*.bzl` / `*.mk` / `*.make` /
+  `BUILD` / `MODULE.bazel` / `WORKSPACE` / `xmake.lua` / `Makefile`) は、ビルドの対象・フラグ・configure 時に
+  取得して実行するソース (FetchContent / ExternalProject / execute_process) を決めるビルドコードなので、
+  generated より先に `infra` (Makefile と同じ) とする (`node_modules/` 配下を除く)。以前は `CMakeLists.txt` が
+  `.txt` として docs に、zstd / lz4 のように `build/` 配下に置かれたビルド定義が generated に取られ、これだけを
+  変える PR が脆弱性診断・登録テスト (Praesidium 前検査を含む) なしで計画されていた。同じ理由で、`build/` /
+  `out/` / `dist/` 配下でも C/C++ のソースは generated にせず、そこにあるスクリプトとリソーススクリプト
+  (`*.sh` / `*.bat` / `*.cmd` / `*.ps1` / `*.py` / `*.rc`。zstd の単一ファイル版を作る `combine.sh`、meson が
+  呼ぶ `GetZstdLibraryVersion.py`、lz4 の `build/visual/*.cmd` など) も `infra` とする (`node_modules/` 配下を
+  除く)。それ以外の `build/` / `out/` / `dist/` 配下 (`dist/server.js`、README、画像など) は従来どおり generated。
+  依存マニフェストとして `config` にする `.txt` は、`conanfile.txt` と pip の `requirements*.txt` /
+  `constraints*.txt` (慣例の接頭辞 `test-` / `tests-` / `dev-` / `doc-` / `docs-` / `build-` / `ci-` / `lint-`
+  (`_` 区切りも) 付きを含む) と `requirements/` 配下の `*.txt`。`system-requirements.txt` のような散文の名前は
+  docs のまま。これらの名前はどの深さでも依存マニフェストとして扱うので、`docs/constraints.txt` や
+  `spec/requirements/overview.txt` のような散文もこの名前なら `config` になり、脆弱性診断と登録テストが走る
+  (`docs/requirements.txt` は Read the Docs の pip マニフェストでもあり、文書と取り違えて診断を外すよりこの
+  余分なコストを取る)。`third_party/` / `3rdparty/` / `3rd_party/` / `3rd-party/` / `vendor/` / `external/` / `extern/` /
+  `deps/` 配下の圧縮アーカイブ (FetchContent が参照する同梱ソースや prebuilt) も `config` とする。docs-only /
+  docs-or-config-only の判定もこれらを文書扱いしない。
+- **依存マニフェストと実行設定 (C/C++)**: `vcpkg.json` / `vcpkg-configuration.json` / `conanfile.txt` /
+  `conan.lock` は依存マニフェストで、docs/config 緩和の対象外かつ依存更新のみの判定に入る (上の `.txt` の
+  依存マニフェストも同じ一覧から判定する)。`conanfile.py` は
+  Conan が実行する Python なので依存マニフェストにせず `code` のまま解析する。`CMakePresets.json` /
+  `CMakeUserPresets.json` は toolchain file とコンパイラ・リンカフラグを選ぶ (製品のハードニングを外せる) ので、
+  CI pipeline と同じ実行設定として緩和しない。
+- **ネイティブソース**: C / C++ / Objective-C のソースを含む変更は `nativeSources: true` を持ち、脆弱性診断が
+  走るときレビュアーへの指示にメモリ安全性の観点 (入力由来の長さによる範囲外アクセスとサイズ計算、整数の
+  オーバーフローと縮小変換、use-after-free と dangling した view・参照、未初期化読み出し、書式文字列、
+  C / OS API の戻り値未検査、データ競合) を加える。
 - **runtime surface**: `migration` / `entrypoint` / `ui` / `infra`。
   登録単体テストでは代替できない面。docs-only 変更は `ui/` 配下でも
-  runtime surface を持たない (実行物が動いていないため)。
+  runtime surface を持たない (実行物が動いていないため)。`entrypoint` は JS/TS の入口に加えて、
+  C / C++ / Objective-C のプロセス入口と、プロセスの権限を決めるプラットフォームマニフェスト
+  (`*.entitlements`、`Info.plist`、`*.manifest`) を含む。プロセス入口は `main` / `server` / `app` / `cli` /
+  `bootstrap` という名前のソースと `*WinMain*` / `*DllMain*` で、接頭辞を付けてよいのは `main` だけ
+  (`macos_main.mm`、`windows_main.cpp`)。`presenter_app.cpp` (クラスの実装) や `http_server.cc` (部品) は
+  入口ではない。テストランナーも入口にしない: `test/` / `tests/` / `__tests__/` / `__mocks__/` / `unittest(s)/` /
+  `testing/` 配下、`gtest_main.cc` / `gmock_main.cc` / `benchmark_main.cc` / `catch_main.cpp` /
+  `doctest_main.cpp` / `test_main.cpp` / `unittest_main.cpp` (`unit_test_main.cc` のように前に `_` 区切りの
+  語があっても同じ)、Xcode のテストバンドル (`MyAppTests/` / `MyAppUITests/`。大文字の `Tests` で終わる
+  ディレクトリだけで、`contests/` は製品のパス)。
 - **規模**: 変更ファイル数と diff 本文行数 (`+++`/`---` はヘッダなので数えない)。
 - **依存更新のみ**: 全パスが依存マニフェストなら `dependencyOnly: true`。解析対象の
   ソースは変わらない一方、第三者コードとビルド結果は変わり得るため、通常の非コード変更と

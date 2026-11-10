@@ -209,3 +209,24 @@ test("an advisor cannot invent a test case that is not registered", () => {
   assert.equal(plan.testSelection.selected.includes("not-registered"), false);
   assert.equal(plan.testSelection.selected.includes("unit"), true);
 });
+
+test("a CMakeLists.txt-only change keeps the vulnerability pass and the registered tests", () => {
+  const plan = planReview({
+    classification: classifyChange({ changedPaths: ["native/CMakeLists.txt"] }),
+    testCases: [{ name: "native", command: "ctest" }],
+  });
+  const run = Object.fromEntries(plan.stages.map((stage) => [stage.id, stage.run]));
+  assert.equal(run.security_review, true);
+  assert.equal(run.registered_tests, true);
+  assert.equal(run.anatomia_code_analysis, true);
+});
+
+test("a build-tree script, a 3rdparty archive or a prefixed requirements file keeps the vulnerability pass and the tests", () => {
+  for (const path of ["build/single_file_libs/combine.sh", "3rdparty/zlib-1.3.1.tar.gz", "test-requirements.txt"]) {
+    const plan = planReview({ classification: classifyChange({ changedPaths: [path] }), testCases: [{ name: "unit" }] });
+    const run = Object.fromEntries(plan.stages.map((stage) => [stage.id, stage.run]));
+    assert.equal(run.security_review, true, path);
+    assert.equal(run.registered_tests, true, path);
+    assert.deepEqual(plan.testSelection.selected, ["unit"], path);
+  }
+});

@@ -5,7 +5,10 @@
   "templateRules": [],
   "membership": [
     {
-      "pathPattern": "(^|/)(src/praesidium/|src/praesidium-ci\\.mjs$|test/praesidium-[a-z-]+\\.test\\.mjs$)"
+      "pathPattern": "(^|/)(src/praesidium/|src/praesidium-ci\\.mjs$|test/praesidium-[a-z-]+\\.test\\.mjs$|test/fixtures/praesidium-native/)"
+    },
+    {
+      "pathPattern": "(^|/)praesidium\\.json$"
     },
     {
       "pathPattern": "(^|/)(src/cpp-code-checks/|src/cpp-code-check-ci\\.mjs$|test/cpp-code-checks\\.test\\.mjs$)"
@@ -48,7 +51,7 @@
     "confidential-term-advisory"
   ],
   "specRefs": [
-    "spec/feature/praesidium.md — RV-PRAESIDIUM-01/02/03/04",
+    "spec/feature/praesidium.md — RV-PRAESIDIUM-01/02/03/04/05",
     "review-gate — マージ可否判定ポリシー / ブロックと advisory の振り分け",
     "review-gate — docs-only 変更の対象ドメイン緩和 (neco 2026-07-30)",
     "review-gate — 業務コード (kind=code) を含まない変更の application domain 除外 (neco 2026-08-04)",

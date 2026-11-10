@@ -1,16 +1,17 @@
 /** @implements RV-PRAESIDIUM-04 — mandatory preflight for both ordinary and Augur test paths. */
-import { changedSourcePaths } from "./praesidium/files.mjs";
+import { reviewedPaths } from "./praesidium/files.mjs";
 import { scanRepository } from "./praesidium/scan.mjs";
 
-// The PR's changed set scopes native analysis; failing to compute it falls back
-// to the whole-repository scope rather than skipping anything.
+// The PR's changed set (plus the units its praesidium.json edit reconfigures) scopes
+// native analysis; failing to compute it falls back to the whole-repository scope
+// rather than skipping anything.
 function reviewedChanges(options, changes) {
   if (!options.mergeBase) return undefined;
   try { return changes(options.worktreePath, options.mergeBase); }
   catch { return undefined; }
 }
 
-export async function runSecurePlannedTests(options, { scan = scanRepository, changes = changedSourcePaths, runTests } = {}) {
+export async function runSecurePlannedTests(options, { scan = scanRepository, changes = reviewedPaths, runTests } = {}) {
   const name = "Praesidium security preflight";
   await options.onCheckStarted?.({ name });
   let report;
@@ -20,6 +21,11 @@ export async function runSecurePlannedTests(options, { scan = scanRepository, ch
   const result = { name, status, durationMs: report?.durationMs ?? 0,
     exitCode: status === "passed" ? 0 : status === "failed" ? 1 : 2,
     security: report, reason: status === "passed" ? undefined : "Praesidium blocked unsafe or unverified code" };
+  // An accepted coverage gap is shown on the board instead of looking like a full pass.
+  const unanalyzed = report?.coverage?.nativeNotAnalyzed;
+  if (Array.isArray(unanalyzed) && unanalyzed.length > 0) {
+    result.advisory = `Praesidium: Objective-C/C++ の ${unanalyzed.length} ファイルは静的解析されていません (検査ホストに SDK が無いため字句規則だけを適用しました)`;
+  }
   if (status !== "passed") {
     const text = JSON.stringify({ reason: report?.reason, findings: report?.findings, checks: report?.checks });
     result.output = { text: text.slice(0, 8000), truncated: text.length > 8000 };
