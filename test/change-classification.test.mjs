@@ -128,20 +128,19 @@ test("treats a change as docs/config-only when no path is code", () => {
 
 test("a dependency manifest keeps the target-domain gate even though it looks like config", () => {
   // Editing these pulls third-party code into the build, so the relaxation must
-  // not cover them (neco 2026-07-30).
+  // not cover them (neco 2026-07-30). The list is the one review-gate.md names.
   for (const path of [
-    "package.json",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "Cargo.toml",
-    "requirements-dev.txt",
-    "composer.json",
-    "go.mod",
+    "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "pnpm-lock.yml",
+    "Cargo.toml", "Cargo.lock", "pyproject.toml", "poetry.lock", "Gemfile", "Gemfile.lock", "composer.json",
+    "composer.lock", "go.mod", "go.sum", "vcpkg.json", "vcpkg-configuration.json", "conanfile.txt", "conan.lock",
+    "requirements.txt", "requirements-dev.txt", "constraints.txt", "test_requirements.txt", "requirements/base.txt",
   ]) {
     assert.equal(isDocsOrConfigOnlyChange([path]), false, path);
   }
   // Pairing one with docs does not launder it either.
   assert.equal(isDocsOrConfigOnlyChange(["README.md", "package.json"]), false);
+  // Only the direct children of a requirements/ directory are pip's split requirements.
+  assert.equal(isDocsOrConfigOnlyChange(["requirements/notes/usage.txt"]), true);
 });
 
 test("a pipeline definition keeps the target-domain gate even though it is YAML", () => {
@@ -256,4 +255,106 @@ test("UI の .html は従来どおり code のままで runtime verification が
   const ui = classifyChange({ changedPaths: ["web/public/index.html"], unifiedDiff: "" });
   assert.equal(ui.codeDomainRequired, true);
   assert.ok(ui.runtimeSurfaces.includes("ui"), "ui 面として runtime verification の対象に残る");
+});
+
+test("C/C++ build scripts and dependency manifests are never planned as documentation", () => {
+  // `CMakeLists.txt` ended in `.txt`, so a PR touching only it skipped the vulnerability
+  // pass and the registered tests (with the Praesidium preflight) although it decides
+  // what is compiled and which sources are downloaded and run at configure time.
+  for (const path of ["CMakeLists.txt", "native/relay/CMakeLists.txt", "meson_options.txt"]) {
+    const profile = classifyChange({ changedPaths: [path] });
+    assert.deepEqual(profile.kinds, ["infra"], path);
+    assert.equal(profile.docsOnly, false, path);
+    assert.equal(profile.docsOrConfigOnly, false, path);
+  }
+  for (const path of ["conanfile.txt", "conan.lock", "vcpkg.json", "vcpkg-configuration.json"]) {
+    const profile = classifyChange({ changedPaths: [path] });
+    assert.equal(profile.docsOnly, false, path);
+    assert.equal(profile.docsOrConfigOnly, false, path);
+    assert.equal(profile.dependencyOnly, true, path);
+  }
+  // Paired with prose, a manifest still keeps an executable kind.
+  assert.deepEqual(classifyChange({ changedPaths: ["conanfile.txt", "README.md"] }).kinds, ["docs", "config"]);
+  // Presets pick the toolchain file and the compiler flags, like a CI pipeline.
+  assert.equal(isDocsOrConfigOnlyChange(["CMakePresets.json"]), false);
+  assert.equal(isDocsOrConfigOnlyChange(["CMakeUserPresets.json"]), false);
+  // A Conan recipe is Python that Conan executes: code with full analysis, not a manifest.
+  assert.deepEqual(classifyChange({ changedPaths: ["conanfile.py"] }).kinds, ["code"]);
+  assert.equal(classifyChange({ changedPaths: ["conanfile.py"] }).dependencyOnly, false);
+  // Plain text stays documentation.
+  assert.equal(classifyChange({ changedPaths: ["notes.txt"] }).docsOnly, true);
+  // pip's other manifest spellings: split requirements, prefixed names and constraints, at any
+  // depth (Read the Docs installs docs/requirements.txt).
+  for (const path of ["requirements/production.txt", "test-requirements.txt", "dev-requirements.txt", "constraints.txt",
+    "docs/requirements.txt", "docs/constraints.txt"]) {
+    const profile = classifyChange({ changedPaths: [path] });
+    assert.deepEqual(profile.kinds, ["config"], path);
+    assert.equal(profile.docsOnly, false, path);
+    assert.equal(profile.docsOrConfigOnly, false, path);
+    assert.equal(profile.dependencyOnly, true, path);
+  }
+  // Prose that merely mentions requirements or constraints stays documentation.
+  for (const path of ["SYSTEM_REQUIREMENTS.txt", "docs/system-requirements.txt", "docs/design-constraints.txt"]) {
+    assert.equal(classifyChange({ changedPaths: [path] }).docsOnly, true, path);
+  }
+});
+
+test("native build trees under build/ keep their review, and vendored archives count as dependencies", () => {
+  // zstd and lz4 keep their whole build system and single-file sources under build/.
+  for (const path of ["build/cmake/CMakeLists.txt", "build/meson/meson.build", "build/VS2019/libzstd.vcxproj",
+    "build/config/compiler/BUILD.gn", "cmake/opus.cmake", "Directory.Build.props"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).kinds, ["infra"], path);
+  }
+  assert.deepEqual(classifyChange({ changedPaths: ["build/single_file_libs/zstd.c"] }).kinds, ["code"]);
+  // So are the solutions, old projects, CMake templates, make fragments (lz4's compile
+  // recipe) and the scripts and resource files that tree runs or compiles.
+  for (const path of ["build/VS2010/zstd.sln", "build/VS2008/zstd/zstd.vcproj", "build/cmake/zstdConfig.cmake.in",
+    "build/make/multiconf.make", "build/single_file_libs/combine.sh", "build/meson/GetZstdLibraryVersion.py",
+    "build/VS_scripts/build.generic.cmd", "build/visual/generate_vs2015.cmd", "build/VS2010/libzstd-dll/libzstd-dll.rc",
+    "build/VS2022/build.bat", "build/windows/setup.ps1", "out/gen_version.py", "dist/package.sh"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).kinds, ["infra"], path);
+  }
+  for (const path of ["node_modules/x/CMakeLists.txt", "node_modules/x/build/a.sh", "dist/server.js", "build/index.js", "out/main.js"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).kinds, ["generated"], path);
+  }
+  for (const path of ["native/third_party/boost-1.87.0.zip", "3rdparty/zlib-1.3.1.tar.gz", "3rd_party/zlib.zip", "3rd-party/png.7z"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).kinds, ["config"], path);
+  }
+  assert.deepEqual(classifyChange({ changedPaths: ["assets/levels.zip"] }).kinds, ["asset"]);
+});
+
+test("native process entries and platform manifests are runtime surfaces, test runners are not", () => {
+  for (const path of ["native/relay/main.cpp", "native/presenter/platform/macos/macos_main.mm",
+    "native/program/platform/windows/windows_main.cpp", "src/WinMainEntry.cpp", "app/App.entitlements",
+    "app/Info.plist", "app/Info.plist.in", "app/app.manifest"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).runtimeSurfaces, ["entrypoint"], path);
+  }
+  for (const path of ["native/tests/main.cpp", "native/relay/hub.cpp", "src/maintenance.cpp"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).runtimeSurfaces, [], path);
+  }
+  // A class named after the app or a server component is not a process entry, and
+  // neither is a vendored or local test runner or an Xcode test bundle.
+  for (const path of ["native/presenter/app/presenter_app.cpp", "native/program/app/program_app.cpp", "src/http_server.cc",
+    "third_party/googletest/googletest/src/gtest_main.cc", "third_party/googletest/googlemock/src/gmock_main.cc",
+    "third_party/benchmark/src/benchmark_main.cc", "tools/unit_test_main.cc", "__tests__/main.cpp", "unittests/main.cpp",
+    "MyAppTests/Info.plist", "MyAppUITests/main.m"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).runtimeSurfaces, [], path);
+  }
+  for (const path of ["native/relay/server.cpp", "apps/contests/main.cpp", "tools/latest_main.cpp"]) {
+    assert.deepEqual(classifyChange({ changedPaths: [path] }).runtimeSurfaces, ["entrypoint"], path);
+  }
+  assert.equal(classifyChange({ changedPaths: ["native/relay/hub.cpp"] }).nativeSources, true);
+  assert.equal(classifyChange({ changedPaths: ["src/runner.mjs"] }).nativeSources, false);
+});
+
+test("path rules stay linear on long paths of repeated directories and names", () => {
+  // A rule spanning a directory and an extension, or two `[^/]*` around a name, backtracked
+  // quadratically: 256 KiB of `deps/x.zip/` took seconds.
+  for (const unit of ["build/a.sh/", "deps/x.zip/", "3rd_party/", "WinMain", "test_main.", "requirements.txt/", "spec/", ".anatomia/"]) {
+    // `x.jso` ends like a declaration file but is not one, so a spec rule reads to the end.
+    const path = unit.repeat(Math.floor(256 * 1024 / unit.length)) + (unit.endsWith("/") ? "x.jso" : "y");
+    const started = performance.now();
+    classifyChange({ changedPaths: [path] });
+    assert.ok(performance.now() - started < 500, unit);
+  }
 });

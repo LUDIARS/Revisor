@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "native": [
+    {
+      "file": "test/fixtures/praesidium-native/bounded_apis.c",
+      "standard": "c17",
+      "includes": ["src/praesidium/native/include"]
+    },
+    {
+      "file": "test/fixtures/praesidium-native/bounded_apis.cpp",
+      "standard": "c++20",
+      "includes": ["src/praesidium/native/include"]
+    }
+  ],
+  "web": []
+}
