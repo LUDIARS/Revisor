@@ -8,6 +8,8 @@
  *
  * Fail closed: once a PR touches C++, an unresolvable Anatomia, an unknown
  * changed set or an unreadable report is an `error` result, never a pass.
+ * The one exception is an Anatomia that answers "unknown subcommand" for
+ * `code-check`: the check does not exist there yet, so the row is `skipped`.
  *
  * SRP: one registered-check result for the C++ code checks.
  */
@@ -23,6 +25,18 @@ const SEVERITIES = new Set(["error", "warning", "info"]);
 
 function errorResult(reason, startedAt, now) {
   return { name: CPP_CODE_CHECK_NAME, status: "error", exitCode: 2, durationMs: now() - startedAt, reason };
+}
+
+// Anatomia's CLI answers a subcommand it does not have with this fixed line
+// (src/adapters/cli.ts) and a non-zero exit. Only that exact answer means the
+// check is not implemented yet; any other failure stays an error.
+const UNKNOWN_CODE_CHECK = /Unknown subcommand "code-check"/;
+export const CODE_CHECK_UNIMPLEMENTED_REASON = "Anatomia に code-check が未実装のため C++ code checks を省略";
+
+function codeCheckUnimplemented(result) {
+  return result.exitCode !== 0 && result.exitCode !== null
+    && UNKNOWN_CODE_CHECK.test(`${result.stderr ?? ""}
+${result.stdout ?? ""}`);
 }
 
 function validReport(report) {
@@ -105,6 +119,16 @@ export async function runCppCodeChecks(options, {
     env,
     timeoutMs: TIMEOUT_MS,
   });
+  if (codeCheckUnimplemented(result)) {
+    return {
+      name: CPP_CODE_CHECK_NAME,
+      status: "skipped",
+      exitCode: result.exitCode,
+      durationMs: now() - startedAt,
+      reason: CODE_CHECK_UNIMPLEMENTED_REASON,
+      advisory: CODE_CHECK_UNIMPLEMENTED_REASON,
+    };
+  }
   let report;
   try {
     report = result.exitCode === 0 ? JSON.parse(result.stdout) : null;
