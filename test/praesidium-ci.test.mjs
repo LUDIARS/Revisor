@@ -1,6 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runSecurePlannedTests } from "../src/praesidium-ci.mjs";
+import { scanRepository } from "../src/praesidium/scan.mjs";
+import { collectionError } from "../src/praesidium/collection-errors.mjs";
+
+test("collection reason codes reach preflight output without allowing tests to start", async () => {
+  const [result] = await runSecurePlannedTests({ worktreePath: "." }, {
+    scan: options => scanRepository({ ...options, collect: () => { throw collectionError("source.nul"); } }),
+    runTests: () => assert.fail("collection failure must block tests"),
+  });
+  assert.equal(result.status, "error");
+  assert.equal(result.exitCode, 2);
+  assert.deepEqual(JSON.parse(result.output.text), {
+    reason: "inspection incomplete: check repository files, limits and praesidium.json",
+    reasonCode: "source.nul", findings: [], checks: [],
+  });
+});
 
 test("mandatory security result precedes every registered/Augur execution", async () => {
   const events = [];

@@ -21,7 +21,8 @@ export async function runSecurePlannedTests(options, { scan = scanRepository, ch
     exitCode: status === "passed" ? 0 : status === "failed" ? 1 : 2,
     security: report, reason: status === "passed" ? undefined : "Praesidium blocked unsafe or unverified code" };
   if (status !== "passed") {
-    const text = JSON.stringify({ reason: report?.reason, findings: report?.findings, checks: report?.checks });
+    const text = JSON.stringify({ reason: report?.reason, reasonCode: report?.reasonCode,
+      findings: report?.findings, checks: report?.checks });
     result.output = { text: text.slice(0, 8000), truncated: text.length > 8000 };
   }
   await options.onCheckResult?.(result);

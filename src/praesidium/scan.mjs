@@ -5,6 +5,9 @@ import { containedFile, trackedSources } from "./files.mjs";
 import { sourceFindings } from "./rules.mjs";
 import { analyzeNative } from "./native.mjs";
 import { checkWebContracts } from "./web-contracts.mjs";
+import { collectionErrorCode } from "./collection-errors.mjs";
+import { contract } from '../contract-runtime.mjs'; /* augur-inject:import:3f83ecad */
+import augurContract_02bbc11b from '../../contracts/praesidium-input-reasons.contract.mjs'; /* augur-inject:contract-predicate:5bf42227 */
 
 function configuration(root) {
   if (!existsSync(join(root, "praesidium.json"))) return { native: [], web: [] };
@@ -41,10 +44,14 @@ export async function scanRepository({ root, collect = trackedSources, changedPa
         nativeUnits: native.filter(item => item.file).length, nativeScope: changed ? "changed" : "repository",
         webContracts: web.length, webRuntimeWiring: "not-verified", scope: "tracked and nonignored new source files; submodules and unsupported languages are not analyzed" },
       durationMs: Math.max(0, now() - started) };
-  } catch {
+  } catch (error) {
     // Never retain source text, compiler output or parser messages containing secrets.
+    const reasonCode = collectionErrorCode(error);
     return { tool: "Praesidium", version: 1, status: "error", findings: [], checks: [],
       reason: "inspection incomplete: check repository files, limits and praesidium.json",
+      ...(reasonCode ? { reasonCode } : {}),
       durationMs: Math.max(0, now() - started) };
   }
 }
+// @ts-expect-error augur-inject
+scanRepository = contract(scanRepository, { ...augurContract_02bbc11b, contractId: 'C-21', mode: 'observe', sample: 1, where: 'src/praesidium/scan.mjs:21', rule: 'contract-wrap', id: '02bbc11b' }); /* augur-inject:contract-wrap:02bbc11b */

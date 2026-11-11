@@ -217,6 +217,26 @@ separator as the JavaScript `\0` escape preserves the runtime key while making t
 text inspectable. The collector still rejects raw NUL bytes; a regression fixture checks
 both escaped and raw representations. Passing delegated review remains required.
 
+## RV-PRAESIDIUM-05: Safe collection failure reasons
+
+Actio reference: `actio:3aff905e-6387-40f2-939e-225bec1117cb`.
+Incomplete inspections retain `status: error`, empty findings/checks, and the existing
+generic `reason`. Only errors created at known collector rejection sites add `reasonCode`:
+`source.nul`, `source.invalid-utf8`, `source.size-limit` (per-file or aggregate),
+or `source.file-count-limit`. Codes never contain file paths, source text or exception messages.
+Read/Git/boundary/configuration errors and other unknown exceptions retain the generic reason
+without a code. Matching an exception message or a user-provided `code` property is insufficient.
+UTF-8 classification surrounds decoding only; file read errors are not mislabeled as encoding errors.
+All existing thresholds, rejection conditions, exit codes and fail-closed gates are unchanged.
+The CLI JSON and Revisor preflight output both retain this optional code for diagnosis.
+
+Contract: C-21 scanRepository(options): 収集失敗は error と空の所見を返し、理由は固定の一般文と既知の許可コードだけで機密情報を含めない。
+
+Regression plan (Augur plan: characterize current behavior): extend the already registered
+`test/praesidium-files.test.mjs` with real NUL/invalid UTF-8/oversize inputs and unknown/forged/hostile
+exceptions; preserve escaped-NUL acceptance and unsafe-boundary rejection. Local test execution
+is not authorized; execution and contract evidence are delegated to the registered Revisor suite.
+
 ## Melpomene replacement decision
 
 Ars-Musa inspected at `5b4ebe28ab7afe46968bf4f140f5fc965b5edb73`:

@@ -5,6 +5,8 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { changedSourcePaths, containedFile, trackedSources } from "../src/praesidium/files.mjs";
+import { scanRepository } from "../src/praesidium/scan.mjs";
+import { collectionError, collectionErrorCode } from "../src/praesidium/collection-errors.mjs";
 
 function repository(t) {
   const root = mkdtempSync(join(tmpdir(), "praesidium-files-"));
@@ -31,6 +33,44 @@ test("rejects non-text, oversized and invalid UTF-8 sources rather than truncati
   }
   assert.throws(() => containedFile(root, root));
   assert.throws(() => containedFile(root, ".."));
+});
+
+test("collection failures expose only fixed codes and remain fail-closed", async (t) => {
+  const root = repository(t);
+  const path = join(root, "private-source.js");
+  for (const [contents, reasonCode] of [
+    [Buffer.from("private source\0"), "source.nul"],
+    [Buffer.from([0xff]), "source.invalid-utf8"],
+    [Buffer.alloc(2 * 1024 * 1024 + 1, 65), "source.size-limit"],
+  ]) {
+    writeFileSync(path, contents);
+    const result = await scanRepository({ root, now: () => 0 });
+    assert.deepEqual(result, { tool: "Praesidium", version: 1, status: "error",
+      findings: [], checks: [], reason: "inspection incomplete: check repository files, limits and praesidium.json",
+      reasonCode, durationMs: 0 });
+    assert.ok(!JSON.stringify(result).includes(root));
+    assert.ok(!JSON.stringify(result).includes("private"));
+  }
+});
+
+test("unknown exceptions and forged codes stay redacted without reading their properties", async () => {
+  const hostile = new Proxy({}, { get() { throw new Error("must not inspect exception"); } });
+  for (const error of [new Error("non-text source: private source"),
+    { code: "source.nul", reasonCode: "source.nul", message: "private source" }, hostile, null, undefined, "source.nul"]) {
+    const result = await scanRepository({ root: ".", collect: () => { throw error; }, now: () => 0 });
+    assert.deepEqual(result, { tool: "Praesidium", version: 1, status: "error", findings: [], checks: [],
+      reason: "inspection incomplete: check repository files, limits and praesidium.json", durationMs: 0 });
+  }
+  for (const code of ["source.nul", "source.invalid-utf8", "source.size-limit", "source.file-count-limit"]) {
+    const error = collectionError(code);
+    error.message = "private source";
+    assert.equal(collectionErrorCode(error), code);
+    const result = await scanRepository({ root: ".", collect: () => { throw error; }, now: () => 0 });
+    assert.equal(result.status, "error");
+    assert.equal(result.reasonCode, code);
+    assert.ok(!JSON.stringify(result).includes("private"));
+  }
+  assert.throws(() => collectionError("private source"), /unknown collection error code/);
 });
 
 test("accepts an escaped NUL in text without accepting raw NUL bytes", (t) => {

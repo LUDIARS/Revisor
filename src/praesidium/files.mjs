@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { resolve, relative, isAbsolute } from "node:path";
+import { collectionError } from "./collection-errors.mjs";
 import { contract } from '../contract-runtime.mjs'; /* augur-inject:import:57936444 */
 import augurContract_76cae6ab from '../../contracts/changed-source-paths.contract.mjs'; /* augur-inject:contract-predicate:d1406037 */
 
@@ -20,15 +21,24 @@ export function trackedSources(root) {
     timeout: 10_000, maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
   });
   const paths = [...new Set(listing.split("\0").filter(Boolean))];
-  if (paths.length > 30_000) throw new Error("file count limit");
+  if (paths.length > 30_000) throw collectionError("source.file-count-limit");
   let bytes = 0;
   return paths.filter((file) => /\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|js|jsx|mjs|cjs|ts|tsx)$/i.test(file)).map((file) => {
     const path = containedFile(root, file);
     const size = lstatSync(path).size;
     bytes += size;
-    if (size > 2 * 1024 * 1024 || bytes > 32 * 1024 * 1024) throw new Error("source size limit");
-    const source = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path));
-    if (source.includes("\0")) throw new Error("non-text source");
+    if (size > 2 * 1024 * 1024 || bytes > 32 * 1024 * 1024) throw collectionError("source.size-limit");
+    const contents = readFileSync(path);
+    let source;
+    try {
+      source = new TextDecoder("utf-8", { fatal: true }).decode(contents);
+    } catch (error) {
+      if (error instanceof TypeError && error.code === "ERR_ENCODING_INVALID_ENCODED_DATA") {
+        throw collectionError("source.invalid-utf8");
+      }
+      throw error;
+    }
+    if (source.includes("\0")) throw collectionError("source.nul");
     return { file, source };
   });
 }
