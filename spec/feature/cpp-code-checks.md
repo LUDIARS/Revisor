@@ -29,11 +29,9 @@ Actio task: `actio:94697901-b4b9-4fd9-bc8b-cda614ab1b61` (Anatomia 側は `actio
 - **fail closed**: C++ の変更がある PR で、Anatomia を解決できない (`anatomiaFolder` 未設定を含む)・
   変更集合や書いた行を git から取れない・CLI が exit 0 で version 1 のレポートを返さない場合は
   `error` (exit 2) とし、通さない。理由にはローカルパスや例外文を残さない。
-- **Anatomia に `code-check` が未実装**: 解決した CLI が非 0 終了で
-  `Unknown subcommand "code-check"` (Anatomia の未知サブコマンド応答) を返した場合だけ、結果行を
-  `skipped` とし、`reason` / `advisory` を「Anatomia に code-check が未実装のため C++ code checks を省略」にする
-  (`testsPassed` は通る)。それ以外の失敗 (CLI 解決不可・git 不可・code-check があるのに不正レポート) は
-  上の fail closed のまま `error`。
+  Anatomia に `code-check` が無い (古い checkout の) ときも同じく `error`。省略 (skipped) にはしない
+  (2026-11-11 に暫定で入れた skipped は、neco「skip は良くない」で外した)。`anatomiaFolder` の checkout は
+  `code-check` を持つ版 (Anatomia `0ad6d73` 以降) に保ち、`dist/` を作り直しておくこと。
 - merge base が無いときは、リポジトリに C++ が無ければ対象外、あれば `error`。
 
 ## RV-CPP-CODE-CHECKS-02: PR が書いた行だけで判定する
@@ -64,4 +62,4 @@ writtenFindings: { error, warning, info }, outsideWrittenLines, parseErrors }, r
 
 `test/cpp-code-checks.test.mjs`: hunk 解析、C++ だけを標準入力で渡すこと、書いた行の error だけで
 落ちること、C++ 変更なしで行を作らないこと、Anatomia 解決失敗・git 失敗・不正レポートで
-`error` になること、code-check 未実装の Anatomia では `skipped` で、実装済みの不正レポートは `error` のままなこと、merge base 不明時の扱い、結果行の順序と後続テストの継続。
+`error` になること、merge base 不明時の扱い、結果行の順序と後続テストの継続。

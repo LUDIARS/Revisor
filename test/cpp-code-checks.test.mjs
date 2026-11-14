@@ -1,9 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isWrittenLine, parseWrittenLines, WHOLE_FILE } from "../src/cpp-code-checks/changed-lines.mjs";
-import { CODE_CHECK_UNIMPLEMENTED_REASON, CPP_CODE_CHECK_NAME, runCppCodeChecks } from "../src/cpp-code-checks/run.mjs";
+import { CPP_CODE_CHECK_NAME, runCppCodeChecks } from "../src/cpp-code-checks/run.mjs";
 import { runCppCheckedTests } from "../src/cpp-code-check-ci.mjs";
-import { testsPassed } from "../src/ci.mjs";
 
 const DIFF = [
   "diff --git a/src/a.cpp b/src/a.cpp",
@@ -104,30 +103,6 @@ test("fails closed when Anatomia, git or the report cannot be trusted", async ()
     const result = await runCppCodeChecks(base, deps({ run: fakeRun({ codeCheck }) }));
     assert.equal(result.status, "error", JSON.stringify(codeCheck));
     assert.equal(result.exitCode, 2);
-  }
-});
-
-test("an Anatomia without code-check skips the row; one with it still fails closed", async () => {
-  const unknown = {
-    exitCode: 1,
-    stdout: "",
-    stderr: 'anatomia: Unknown subcommand "code-check". Expected: verify | context | where | find',
-  };
-  const skipped = await runCppCodeChecks(base, deps({ run: fakeRun({ codeCheck: unknown }) }));
-  assert.equal(skipped.status, "skipped");
-  assert.equal(skipped.reason, CODE_CHECK_UNIMPLEMENTED_REASON);
-  assert.equal(skipped.advisory, CODE_CHECK_UNIMPLEMENTED_REASON);
-  assert.equal(testsPassed([skipped]), true);
-
-  for (const codeCheck of [
-    { exitCode: 1, stdout: "", stderr: 'Unknown subcommand "code-checks"' },
-    { exitCode: 1, stdout: "", stderr: "anatomia: crashed" },
-    { exitCode: 0, stdout: 'Unknown subcommand "code-check"', stderr: "" },
-    { exitCode: 0, stdout: JSON.stringify({ version: 2, findings: [] }), stderr: "" },
-  ]) {
-    const result = await runCppCodeChecks(base, deps({ run: fakeRun({ codeCheck }) }));
-    assert.equal(result.status, "error", JSON.stringify(codeCheck));
-    assert.equal(testsPassed([result]), false);
   }
 });
 
