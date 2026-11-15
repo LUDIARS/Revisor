@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
+  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -189,6 +190,7 @@ test("resolves executable global hooks without injected config and removes stale
     for (const key of Object.keys(process.env)) if (!(key in oldEnv)) delete process.env[key];
     Object.assign(process.env, oldEnv);
     removeFixture(state.directory);
+    rmSync(globalHooks, { recursive: true, force: true });
   }
 });
 

@@ -6,9 +6,14 @@ import {
   resolveRegisteredRepository,
 } from "../src/branch-push.mjs";
 
+// 開発機 (Windows) の配置を写したパス。 resolveRegisteredRepository は cwd を resolve
+// するので、 ドライブ名付きのままだと POSIX (CI) では相対パス扱いになり登録と一致しない。
+// 実行ホストで絶対パスになる形にする (Windows では従来どおり)。
+const ARS = process.platform === "win32" ? "E:/Document/Ars" : "/Document/Ars";
+
 const REPOSITORY = {
   repository: "LUDIARS/Product",
-  rootPath: "E:/Document/Ars/Product",
+  rootPath: `${ARS}/Product`,
   baseRef: "main",
 };
 
@@ -45,9 +50,9 @@ function recorder() {
 test("worktree の path からでも登録リポジトリへ辿り着く", async () => {
   const store = storeFor([REPOSITORY.rootPath]);
   // linked worktree では `--git-common-dir` が本体 checkout の .git を指す。
-  const git = runner({ commonDirectory: "E:/Document/Ars/Product/.git" });
+  const git = runner({ commonDirectory: `${ARS}/Product/.git` });
   const resolved = await resolveRegisteredRepository({
-    cwd: "E:/Document/Ars/.worktrees/Product-task",
+    cwd: `${ARS}/.worktrees/Product-task`,
     store,
     run: git.run,
   });
@@ -57,7 +62,7 @@ test("worktree の path からでも登録リポジトリへ辿り着く", async
 test("未登録リポジトリは送出しない", async () => {
   await assert.rejects(
     resolveRegisteredRepository({
-      cwd: "E:/Document/Ars/Unknown",
+      cwd: `${ARS}/Unknown`,
       store: storeFor([]),
       run: runner().run,
     }),

@@ -12,9 +12,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # @ludiars/one-shot is file:lib/lapilli/packages/one-shot, so the submodule
+      # must be present before npm can link it.
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - run: npm ci
       - run: npm test
+      # The syntax check is independent of the tests; run it even when they fail.
       - run: npm run check
+        if: ${{ !cancelled() }}
