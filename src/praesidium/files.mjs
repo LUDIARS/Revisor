@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, parse, resolve, relative, isAbsolute, sep } from "node:path";
 import { isPolicySource } from "./languages.mjs";
+import { collectionError } from "./collection-errors.mjs";
 import { contract } from '../contract-runtime.mjs'; /* augur-inject:import:57936444 */
 import augurContract_76cae6ab from '../../contracts/changed-source-paths.contract.mjs'; /* augur-inject:contract-predicate:d1406037 */
 
@@ -165,7 +166,7 @@ export function repositoryFiles(root, sources = undefined) {
 
 export function trackedSources(root) {
   const paths = repositoryFiles(root);
-  if (paths.length > 30_000) throw new Error("file count limit");
+  if (paths.length > 30_000) throw collectionError("source.file-count-limit");
   let bytes = 0;
   let inspected = 0;
   let configured;
@@ -177,14 +178,23 @@ export function trackedSources(root) {
     if (AMBIGUOUS_SOURCE.test(file)) {
       // Decided before the source limits: a `.m` left out is no source and counts only here.
       inspected += size;
-      if (size > AMBIGUOUS_FILE_LIMIT || inspected > AMBIGUOUS_TOTAL_LIMIT) throw new Error("source size limit");
+      if (size > AMBIGUOUS_FILE_LIMIT || inspected > AMBIGUOUS_TOTAL_LIMIT) throw collectionError("source.size-limit");
       raw = readFileSync(path);
       if (!mayHoldObjectiveC(raw) && !(configured ??= configuredUnitFiles(root)).has(file)) return [];
     }
     bytes += size;
-    if (size > 2 * 1024 * 1024 || bytes > 32 * 1024 * 1024) throw new Error("source size limit");
-    const source = new TextDecoder("utf-8", { fatal: true }).decode(raw ?? readFileSync(path));
-    if (source.includes("\0")) throw new Error("non-text source");
+    if (size > 2 * 1024 * 1024 || bytes > 32 * 1024 * 1024) throw collectionError("source.size-limit");
+    const contents = raw ?? readFileSync(path);
+    let source;
+    try {
+      source = new TextDecoder("utf-8", { fatal: true }).decode(contents);
+    } catch (error) {
+      if (error instanceof TypeError && error.code === "ERR_ENCODING_INVALID_ENCODED_DATA") {
+        throw collectionError("source.invalid-utf8");
+      }
+      throw error;
+    }
+    if (source.includes("\0")) throw collectionError("source.nul");
     return [{ file, source }];
   });
   listings.set(sources, paths);

@@ -27,7 +27,8 @@ export async function runSecurePlannedTests(options, { scan = scanRepository, ch
     result.advisory = `Praesidium: Objective-C/C++ の ${unanalyzed.length} ファイルは静的解析されていません (検査ホストに SDK が無いため字句規則だけを適用しました)`;
   }
   if (status !== "passed") {
-    const text = JSON.stringify({ reason: report?.reason, findings: report?.findings, checks: report?.checks });
+    const text = JSON.stringify({ reason: report?.reason, reasonCode: report?.reasonCode,
+      findings: report?.findings, checks: report?.checks });
     result.output = { text: text.slice(0, 8000), truncated: text.length > 8000 };
   }
   await options.onCheckResult?.(result);

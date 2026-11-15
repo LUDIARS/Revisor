@@ -1,4 +1,4 @@
-/* Praesidium analysis baseline (RV-PRAESIDIUM-05).
+/* Praesidium analysis baseline (RV-PRAESIDIUM-06).
  *
  * Revisor force-includes this header into every pass of every C/C++ unit Praesidium
  * analyzes. It is an analysis input, not a product header: product builds take their

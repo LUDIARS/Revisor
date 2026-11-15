@@ -79,7 +79,7 @@ request-to-HTML/shell assignments. These are **syntactic tripwires**, not AST/ta
 Comments and literals are masked; interpolation, aliases, macros, indirect calls, code generation,
 complex control flow and unsupported languages can evade them. No findings is not a safety proof.
 For native sources the force-included analysis baseline closes the alias/macro/indirect-call gap
-for analyzed units (RV-PRAESIDIUM-05).
+for analyzed units (RV-PRAESIDIUM-06).
 
 Native rules, each measured at zero findings across the 2,828 policy sources of ten local LUDIARS
 repositories (Odeum's 418 included). Every call rule also takes a parenthesized name,
@@ -807,8 +807,8 @@ deprecation into another attribute such as `[[nodiscard]]` or `annotate`; `__cpl
 nor the rejected API names (a `-Dsprintf=...` alias would rename them out of the baseline).
 `-D_WIN32`, `-Ddeprecated=nodiscard` and `-D__deprecated__=__annotate__` each passed a unit that
 reached `strcpy` or `sprintf` through a pointer or macro; a Windows build never passes `_WIN32`, which
-the compiler predefines. Other reserved names stay usable (`__STDC_FORMAT_MACROS`). The report names
-the offending unit and macro (both `praesidium.json` text, never source). Standard library
+the compiler predefines. Other reserved names stay usable (`__STDC_FORMAT_MACROS`). Local validation names the offending unit and macro. The public scan report uses the fixed
+incomplete-inspection reason (RV-PRAESIDIUM-05). Standard library
 hardening macros are the product build's own choice and are compiled as written, so a unit can mirror its build as AIFormat RULE_CODE_CPP
 §C2.10 requires (its `LUDIARS_CXX_HARDENING` presets emit `_GLIBCXX_ASSERTIONS`,
 `_LIBCPP_HARDENING_MODE=...` and `_MSVC_STL_HARDENING=1`). `_FORTIFY_SOURCE` is accepted and not
@@ -1011,7 +1011,7 @@ and read back, preserving all four prior cases and notification/workflow setting
 }
 ```
 
-The C/C++ hardening change (RV-PRAESIDIUM-05) also depends on the change classification that plans
+The C/C++ hardening change (RV-PRAESIDIUM-06) also depends on the change classification that plans
 the test stage (`CMakeLists.txt` and other build definitions must reach it) and on the reviewer's
 native brief. Their tests are not in this case, so the registration is to add
 `test/change-classification.test.mjs`, `test/review-plan.test.mjs` and
@@ -1033,7 +1033,7 @@ separator as the JavaScript `\0` escape preserves the runtime key while making t
 text inspectable. The collector still rejects raw NUL bytes; a regression fixture checks
 both escaped and raw representations. Passing delegated review remains required.
 
-## RV-PRAESIDIUM-05: Native analysis baseline and the AIFormat C++ conventions
+## RV-PRAESIDIUM-06: Native analysis baseline and the AIFormat C++ conventions
 
 Revisor ships one header, `src/praesidium/native/include/praesidium/baseline.h`. Native analysis
 force-includes the running Revisor's copy (`-include`, never the reviewed repository's) into every
@@ -1126,6 +1126,26 @@ AIFormat's proposals to Revisor (RULE_CODE_CPP "Revisor への提案"), as of th
 None of this makes C++ memory safe. Compiler and linker hardening (`_FORTIFY_SOURCE`, stack
 protector, control-flow integrity, ASLR), sanitizers and fuzzing remain the build's and the tests'
 responsibility.
+
+## RV-PRAESIDIUM-05: Safe collection failure reasons
+
+Actio reference: `actio:3aff905e-6387-40f2-939e-225bec1117cb`.
+Incomplete inspections retain `status: error`, empty findings/checks, and the existing
+generic `reason`. Only errors created at known collector rejection sites add `reasonCode`:
+`source.nul`, `source.invalid-utf8`, `source.size-limit` (per-file or aggregate),
+or `source.file-count-limit`. Codes never contain file paths, source text or exception messages.
+Read/Git/boundary/configuration errors and other unknown exceptions retain the generic reason
+without a code. Matching an exception message or a user-provided `code` property is insufficient.
+UTF-8 classification surrounds decoding only; file read errors are not mislabeled as encoding errors.
+All existing thresholds, rejection conditions, exit codes and fail-closed gates are unchanged.
+The CLI JSON and Revisor preflight output both retain this optional code for diagnosis.
+
+Contract: C-21 scanRepository(options): 収集失敗は error と空の所見を返し、理由は固定の一般文と既知の許可コードだけで機密情報を含めない。
+
+Regression plan (Augur plan: characterize current behavior): extend the already registered
+`test/praesidium-files.test.mjs` with real NUL/invalid UTF-8/oversize inputs and unknown/forged/hostile
+exceptions; preserve escaped-NUL acceptance and unsafe-boundary rejection. Local test execution
+is not authorized; execution and contract evidence are delegated to the registered Revisor suite.
 
 ## Melpomene replacement decision
 

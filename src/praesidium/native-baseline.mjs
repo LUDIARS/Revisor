@@ -1,4 +1,4 @@
-/** @implements RV-PRAESIDIUM-05 — the Revisor-owned baseline every analyzed C/C++ unit is compiled against. */
+/** @implements RV-PRAESIDIUM-06 — the Revisor-owned baseline every analyzed C/C++ unit is compiled against. */
 import { fileURLToPath } from "node:url";
 
 // Shipped with Revisor, never read from the reviewed repository: the running Revisor's

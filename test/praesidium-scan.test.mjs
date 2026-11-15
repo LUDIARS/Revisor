@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -589,6 +589,60 @@ async function analyzeWithClang(t, files, units, changed, findings = undefined) 
   return outcomes;
 }
 
+test("real clang: host package diagnostics stay separate from repository header diagnostics", { skip: !clangAvailable() && "clang++ is not installed" }, async (t) => {
+  const root = fixture(t), sdk = fixture(t);
+  mkdirSync(join(root, "include"));
+  const unit = { file: "use.cpp", standard: "c++20", includes: ["include"], packages: ["sdk"] };
+  const host = { includePackages: { sdk } };
+  const header = "inline int value() { int n; n = 1; n = 2; return n; }\n";
+  const use = "#include <sdk.hpp>\n#include <local.hpp>\nint read() { return value(); }\n";
+  writeFileSync(join(root, unit.file), use);
+
+  // Move the same defect across the include boundary. A compiler warning and an
+  // analyzer diagnostic take different passes, and clang exits zero for the latter.
+  for (const [body, stage] of [
+    ["inline int value(int unused = 0) { return 2; }\n", "-fsyntax-only"],
+    [header, "--analyze"],
+  ]) {
+    for (const owned of [false, true]) {
+      writeFileSync(join(sdk, "sdk.hpp"), owned ? "" : body);
+      writeFileSync(join(root, "include/local.hpp"), owned ? body : "");
+      const diagnostics = [];
+      const outcomes = await analyzeNative(root, [{ file: unit.file }], [unit], async (command, args, cwd) => {
+        const result = await analyzeProcess(command, args, cwd);
+        if (result.diagnostics) diagnostics.push(args[0]);
+        return result;
+      }, { host });
+      assert.deepEqual(diagnostics, owned ? [stage] : []);
+      assert.equal(outcomes[0].status, owned ? "failed" : "passed");
+    }
+  }
+});
+
+test("real clang: host packages preserve repository memory and undefined-behavior findings", { skip: !clangAvailable() && "clang++ is not installed" }, async (t) => {
+  const root = fixture(t), sdk = fixture(t);
+  mkdirSync(join(root, "include"));
+  writeFileSync(join(sdk, "sdk.hpp"), "inline void release(int* p) { delete p; }\ninline int denominator() { return 0; }\n");
+  const unit = { file: "use.cpp", standard: "c++20", includes: ["include"], packages: ["sdk"] };
+  const host = { includePackages: { sdk } };
+  for (const [where, body, checker] of [
+    ["use.cpp", "int* p = new int(5); release(p); return *p;", /cplusplus\.NewDelete/],
+    ["include/local.hpp", "return 1 / denominator();", /core\.DivideZero/],
+  ]) {
+    const inHeader = where !== unit.file;
+    writeFileSync(join(root, "include/local.hpp"), inHeader ? `inline int local() { ${body} }\n` : "");
+    writeFileSync(join(root, unit.file), `#include <sdk.hpp>\n#include <local.hpp>\nint read() { ${inHeader ? "return local();" : body} }\n`);
+    const outcomes = await analyzeNative(root, [{ file: unit.file }], [unit], undefined, { host });
+    assert.equal(outcomes[0].status, "failed", where);
+    const { command, passes } = nativeInvocation(root, unit, host);
+    // Assert the reason as well as the gate status; a parse error is not detection.
+    const result = spawnSync(command, passes.at(-1), { cwd: root, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    const finding = result.stderr.split("\n").find(line => line.includes("warning:") && checker.test(line));
+    assert.ok(finding?.replaceAll("\\", "/").includes(where), result.stderr);
+  }
+});
+
 test("real clang: compiler warnings fail a unit even though the analyzer runs with -w", { skip: !clangAvailable() && "clang++ is not installed" }, async (t) => {
   const unit = { file: "log.cpp", standard: "c++20" };
   const formatString = await analyzeWithClang(t, { "log.cpp": "#include <cstdio>\nvoid log(const char* m) { std::printf(m); }\n" }, [unit]);
@@ -665,12 +719,13 @@ test("a unit cannot define macros that disable its own analysis or rename reject
   }
   assert.throws(() => nativeInvocation(root, { file: "unit.cpp", standard: "c23" }), /standard/);
   assert.throws(() => nativeInvocation(root, { file: "unit.c", standard: "c++20" }));
-  // The report names the offending entry: a praesidium.json name, never source text.
+  // The local validator names the entry; the public scan report retains its fixed reason.
   writeFileSync(join(root, "praesidium.json"), JSON.stringify({ version: 1, web: [],
     native: [{ file: "unit.cpp", standard: "c++20", defines: ["__clang_analyzer__=0"] }] }));
   const scanned = await scanRepository({ root, collect: () => [{ file: "unit.cpp", source: "int main() {}" }], changedPaths: [] });
   assert.equal(scanned.status, "error");
-  assert.match(scanned.reason, /unit\.cpp: define __clang_analyzer__ overrides analysis controls/);
+  assert.equal(scanned.reason, "inspection incomplete: check repository files, limits and praesidium.json");
+  assert.equal(scanned.reasonCode, undefined);
 });
 
 test("an uppercase .C or .M unit is compiled in the language of its declared standard", async (t) => {

@@ -5,6 +5,15 @@
   "runtimeFile": "src/contract-runtime.mjs",
   "contracts": [
     {
+      "id": "C-21",
+      "criterion": "C-21 scanRepository(options): 収集失敗は error と空の所見を返し、理由は固定の一般文と既知の許可コードだけで機密情報を含めない",
+      "symbol": "scanRepository",
+      "file": "src/praesidium/scan.mjs",
+      "module": "contracts/praesidium-input-reasons.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
       "id": "C-1",
       "criterion": "C-1 collectRepositoryChanges(repository): 範囲内の commit と merged local PR、Markdown、無害化済み通知文を返す",
       "symbol": "collectRepositoryChanges",
