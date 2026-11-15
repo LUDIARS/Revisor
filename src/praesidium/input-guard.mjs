@@ -18,15 +18,19 @@ function segments(path) {
 
 function parseBody(text) {
   // JSON.parse discards duplicate keys. Reject them before that ambiguity is lost.
-  // Contracts deliberately accept only a flat object of scalar fields.
-  const keys = new Set();
+  // Contracts deliberately accept only a flat object of scalar fields. The text is parsed
+  // first: in valid JSON every string closes, so the key scan reads each character once,
+  // where an unclosed string (`"\"\"\"...`) had it rescan the rest from every quote.
+  const value = JSON.parse(text);
+  const keys = new Set(), colon = /\s*:/y;
   for (const token of text.matchAll(/"(?:\\[\s\S]|[^"\\])*"/g)) {
-    if (!/^\s*:/.test(text.slice(token.index + token[0].length))) continue;
+    colon.lastIndex = token.index + token[0].length;
+    if (!colon.test(text)) continue;
     const key = JSON.parse(token[0]);
     if (keys.has(key)) throw new Error("duplicate JSON property");
     keys.add(key);
   }
-  return JSON.parse(text);
+  return value;
 }
 
 export function compileRouteGuard(contract) {

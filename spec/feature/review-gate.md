@@ -231,11 +231,15 @@ plan`) として記録する。これは advisory であって pass ではない
   `.json` 固定で書いていたため漏れており、生成物 `*.jsonl` の追跡をやめる変更が
   code と分類されて、持ちようのない対象ドメインを要求されていた (Concordia#12)。
   変更種別分類でも同じ理由で `.jsonl` は `config`。
-- 例外: **依存マニフェスト** (`package.json`・`package-lock.json`・
-  `npm-shrinkwrap.json`・`yarn.lock`・`pnpm-lock.yaml`・`Cargo.toml`・`Cargo.lock`・
-  `pyproject.toml`・`requirements*.txt`・`poetry.lock`・`Gemfile`・`Gemfile.lock`・
-  `composer.json`・`composer.lock`・`go.mod`・`go.sum`) は拡張子上は設定に見えるが
-  この狭い docs/config-only 緩和の対象にしない (neco 2026-07-30)。これらの変更は
+- 例外: **依存マニフェスト**は拡張子上は設定に見えるが、この狭い docs/config-only 緩和の対象に
+  しない (neco 2026-07-30)。一覧は `src/change-classification.mjs` の `isDependencyManifest` で、
+  変更種別分類と同じもの: `package.json`・`package-lock.json`・`npm-shrinkwrap.json`・`yarn.lock`・
+  `pnpm-lock.yaml` (`.yml` も)・`Cargo.toml`・`Cargo.lock`・`pyproject.toml`・`poetry.lock`・
+  `Gemfile`・`Gemfile.lock`・`composer.json`・`composer.lock`・`go.mod`・`go.sum`・`vcpkg.json`・
+  `vcpkg-configuration.json`・`conanfile.txt`・`conan.lock`、pip の `requirements*.txt` /
+  `constraints*.txt` (接頭辞 `test-` / `tests-` / `dev-` / `doc-` / `docs-` / `build-` / `ci-` /
+  `lint-` (`_` 区切りも) 付きを含む) と `requirements/` ディレクトリ直下の `*.txt` (その下の
+  サブディレクトリは含まない)。これらの変更は
   第三者コードをビルドへ持ち込む変更であり、他のリスク信号を保つべき変更種別だから。
   docs と組み合わせても docs/config-only にはならない。ただし application domain の
   要否は下記の非コード変更ルールで別に判定し、依存マニフェストだけなら要求しない。

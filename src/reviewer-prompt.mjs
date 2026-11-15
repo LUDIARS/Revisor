@@ -68,8 +68,12 @@ function runtimeCheckInstruction() {
   ].join(" ");
 }
 
-function securityInstruction() {
-  return "Perform a vulnerability review: injection, authentication and authorization gaps, unsafe deserialization, path traversal, command execution, unvalidated redirects, and dependency risk introduced by this diff.";
+function securityInstruction(plan) {
+  const general = "Perform a vulnerability review: injection, authentication and authorization gaps, unsafe deserialization, path traversal, command execution, unvalidated redirects, and dependency risk introduced by this diff.";
+  if (plan?.changeProfile?.nativeSources !== true) return general;
+  // Praesidium's analyzer cannot follow lengths that arrive at run time, so for C/C++
+  // the reviewer is the only stage that reads these with intent.
+  return `${general} The diff changes C, C++ or Objective-C sources, so also review memory safety: out-of-bounds access and size arithmetic on lengths that come from input, integer overflow, signed/unsigned and narrowing conversions, use-after-free and dangling string_view, span, iterators or references, uninitialized reads, format strings, unchecked results of C and OS APIs, and data races.`;
 }
 
 // Information-leakage review is unconditional. It is the reason this workflow
@@ -111,7 +115,7 @@ export function buildReviewerPrompt({
     request.riskReassessment === true
       ? "This is the single high-risk repair attempt. Fix actionable causes within this PR; do not weaken tests, gates, or scoring to reduce the number. Report remaining risks. Prior evidence: " + JSON.stringify(request.riskReassessmentContext ?? {})
       : null,
-    stageEnabled(plan, "security_review") ? securityInstruction() : null,
+    stageEnabled(plan, "security_review") ? securityInstruction(plan) : null,
     leakageInstruction(leakage),
     "Preserve existing user changes and keep edits scoped to this PR.",
     `Anatomia temporary analysis (may be truncated):\n${JSON.stringify(analysis, null, 2).slice(0, 80_000)}`,

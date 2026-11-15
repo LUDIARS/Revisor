@@ -1,8 +1,45 @@
+import { isNativeSource } from "./praesidium/languages.mjs";
+
 // One place that decides "what kind of change is this", so the review plan, the
 // merge-risk score, and the runtime-verification judgement all reason about the
 // same profile instead of each re-deriving it from raw paths.
 
 const DOC_FILE = /\.(md|markdown|mdx|txt|adoc|rst)$/i;
+
+// C/C++ build definitions. They decide what is compiled, with which flags, and which
+// sources are downloaded and run at configure time (FetchContent, ExternalProject,
+// execute_process), so they are build code (`infra`, like a Makefile). Two traps put
+// them out of review: `CMakeLists.txt` and `meson_options.txt` end in `.txt`, which
+// DOC_FILE took for prose (a PR touching only them skipped the vulnerability pass and
+// the registered tests, Praesidium preflight included), and libraries such as zstd and
+// lz4 keep their whole build system under a tracked `build/`, which the generated rule
+// took for output. Vendored copies under node_modules stay generated.
+const BUILD_DEFINITION =
+  /^(?!(?:.*\/)?node_modules\/)(?:.*\/)?(?:CMakeLists\.txt|[^/]+\.cmake(?:\.in)?|meson\.build|meson_options\.txt|meson\.options|[^/]+\.(?:vcxproj|vcproj|sln|props|targets|gn|gni|bzl|mk|make)|BUILD(?:\.bazel)?|MODULE\.bazel|WORKSPACE(?:\.bazel)?|xmake\.lua|GNUmakefile|Makefile)$/i;
+// Rules that need a directory and an extension test them separately: one expression
+// spanning both backtracks quadratically over a long path of repeated directory names.
+const NODE_MODULES = /(?:^|\/)node_modules\//i;
+// The scripts such a tracked build tree runs to build or amalgamate the shipped library
+// (zstd's build/single_file_libs/combine.sh, meson's GetZstdLibraryVersion.py, lz4's
+// build/visual/*.cmd) and the resource scripts compiled into it.
+const BUILD_TREE = /(?:^|\/)(?:build|out|dist)\//i;
+const BUILD_SCRIPT = /[^/]\.(?:sh|bat|cmd|ps1|py|rc)$/i;
+const BUILD_TREE_SCRIPT = { test: (path) => BUILD_SCRIPT.test(path) && BUILD_TREE.test(path) && !NODE_MODULES.test(path) };
+// Dependency manifests whose `.txt` name made DOC_FILE take them for prose: pip
+// requirements and constraints, also with the usual prefixes (`test-requirements.txt`)
+// or split under `requirements/`, and Conan's. A prose name such as
+// `system-requirements.txt` stays documentation.
+const MANIFEST_TEXT =
+  /(?:^|\/)(?:(?:(?:test|tests|dev|doc|docs|build|ci|lint)[-_])?(?:requirements|constraints)[^/]*\.txt|requirements\/[^/]+\.txt|conanfile\.txt)$/i;
+// A dependency archive kept in the repository (FetchContent URL to a local zip, a
+// prebuilt library) changes shipped code like a manifest bump, not like an image.
+const VENDOR_DIRECTORY = /(?:^|\/)(?:(?:third|3rd)[_-]?party|vendor|external|extern|deps)\//i;
+const ARCHIVE = /\.(?:zip|tar|gz|tgz|xz|bz2|7z)$/i;
+const VENDORED_ARCHIVE = { test: (path) => ARCHIVE.test(path) && VENDOR_DIRECTORY.test(path) };
+
+function isDocumentationFile(path) {
+  return DOC_FILE.test(path) && !BUILD_DEFINITION.test(path) && !MANIFEST_TEXT.test(path);
+}
 
 // Settings text that carries no domain of its own. Deliberately narrower than the
 // `config` change kind below: this list decides a gate relaxation, so it names the
@@ -22,7 +59,9 @@ const CONFIG_FILE =
 // the narrow docs/config relaxation and keep its other risk signals. The broader
 // non-code policy below still avoids inventing an application domain for them.
 const DEPENDENCY_MANIFEST =
-  /(?:^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|Cargo\.(?:toml|lock)|poetry\.lock|pyproject\.toml|requirements[^/]*\.txt|Gemfile(?:\.lock)?|composer\.(?:json|lock)|go\.(?:mod|sum))$/i;
+  /(?:^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|Cargo\.(?:toml|lock)|poetry\.lock|pyproject\.toml|Gemfile(?:\.lock)?|composer\.(?:json|lock)|go\.(?:mod|sum)|vcpkg\.json|vcpkg-configuration\.json|conan\.lock)$/i;
+// The `.txt` manifests are one list, so classification and these checks cannot drift.
+const isDependencyManifest = (path) => DEPENDENCY_MANIFEST.test(path) || MANIFEST_TEXT.test(path);
 
 // CI pipelines and compose files are YAML, so CONFIG_FILE matches them, but they
 // are not settings text either: they describe what gets executed, with what
@@ -31,20 +70,29 @@ const DEPENDENCY_MANIFEST =
 // below already encodes by classifying a workflow as `infra` before `config`.
 // Without this the relaxation would be stricter about `Dockerfile` (no config
 // extension, so never relaxed) than about the pipeline that runs it.
+//
+// CMake presets are JSON for the same reason: they pick the toolchain file that CMake
+// executes and the cache variables that set compiler and linker flags, so a preset can
+// switch off the hardening a C/C++ product builds with.
 const EXECUTABLE_CONFIG =
-  /(?:^|\/)(?:\.github\/workflows|\.circleci|\.gitlab)\/|(?:^|\/)(?:\.gitlab-ci|docker-compose[^/]*|azure-pipelines[^/]*|cloudbuild)\.ya?ml$/i;
+  /(?:^|\/)(?:\.github\/workflows|\.circleci|\.gitlab)\/|(?:^|\/)(?:\.gitlab-ci|docker-compose[^/]*|azure-pipelines[^/]*|cloudbuild)\.ya?ml$|(?:^|\/)CMake(?:User)?Presets\.json$/i;
 
 // Declarative files under `spec/` and `.anatomia/` (domain definitions,
 // ontology, layers, spec indexes). Only data formats: an `.mjs` domain def or
-// a script under `spec/` still runs code and stays `code`.
-const SPEC_DECLARATION_FILE =
-  /(?:^|\/)(?:spec|\.anatomia)\/.*\.(?:json|jsonl|jsonc|json5|ya?ml|toml)$/i;
+// a script under `spec/` still runs code and stays `code`. The directory and the
+// extension are tested apart: one pattern spanning both ran `.*` to the end from every
+// `spec/` and backtracked, quadratic in the path length.
+const SPEC_DIRECTORY = /(?:^|\/)(?:spec|\.anatomia)\//i;
+const DECLARATION_EXTENSION = /\.(?:json|jsonl|jsonc|json5|ya?ml|toml)$/i;
+const SPEC_DECLARATION_FILE = { test: (path) => SPEC_DIRECTORY.test(path) && DECLARATION_EXTENSION.test(path) };
 
 // Evaluated in order: the first match wins. Order matters more than the
 // individual patterns — a lock file is generated before it is config, a
 // workflow file is infrastructure before it is config, and a test file is a
 // test before its extension makes it code.
 const KIND_RULES = [
+  { kind: "infra", pattern: BUILD_DEFINITION },
+  { kind: "infra", pattern: BUILD_TREE_SCRIPT },
   {
     kind: "generated",
     // `report/` だけはリポジトリ直下に固定する。 他の生成物ディレクトリと違って
@@ -59,6 +107,7 @@ const KIND_RULES = [
     pattern:
       /(?:^|\/)(?:test|tests|__tests__|__mocks__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:py|go|rb)$/i,
   },
+  { kind: "config", pattern: MANIFEST_TEXT },
   { kind: "docs", pattern: DOC_FILE },
   // Declarative spec files (domain definitions, ontology, spec indexes) are
   // documentation of the product, not settings that change what runs. Before
@@ -71,6 +120,7 @@ const KIND_RULES = [
     pattern:
       /(?:^|\/)(?:\.github\/workflows|migrations?|deploy|infra|terraform|charts?)\/|(?:^|\/)(?:Dockerfile|docker-compose[^/]*\.ya?ml|Makefile)$|\.(?:tf|tfvars|sql|ps1|sh|bat|cmd)$/i,
   },
+  { kind: "config", pattern: VENDORED_ARCHIVE },
   {
     kind: "asset",
     pattern:
@@ -96,6 +146,18 @@ const RUNTIME_SURFACE_RULES = [
       /(?:^|\/)(?:server|main|app|cli|index|bootstrap|worker-entry)\.[cm]?[jt]sx?$|(?:^|\/)bin\//i,
   },
   {
+    // Native process entries (`main.cpp`, `macos_main.mm`, `WinMain`) and the platform
+    // manifests that grant a process its entitlements or elevation. Only `main` takes a
+    // platform prefix: `presenter_app.cpp` implements a class and `http_server.cc` a
+    // component. Test runners are not the product's entry: a `main.cpp` under a test
+    // directory, `gtest_main.cc`-style runners, and an Xcode test bundle (`MyAppTests/`,
+    // matched case-sensitively so `contests/` stays a product path).
+    surface: "entrypoint",
+    pattern:
+      /^(?!(?:.*\/)?(?:test|tests|__tests__|__mocks__|unittests?|testing)\/)(?:.*\/)?(?:(?:(?!(?:[^/]*_)?(?:test|unittest|gtest|gmock|benchmark|catch|doctest)_main\.)[^/]*_)?main\.(?:c|cc|cpp|cxx|c\+\+|m|mm)|(?:server|app|cli|bootstrap)\.(?:c|cc|cpp|cxx|c\+\+|m|mm)|(?=[^/]*(?:WinMain|DllMain))[^/]*\.(?:c|cc|cpp|cxx)|[^/]+\.(?:entitlements|manifest)|Info\.plist(?:\.in)?)$/i,
+    exclude: /(?:^|\/)[^/]+Tests\//,
+  },
+  {
     surface: "ui",
     pattern:
       /(?:^|\/)ui-[^/]+\.[cm]?[jt]sx?$|(?:^|\/)(?:ui|views?|pages?|components?|screens?)\/|\.(?:html|css|scss|vue|svelte)$/i,
@@ -113,15 +175,18 @@ export const CHANGE_KINDS = ["code", "docs", "test", "config", "infra", "asset",
 
 export function classifyPath(path) {
   for (const rule of KIND_RULES) {
+    // A tracked C/C++ source under build/, out/ or dist/ is a library's source tree
+    // (zstd's build/single_file_libs), not output: it keeps the code review.
+    if (rule.kind === "generated" && isNativeSource(path) && !/(?:^|\/)node_modules\//.test(path)) continue;
     if (rule.pattern.test(path)) return rule.kind;
   }
   return "code";
 }
 
 function runtimeSurfacesOf(path) {
-  return RUNTIME_SURFACE_RULES
-    .filter((rule) => rule.pattern.test(path))
-    .map((rule) => rule.surface);
+  return [...new Set(RUNTIME_SURFACE_RULES
+    .filter((rule) => rule.pattern.test(path) && !rule.exclude?.test(path))
+    .map((rule) => rule.surface))];
 }
 
 // Counts only body lines: `+++`/`---` are file headers, not content, and a diff
@@ -145,7 +210,7 @@ export function diffLineStats(unifiedDiff) {
 
 export function isDocsOnlyChange(changedPaths) {
   return changedPaths.length > 0 && changedPaths.every((path) =>
-    DOC_FILE.test(path) || classifyPath(path) === "docs");
+    isDocumentationFile(path) || classifyPath(path) === "docs");
 }
 
 // Documentation and settings files have no code target domain to point at, so a
@@ -157,9 +222,9 @@ export function isDocsOnlyChange(changedPaths) {
 export function isDocsOrConfigOnlyChange(changedPaths) {
   return changedPaths.length > 0
     && changedPaths.every((path) =>
-      !DEPENDENCY_MANIFEST.test(path)
+      !isDependencyManifest(path)
       && !EXECUTABLE_CONFIG.test(path)
-      && (DOC_FILE.test(path) || CONFIG_FILE.test(path)));
+      && (isDocumentationFile(path) || CONFIG_FILE.test(path)));
 }
 
 /**
@@ -179,7 +244,7 @@ export function isDocsOrConfigOnlyChange(changedPaths) {
 export function isDependencyOnlyChange(changedPaths, gitlinkPaths = []) {
   const gitlinks = new Set(gitlinkPaths);
   return changedPaths.length > 0
-    && changedPaths.every((path) => DEPENDENCY_MANIFEST.test(path) || gitlinks.has(path));
+    && changedPaths.every((path) => isDependencyManifest(path) || gitlinks.has(path));
 }
 
 export function classifyChange({ changedPaths = [], unifiedDiff = "", gitlinkPaths = [] } = {}) {
@@ -216,6 +281,8 @@ export function classifyChange({ changedPaths = [], unifiedDiff = "", gitlinkPat
     // ownership that the product does not have.
     codeDomainRequired: (counts.code ?? 0) > 0,
     touchesSpec: changedPaths.some((path) => SPEC_FILE.test(path)),
+    // C, C++ or Objective-C sources: the reviewer then also gets the memory-safety brief.
+    nativeSources: changedPaths.some((path) => isNativeSource(path)),
     touchesTests: counts.test > 0,
     // A docs-only change carries no runtime surface even when a documentation
     // file happens to live under a `ui/` folder: nothing executable moved.

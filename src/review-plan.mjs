@@ -154,6 +154,7 @@ export function planReview({ classification, testCases = [] }) {
       codeDomainRequired: classification.codeDomainRequired !== false,
       dependencyOnly: classification.dependencyOnly,
       touchesSpec: classification.touchesSpec,
+      nativeSources: classification.nativeSources === true,
       runtimeSurfaces: classification.runtimeSurfaces,
     },
     review,

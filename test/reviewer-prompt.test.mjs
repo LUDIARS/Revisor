@@ -73,3 +73,17 @@ test("a docs/config-only change keeps its wording over the generic non-code one"
   assert.match(instruction, /documentation and configuration files only/);
   assert.doesNotMatch(instruction, /no production code/);
 });
+
+test("a C/C++ change asks the reviewer for memory safety as well as the general vulnerability pass", async () => {
+  const { buildReviewerPrompt } = await import("../src/reviewer-prompt.mjs");
+  const { classifyChange } = await import("../src/change-classification.mjs");
+  const { planReview } = await import("../src/review-plan.mjs");
+  const prompt = (paths) => buildReviewerPrompt({
+    request: { repository: "LUDIARS/Odeum", number: 1, baseRef: "main" },
+    analysis: analysis({ anchors: [], hasTargetDomain: true }), leakage: {}, unifiedDiff: "",
+    plan: planReview({ classification: classifyChange({ changedPaths: paths }), testCases: [] }),
+  });
+  assert.match(prompt(["native/relay/http_query.cpp"]), /memory safety: out-of-bounds/);
+  assert.match(prompt(["native/relay/http_query.cpp"]), /Perform a vulnerability review/);
+  assert.doesNotMatch(prompt(["src/server.mjs"]), /memory safety/);
+});
