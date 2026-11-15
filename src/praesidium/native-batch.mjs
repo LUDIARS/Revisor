@@ -21,14 +21,20 @@ export async function analyzeNativeBatch(invocations, execute, now = Date.now) {
       const index = next++;
       const invocation = invocations[index];
       let status = "passed";
+      let evidence;
+      const capture = async (...args) => {
+        const result = await execute(...args);
+        if (!result?.ok || result.diagnostics) evidence = result;
+        return result;
+      };
       for (const [pass, args] of invocation.passes.entries()) {
         if (overBudget()) {
           outcomes[index] = { rule: "native.analysis-budget", file: invocation.file, status: "error" };
           break;
         }
-        status = await passStatus(invocation, args, execute);
+        status = await passStatus(invocation, args, capture);
         if (status === "failed" && invocation.probe && pass === 1 && invocation.syntax) {
-          status = await syntaxVerdict(invocation, execute, overBudget);
+          status = await syntaxVerdict(invocation, capture, overBudget);
         }
         if (status === "budget") outcomes[index] = { rule: "native.analysis-budget", file: invocation.file, status: "error" };
         if ((status === "failed" && invocation.probe && pass === 0) || status === "skipped") {
@@ -37,6 +43,10 @@ export async function analyzeNativeBatch(invocations, execute, now = Date.now) {
         if (status !== "passed") break;
       }
       outcomes[index] ??= { rule: "native.clang-analysis", file: invocation.file, status };
+      if (["failed", "error"].includes(outcomes[index].status)) {
+        if (evidence?.reason) outcomes[index].reason = evidence.reason;
+        if (evidence?.output) outcomes[index].output = evidence.output;
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(NATIVE_WORKERS, invocations.length) }, () => worker()));

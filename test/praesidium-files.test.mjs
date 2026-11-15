@@ -1,4 +1,6 @@
 import test from "node:test";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync, symlinkSync, truncateSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -37,14 +39,32 @@ test("rejects non-text, oversized and invalid UTF-8 sources rather than truncati
 
 test("collection resolves each directory once, however deep its sources lie, and still rejects links", (t) => {
   const root = repository(t);
+  // This fixture intentionally exceeds MAX_PATH; configure only its private Git repository.
+  execFileSync("git", ["config", "core.longpaths", "true"], {cwd: root, windowsHide: true});
   // 300 headers at the end of a chain 1,000 directories deep: resolving each whole took
   // about 7 s, the system reading the chain again at each of its components.
   const chain = Array(1_000).fill("d").join("/");
   mkdirSync(join(root, chain), { recursive: true });
   for (let index = 0; index < 300; index++) writeFileSync(join(root, chain, `h${index}.h`), "int x;\n");
-  const started = performance.now();
-  assert.equal(trackedSources(root).length, 300);
-  assert.ok(performance.now() - started < 1_500, `${performance.now() - started} ms`);
+  // Count filesystem work rather than machine-dependent wall time. Resolving
+  // every whole deep path again must fail even on a fast machine.
+  const originalStat = fs.lstatSync, originalReal = fs.realpathSync.native;
+  let filesystemWork = 0;
+  const statMock = t.mock.method(fs, "lstatSync", (...args) => {
+    filesystemWork++;
+    return originalStat(...args);
+  });
+  const realMock = t.mock.method(fs.realpathSync, "native", (...args) => {
+    filesystemWork += String(args[0]).split(/[\\/]/).length;
+    return originalReal(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.equal(trackedSources(root).length, 300);
+    assert.ok(filesystemWork < 4_000, `${filesystemWork} filesystem path steps`);
+  } finally {
+    statMock.mock.restore(); realMock.mock.restore(); syncBuiltinESMExports();
+  }
   // Resolved once each or by the system, a file whose real path leaves the root, or that is
   // a link, is no repository file.
   if (process.platform !== "win32") {

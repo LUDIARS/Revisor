@@ -11,6 +11,7 @@ import { NATIVE_REJECTED_APIS } from "./rules.mjs";
 import { maskNativeCode } from "./native-lexer.mjs";
 import { nativePackageIncludes, readNativeHost } from "./native-host.mjs";
 import { analyzeNativeBatch } from "./native-batch.mjs";
+import { nativeProcessResult } from "./native-process-result.mjs";
 import { NATIVE_COMPILER_TIMEOUT_MS } from "./native-limits.mjs";
 import { EXPANSION_LIMIT, expandedSuppressions, expansionLexing, holdsObjectiveC } from "./native-expansion.mjs";
 import { DEPENDENCY_TARGET, dependencyFindings, readDependencyList, repositoryFile } from "./native-dependencies.mjs";
@@ -40,7 +41,8 @@ export function analyzeProcess(command, args, cwd) {
       timeout: NATIVE_COMPILER_TIMEOUT_MS, maxBuffer: preprocessed ? EXPANSION_LIMIT : 2 * 1024 * 1024 }, (error, stdout, stderr) => {
       const output = preprocessed ? stderr : `${stdout}\n${stderr}`;
       const exitCode = typeof error?.code === "number" && !COMPILER_CRASH.test(output) ? error.code : error ? null : 0;
-      const result = { ok: !error, exitCode, diagnostics: /\b(?:warning|error):/.test(output) };
+      const result = nativeProcessResult(error, preprocessed ? "" : stdout, stderr);
+      result.exitCode = exitCode;
       // A pass that passed must say what it read; if it cannot, the inspection is incomplete.
       // clang also lists what a failing pass read, which then only adds findings.
       const list = args.indexOf("-MF");
