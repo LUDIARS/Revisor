@@ -900,8 +900,11 @@ test("a passing diagnostics pass reports what it read, and one that cannot is in
   // A failing pass's list only adds findings; without one it stays a failure.
   const failing = join(root, "failing-listing-clang");
   writeFileSync(failing, '#!/bin/sh\nprintf \'praesidium: a.cpp inc/b.txt\\n\' > "$2"\necho "a.cpp:1:1: error: x" >&2\nexit 1\n', { mode: 0o755 });
-  assert.deepEqual(await analyzeProcess(failing, ["-MF", join(root, "failed.d")], root),
-    { ok: false, exitCode: 1, diagnostics: true, dependencies: ["a.cpp", "inc/b.txt"] });
+  // It also keeps the failure's reason and its bounded output (spec: failed native checks retain both).
+  const { output, ...failed } = await analyzeProcess(failing, ["-MF", join(root, "failed.d")], root);
+  assert.deepEqual(failed,
+    { ok: false, exitCode: 1, diagnostics: true, reason: "compiler-failed", dependencies: ["a.cpp", "inc/b.txt"] });
+  assert.match(output.text, /a\.cpp:1:1: error: x/);
   const failingSilent = join(root, "failing-silent-clang");
   writeFileSync(failingSilent, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   assert.equal((await analyzeProcess(failingSilent, ["-MF", join(root, "none.d")], root)).exitCode, 1);
@@ -2225,7 +2228,9 @@ test("a changed fragment some source includes needs a configured unit; other .in
     writeFileSync(join(levelled, "a\\q/t.c"), "int x;\n");
     const compiled = [];
     await assert.rejects(analyzeNative(levelled, [{ file: "a\\q/t.c", source: '#include "../data.txt"\n' }], [{ file: "a\\q/t.c", standard: "c17" }],
-      async (_command, args) => { compiled.push(relative(levelled, args.at(-1))); return { ok: true, exitCode: 0 }; }, { host: {}, changed: new Set(["data.txt"]) }),
+      // The directory name itself holds the backslash here, so compare the native path:
+      // `relative` turns every backslash into a separator.
+      async (_command, args) => { compiled.push(nativeRelative(levelled, args.at(-1))); return { ok: true, exitCode: 0 }; }, { host: {}, changed: new Set(["data.txt"]) }),
     /backslash in a repository path/);
     assert.deepEqual([...new Set(compiled)], ["a\\q/t.c"]);
   }
