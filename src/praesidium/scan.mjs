@@ -56,6 +56,8 @@ export async function scanRepository({ root, collect = trackedSources, changedPa
       coverage: { sourceFiles: sources.length, policyInspectedFiles: inspectedFiles,
         findingsLimited: findings.length >= 1000 || findings.some(item => item.rule === "inspection.finding-limit"),
         nativeUnits: native.filter(item => item.file).length, nativeScope: changed ? "changed" : "repository",
+        // Analyzer reports that end inside host packages: recorded on their checks, not blocking.
+        nativeHostReports: native.reduce((total, item) => total + (item.status === "passed" ? item.hostReports?.length ?? 0 : 0), 0),
         // Objective-C/C++ the host was not configured to compile: policy-scanned, never analyzed.
         nativeNotAnalyzed: [...unanalyzedPlatformUnits(sources, config.native, changed), ...notAnalyzed],
         webContracts: web.length, webRuntimeWiring: "not-verified", scope: "tracked and nonignored new source files; submodules and unsupported languages are not analyzed" },

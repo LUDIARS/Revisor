@@ -13,6 +13,8 @@ import { nativePackageIncludes, readNativeHost } from "./native-host.mjs";
 import { analyzeNativeBatch } from "./native-batch.mjs";
 import { nativeProcessResult } from "./native-process-result.mjs";
 import { NATIVE_COMPILER_TIMEOUT_MS } from "./native-limits.mjs";
+import { hostAnalyzerReports, hostDirectories } from "./native-host-reports.mjs";
+import { lineDirectiveFiles } from "./native-line-directives.mjs";
 import { EXPANSION_LIMIT, expandedSuppressions, expansionLexing, holdsObjectiveC } from "./native-expansion.mjs";
 import { DEPENDENCY_TARGET, dependencyFindings, readDependencyList, repositoryFile } from "./native-dependencies.mjs";
 export { dependencyList } from "./native-dependencies.mjs";
@@ -55,10 +57,25 @@ export function analyzeProcess(command, args, cwd) {
           result.diagnostics ||= result.suppressions.length > 0;
         }
         if (probe && result.ok) result.diagnostics ||= holdsObjectiveC(stdout, expansionLexing(args));
+        if (args.includes("--analyze") && result.ok && result.diagnostics) hostOnly(result, output, cwd, args);
       } catch { done({ ok: false, exitCode: null }); return; }
       done(result);
     });
   });
+}
+
+// An analyzer pass whose every report ends, and mostly runs, inside a host package passes
+// with those reports recorded (`hostReports`): a false positive inside a trusted library
+// (Boost.Asio's coroutine machinery) is not the reviewed change's, and the change cannot
+// silence it, because suppression stays rejected (rules.mjs). analyzeNative still fails
+// the file when a repository file it read could relocate a report (`#line`).
+function hostOnly(result, output, cwd, args) {
+  const split = hostAnalyzerReports(output, cwd, hostDirectories(args));
+  if (!split || split.blocking > 0) return;
+  result.diagnostics = false;
+  result.hostReports = split.advisories;
+  delete result.reason;
+  delete result.output;
 }
 
 const UNIT_KEYS = ["file", "standard", "includes", "defines", "packages"];
@@ -190,7 +207,9 @@ export function nativeInvocation(root, unit, host = {}, header = null, options =
   }
   for (const define of unit.defines ?? []) if (!IGNORED_DEFINE.test(define)) shared.push(`-D${define}`);
   // Host libraries are trusted toolchain inputs like SDK headers: their own warnings are
-  // not the reviewed change's, while analyzer reports reached from repository code remain.
+  // not the reviewed change's. Analyzer reports that end in repository code, or reach a
+  // host header mostly through it, still fail; one that ends and mostly runs inside a host
+  // package is recorded only (native-host-reports.mjs).
   for (const include of nativePackageIncludes(unit.packages ?? [], host)) shared.push("-isystem", include);
   shared.push(...nativeBaselineArguments({ module: header === null && isModuleUnit(unit.file) }));
   const mainLanguage = header === null ? language : `${language}-header`;
@@ -1406,8 +1425,16 @@ export async function analyzeNative(root, sources, units = [], execute = analyze
     }, options.now);
     const lists = invocations.map(invocation => invocation.passes.map(args => read.get(args)).find(Boolean) ?? []);
     const findings = dependencyFindings(root, lists, repositoryFiles(root, sources));
+    const directives = new Map();
     lists.forEach((list, index) => {
       if (outcomes[index].status === "passed" && list.some(path => findings.flagged.has(path))) outcomes[index].status = "failed";
+      // A `#line` in a repository file the unit read can name a host header for a report
+      // that ends in repository code, so host reports are recorded only without one.
+      if (outcomes[index].status === "passed" && outcomes[index].hostReports
+          && (list.length === 0 || lineDirectiveFiles(root, list, directives).length > 0)) {
+        outcomes[index].status = "failed";
+        outcomes[index].reason = "host-report-relocatable";
+      }
     });
     if (Array.isArray(options.findings)) options.findings.push(...findings.items, ...suppressionFindings(root, invocations, expanded));
     return outcomes;

@@ -21,10 +21,11 @@ export async function analyzeNativeBatch(invocations, execute, now = Date.now) {
       const index = next++;
       const invocation = invocations[index];
       let status = "passed";
-      let evidence;
+      let evidence, hostReports;
       const capture = async (...args) => {
         const result = await execute(...args);
         if (!result?.ok || result.diagnostics) evidence = result;
+        if (Array.isArray(result?.hostReports)) hostReports = result.hostReports;
         return result;
       };
       for (const [pass, args] of invocation.passes.entries()) {
@@ -43,6 +44,8 @@ export async function analyzeNativeBatch(invocations, execute, now = Date.now) {
         if (status !== "passed") break;
       }
       outcomes[index] ??= { rule: "native.clang-analysis", file: invocation.file, status };
+      // Analyzer reports inside host packages that did not fail the pass (native.mjs).
+      if (outcomes[index].status === "passed" && hostReports?.length) outcomes[index].hostReports = hostReports;
       if (["failed", "error"].includes(outcomes[index].status)) {
         if (evidence?.reason) outcomes[index].reason = evidence.reason;
         if (evidence?.output) outcomes[index].output = evidence.output;

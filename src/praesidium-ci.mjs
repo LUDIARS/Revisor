@@ -22,10 +22,17 @@ export async function runSecurePlannedTests(options, { scan = scanRepository, ch
     exitCode: status === "passed" ? 0 : status === "failed" ? 1 : 2,
     security: report, reason: status === "passed" ? undefined : "Praesidium blocked unsafe or unverified code" };
   // An accepted coverage gap is shown on the board instead of looking like a full pass.
+  const advisories = [];
   const unanalyzed = report?.coverage?.nativeNotAnalyzed;
   if (Array.isArray(unanalyzed) && unanalyzed.length > 0) {
-    result.advisory = `Praesidium: Objective-C/C++ の ${unanalyzed.length} ファイルは静的解析されていません (検査ホストに SDK が無いため字句規則だけを適用しました)`;
+    advisories.push(`Praesidium: Objective-C/C++ の ${unanalyzed.length} ファイルは静的解析されていません (検査ホストに SDK が無いため字句規則だけを適用しました)`);
   }
+  // Analyzer reports inside host package headers are recorded, not blocking (RV-PRAESIDIUM-03).
+  const hostReports = report?.coverage?.nativeHostReports;
+  if (Number.isInteger(hostReports) && hostReports > 0) {
+    advisories.push(`Praesidium: host package ヘッダ内で完結した analyzer report ${hostReports} 件を記録のみとしました (失敗にはしていません)`);
+  }
+  if (advisories.length > 0) result.advisory = advisories.join(" / ");
   if (status !== "passed") {
     const text = JSON.stringify({ reason: report?.reason, reasonCode: report?.reasonCode,
       findings: report?.findings, checks: report?.checks });

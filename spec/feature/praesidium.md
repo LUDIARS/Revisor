@@ -690,6 +690,42 @@ reported as not analyzed):
    and they are not stable enough to block merges. Raw-array and `memcpy` bounds are not proven;
    standard library bounds are the product build's hardening (AIFormat RULE_CODE_CPP §C2.9).
 
+Analyzer reports inside host packages (decided 2026-11-17, neco: "handle it on the Revisor side").
+A host package (`includePackages` in `praesidium.host.json`, passed as `-isystem`) gets no compiler
+warnings, but the analyzer still path-analyzes its inline code when repository code calls it. In
+LUDIARS/Tirocinium #3803, `native/src/io/http_client.cpp` (package `odeum-boost-1-87-0`) failed
+with `core.NonNullParamChecker` on a Boost.Asio coroutine; once the call site was changed, the same
+path reported `core.NullDereference` inside `boost/asio/awaitable.hpp`. The PR cannot fix Boost,
+and it must not silence the analyzer (the suppression switches, `-w` and `-isystem` stay rejected
+by the policy rules), so such a report would block every change to that unit. The analyzer pass
+(`native-host-reports.mjs`) therefore reads its text output as reports, each warning with the
+path notes after it, and classifies every location, resolved as the system resolves it (so a `..`
+out of a host directory is not inside it): inside the analyzed root is repository code (also a
+host directory configured inside it), inside an `-isystem` directory of that invocation is host
+code, anything else (toolchain, baseline) neither. A report is **advisory** when its final
+location (the warning) is host code **and** its path notes in host code are at least as many as
+those in repository code. Every other report is **blocking**: one that ends in repository code
+(the caller-side `core.NonNullParamChecker` above, a use after a library `delete`), and one that
+ends in the library but runs mostly through repository code (a null created and passed down by
+the repository to a library dereference). The analyzer pass passes only when all its reports are
+advisory; one blocking report fails the file as before, and output that is not reports alone (an
+error line, a diagnostic without a location) fails it too. Advisory reports are kept on the
+file's check as `hostReports` (`file` relative to the package directory, `line`, `checker`; no
+source text), counted in `coverage.nativeHostReports`, and shown as an advisory on the
+preflight row. The price: a repository defect whose path is mostly library code (a short call
+into a long library path) is recorded, not blocking. The majority rule keeps the decisive
+repository steps (where a null is made or passed) blocking, while a library-internal path that
+repository code merely enters does not.
+
+A `#line "file"` directive makes clang name any file for the code after it, a host header
+included, so a report that ends in repository code could look like host code. A file whose
+analyzer pass passed with advisory reports is therefore failed (`reason:
+"host-report-relocatable"`) when any repository file its diagnostics pass read (the dependency
+list) holds a `#line` directive, read in the masked logical view as C++ and as C (a raw string's
+`#line` line counts: fail closed), or cannot be read, or the list is empty. GNU linemarkers
+(`# 12 "x"`) are already rejected by the policy rules; `#line` is not, since generated parsers
+use it, so it only removes the advisory treatment.
+
 The clang driver adds `-w` to every `--analyze` job, so warning flags on the analyzer command line
 never took effect: before the split, `std::printf(user)`, a returned dangling `std::string_view`
 and `-Wsign-compare` defects all passed with exit 0 while `-fsyntax-only` rejected them. Enabling the
