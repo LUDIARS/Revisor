@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative as nativeRelative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// Repository IDs are slash-separated, while compiler paths are native absolute paths.
+const relative = (from, to) => nativeRelative(from, to).replaceAll("\\", "/");
 import { sourceFindings } from "../src/praesidium/rules.mjs";
 import { maskNativeCode } from "../src/praesidium/native-lexer.mjs";
 import { scanRepository } from "../src/praesidium/scan.mjs";
@@ -15,6 +17,7 @@ import { isCLanguageUnit, isEitherLanguageUnit, isNativeFragment, isNativeHeader
 import { NATIVE_BASELINE_HEADER, NATIVE_WARNINGS } from "../src/praesidium/native-baseline.mjs";
 import { readNativeHost } from "../src/praesidium/native-host.mjs";
 import { analyzeNativeBatch } from "../src/praesidium/native-batch.mjs";
+import { nativeSchedulingBudget } from "../src/praesidium/native-limits.mjs";
 import { expandedSuppressions, expansionLexing, holdsObjectiveC, suppressAttributeOffsets } from "../src/praesidium/native-expansion.mjs";
 
 // A repository: the dependency scan reads the files Git tracks or would add.
@@ -445,15 +448,16 @@ test("a probe that does not compile reports the file as not analyzed; any other 
   const calls = [];
   await analyzeNativeBatch([checked], async (_command, [pass]) => { calls.push(pass); return yes; });
   assert.deepEqual(calls, ["probe", "diagnostics", "analyzer"]);
-  // Five processes: a (3 + 1) * 60 s budget, which four 70 s processes stay within and
-  // three 100 s ones exceed before the Objective-C check.
+  // Derive simulated timings from the five-process budget, so this tests the
+  // scheduling boundary even when the production compiler timeout changes.
+  const budget = nativeSchedulingBudget(checked.passes.length + checked.syntax.length);
   const steps = { probe: yes, diagnostics: no, own: no, "objective-c": yes };
   const timed = async step => {
     let clock = 0;
     return analyzeNativeBatch([checked], async (_command, [pass]) => { clock += step; return steps[pass]; }, () => clock);
   };
-  assert.equal((await timed(70_000))[0].status, "skipped");
-  assert.deepEqual(await timed(100_000), [{ rule: "native.analysis-budget", file: "kit.hpp", status: "error" }]);
+  assert.equal((await timed(budget / 4))[0].status, "skipped");
+  assert.deepEqual(await timed(budget / 2), [{ rule: "native.analysis-budget", file: "kit.hpp", status: "error" }]);
 });
 
 test("large native batches inspect every unit beyond the old two-minute cutoff", async () => {
@@ -507,7 +511,7 @@ test("only configured units for changed files are compiled; unchanged units are 
     return { ok: true, exitCode: 0 };
   }, { host: {}, changed: new Set(["changed.cpp"]) });
   assert.deepEqual(outcomes.map(item => item.file), ["changed.cpp"]);
-  assert.deepEqual(compiled, [join(root, "changed.cpp"), join(root, "changed.cpp"), join(root, "changed.cpp")]);
+  assert.deepEqual(compiled.map(path => resolve(path)), Array(3).fill(resolve(root, "changed.cpp")));
   await assert.rejects(analyzeNative(root, sources, [units[0], { file: "unchanged.cpp", standard: "c++98" }],
     async () => assert.fail("must not compile"), { host: {}, changed: new Set(["changed.cpp"]) }));
 });
@@ -910,10 +914,10 @@ test("the files a pass read are scanned under the collection limits and fail clo
   writeFileSync(join(root, ".gitignore"), "ignored.txt\n");
   const pragma = '#pragma clang diagnostic ignored "-Wformat-security"\n';
   for (const [file, text] of Object.entries({ "tracked.txt": pragma, "new.txt": pragma, "ignored.txt": pragma,
-    "big.txt": "x".repeat(2 * 1024 * 1024 + 1), "nul.txt": "a\0b", "latin.txt": Buffer.from([0x63, 0x61, 0x66, 0xe9]) })) {
+    "big.txt": "x".repeat(2 * 1024 * 1024 + 1), "contains-nul.txt": "a\0b", "latin.txt": Buffer.from([0x63, 0x61, 0x66, 0xe9]) })) {
     writeFileSync(join(root, file), text);
   }
-  execFileSync("git", ["add", "unit.cpp", ".gitignore", "tracked.txt", "big.txt", "nul.txt", "latin.txt"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["add", "unit.cpp", ".gitignore", "tracked.txt", "big.txt", "contains-nul.txt", "latin.txt"], { cwd: root, stdio: "pipe" });
   const units = [{ file: "unit.cpp", standard: "c++20" }];
   const reading = dependencies => async (_command, args) => (args.includes("-MF")
     ? { ok: true, exitCode: 0, diagnostics: false, dependencies } : { ok: true, exitCode: 0 });
@@ -925,7 +929,7 @@ test("the files a pass read are scanned under the collection limits and fail clo
   assert.deepEqual(findings.map(item => item.file).sort(), ["new.txt", "tracked.txt"]);
   assert.equal(outcomes[0].status, "failed");
   await assert.rejects(analyze(["big.txt"]), /source size limit/);
-  await assert.rejects(analyze(["nul.txt"]), /non-text source/);
+  await assert.rejects(analyze(["contains-nul.txt"]), /non-text source/);
   await assert.rejects(analyze(["latin.txt"]), TypeError);
   // A name that is not a file means the list was read wrongly.
   mkdirSync(join(root, "dir"));

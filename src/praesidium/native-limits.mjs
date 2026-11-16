@@ -1,5 +1,7 @@
 /** Bounded compiler execution and scheduling limits for native analysis. */
-export const NATIVE_COMPILER_TIMEOUT_MS = 60_000;
+// Installed Boost/Beast analysis takes about 81 seconds on the supported Windows
+// host. Keep a finite limit and the existing two-worker cap while allowing it to finish.
+export const NATIVE_COMPILER_TIMEOUT_MS = 120_000;
 export const NATIVE_WORKERS = 2;
 
 export function nativeSchedulingBudget(processCount) {

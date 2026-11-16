@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolveServiceLoopbackUrl } from "./catalog.mjs";
 import { option } from "./local-pr-commands.mjs";
+import { workflowAuthorizationHeaders } from "./workflow-authorization.mjs";
 
 function required(value, message) {
   if (typeof value !== "string" || !value.trim()) throw new Error(message);
@@ -29,15 +30,20 @@ export async function runManualReleaseCommand(args, {
   cwd = process.cwd(),
   stdout = process.stdout,
   fetchImpl = fetch,
+  env = process.env,
 } = {}) {
   if (args[0] !== "release") return null;
   const repository = required(args[1], "release requires <owner/name>.");
+  const payload = JSON.stringify(requestBody(args));
+  // Resolve the token before sending: a missing one should say what to fix, not
+  // surface as an opaque 401 from the service.
+  const authorization = workflowAuthorizationHeaders(env);
   const response = await fetchImpl(
     `${resolveServiceLoopbackUrl(cwd, "revisor")}/v1/repositories/${encodeURIComponent(repository)}/releases`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(requestBody(args)),
+      headers: { "content-type": "application/json", ...authorization },
+      body: payload,
     },
   );
   const body = await response.json().catch(() => ({}));

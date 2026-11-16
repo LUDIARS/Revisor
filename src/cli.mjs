@@ -108,12 +108,13 @@ export async function main(args, {
   stdout = process.stdout,
   cwd = process.cwd(),
   fetchImpl = fetch,
+  env = process.env,
 } = {}) {
   if (args.length === 0 || args[0] === "help" || args[0] === "--help") {
     printHelp(stdout);
     return 0;
   }
-  const releaseHandled = await runManualReleaseCommand(args, { cwd, stdout, fetchImpl });
+  const releaseHandled = await runManualReleaseCommand(args, { cwd, stdout, fetchImpl, env });
   if (releaseHandled !== null) return releaseHandled;
   const versionsHandled = await runServiceVersionCommand(args, { cwd, stdout, fetchImpl });
   if (versionsHandled !== null) return versionsHandled;

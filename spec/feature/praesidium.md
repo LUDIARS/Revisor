@@ -9,6 +9,12 @@ status: implemented
 
 # Praesidium
 
+Failed native compiler checks retain a `reason` and optional bounded, redacted
+`output`, using the registered-test output boundary. Reasons distinguish compiler
+diagnostics, process termination, missing compiler, output limit and compiler error.
+Termination does not by itself prove timeout. Warning-only output still fails; this
+evidence does not change native gate acceptance or compiler limits.
+
 ## RV-PRAESIDIUM-01: Offline source policy and explicit coverage
 
 Praesidium (Latin: protection) is an independently callable CLI shipped with Revisor.
@@ -830,7 +836,7 @@ are not the reviewed change's (with `-I`, a vendor header's unused parameter fai
 analyzer reports reached from repository code still appear. No repository setup runs before security preflight.
 This supports a cold checkout without running installers or copying unchecked code into it.
 
-Per-process timeout is 60 seconds / output cap 2 MiB (64 MiB for the preprocessed output of the
+Per-process timeout is 120 seconds / output cap 2 MiB (64 MiB for the preprocessed output of the
 expansion pass and the probe); at most two compiler workers run concurrently,
 each running one file's passes in order and stopping at the first pass that does not pass. The
 shared batch stops scheduling processes once its budget (RV-PRAESIDIUM-NATIVE-BUDGET) is spent,

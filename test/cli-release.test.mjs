@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli.mjs";
+import { writeWorkflowToken } from "../src/config.mjs";
 import { removeFixture } from "./helpers/fixture-cleanup.mjs";
 
 // The CLI finds the local API port in the Excubitor catalog above its cwd. Give it
@@ -17,6 +18,17 @@ function workspaceWithCatalog(directory) {
     "utf8",
   );
   return directory;
+}
+
+// The release API is a mutating route, so the CLI must read the workflow token from
+// the same encrypted local config the service uses. Point it at a fixture config.
+function configEnv(directory, token) {
+  const env = {
+    REVISOR_CONFIG_PATH: join(directory, "config.json"),
+    REVISOR_KEY_PATH: join(directory, "config.key"),
+  };
+  if (token) writeWorkflowToken(token, env);
+  return env;
 }
 
 function response(status, body) {
@@ -35,6 +47,7 @@ test("release CLI sends a confirmed file-backed request to the local API", async
       "--notes-file", notesFile, "--expected-version", "1.4.8", "--json",
     ], {
       cwd: workspaceWithCatalog(directory),
+      env: configEnv(directory, "workflow-secret"),
       stdout: { write: (value) => { output += value; return true; } },
       fetchImpl: async (url, options) => {
         received = { url, options };
@@ -52,18 +65,73 @@ test("release CLI sends a confirmed file-backed request to the local API", async
   }
 });
 
+test("release CLI authenticates with the local workflow token without echoing it", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-cli-release-"));
+  const notesFile = join(directory, "notes.md");
+  writeFileSync(notesFile, "Release notes.", "utf8");
+  let headers;
+  let output = "";
+  try {
+    assert.equal(await main([
+      "release", "LUDIARS/Product", "--kind", "minor", "--title", "Product 1.5",
+      "--notes-file", notesFile, "--expected-version", "1.4.8",
+    ], {
+      cwd: workspaceWithCatalog(directory),
+      env: configEnv(directory, "workflow-secret"),
+      stdout: { write: (value) => { output += value; return true; } },
+      fetchImpl: async (_url, options) => {
+        headers = options.headers;
+        return response(200, { release: { repository: "LUDIARS/Product", tag: "v1.5.0" } });
+      },
+    }), 0);
+    assert.equal(headers.authorization, "Bearer workflow-secret");
+    assert.equal(headers["content-type"], "application/json");
+    assert.equal(output.includes("workflow-secret"), false);
+  } finally {
+    removeFixture(directory);
+  }
+});
+
+test("release CLI fails before sending when the workflow token is missing", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "revisor-cli-release-"));
+  const notesFile = join(directory, "notes.md");
+  writeFileSync(notesFile, "Release notes.", "utf8");
+  let sent = false;
+  try {
+    await assert.rejects(
+      main([
+        "release", "LUDIARS/Product", "--kind", "minor", "--title", "Product 1.5",
+        "--notes-file", notesFile, "--expected-version", "1.4.8",
+      ], {
+        cwd: workspaceWithCatalog(directory),
+        env: configEnv(directory),
+        fetchImpl: async () => { sent = true; return response(401, { error: "unauthorized" }); },
+      }),
+      (error) => {
+        assert.match(error.message, /workflow トークンが設定されていません/);
+        assert.match(error.message, /REVISOR_CONFIG_PATH/);
+        return true;
+      },
+    );
+    assert.equal(sent, false);
+  } finally {
+    removeFixture(directory);
+  }
+});
+
 test("release CLI surfaces local API conflict and validation messages", async () => {
   const directory = mkdtempSync(join(tmpdir(), "revisor-cli-release-"));
   const notesFile = join(directory, "notes.md");
   writeFileSync(notesFile, "Release notes.", "utf8");
   const args = ["release", "LUDIARS/Product", "--kind", "major", "--title", "Product 2", "--notes-file", notesFile, "--expected-version", "1.4.8"];
   try {
+    const env = configEnv(directory, "workflow-secret");
     await assert.rejects(
-      main(args, { cwd: workspaceWithCatalog(directory), fetchImpl: async () => response(409, { error: "Version changed." }) }),
+      main(args, { cwd: workspaceWithCatalog(directory), env, fetchImpl: async () => response(409, { error: "Version changed." }) }),
       /Version changed/,
     );
     await assert.rejects(
-      main(args, { cwd: workspaceWithCatalog(directory), fetchImpl: async () => response(400, { error: "kind is invalid." }) }),
+      main(args, { cwd: workspaceWithCatalog(directory), env, fetchImpl: async () => response(400, { error: "kind is invalid." }) }),
       /kind is invalid/,
     );
   } finally {
@@ -83,6 +151,7 @@ test("release CLI sends githubRelease=false for --no-github-release", async () =
       "--notes-file", notesFile, "--expected-version", "0.8.0", "--no-github-release",
     ], {
       cwd: workspaceWithCatalog(directory),
+      env: configEnv(directory, "workflow-secret"),
       stdout: { write: (value) => { output += value; return true; } },
       fetchImpl: async (_url, options) => {
         body = JSON.parse(options.body);
