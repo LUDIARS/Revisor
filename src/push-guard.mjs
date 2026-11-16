@@ -14,9 +14,12 @@ import { dirname, resolve, sep } from "node:path";
 import { resolveRepositoryWorkflow, WORKFLOW_GITHUB } from "./repository-workflow.mjs";
 import { BRANCH_PUSH_ENV_FLAG } from "./branch-push-flag.mjs";
 import { scanOutgoingHistory } from "./outgoing-history.mjs";
+import { resolveDestinationRemotes } from "./push-destination.mjs";
 import { LocalPrStore, redirectLegacyStorePath } from "./state-store.mjs";
 import { git } from "./workspace.mjs";
 import { runProcess } from "./process.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:3bd5e66c */
+import augurContract_02932a3a from '../contracts/install-push-guard.contract.mjs'; /* augur-inject:contract-predicate:b32df1b1 */
 
 const MANAGED_MARKER = "# LUDIARS Revisor managed pre-push hook";
 const ZERO_SHA = /^0+$/;
@@ -154,6 +157,8 @@ export async function installPushGuard({
   await git(repoPath, ["config", "--local", "core.hooksPath", managedDirectory]);
   return hookPath;
 }
+// @ts-expect-error augur-inject
+installPushGuard = contract(installPushGuard, { ...augurContract_02932a3a, contractId: 'C-5', mode: 'observe', sample: 1, where: 'src/push-guard.mjs:73', rule: 'contract-wrap', id: '02932a3a' }); /* augur-inject:contract-wrap:02932a3a */
 
 async function writeManagedHook({
   hookPath,
@@ -213,6 +218,8 @@ export async function guardMainPush({
   env = process.env,
   authorizedPublication = env.REVISOR_PUBLISHING === "1",
   authorizedBranchPublication = env[BRANCH_PUSH_ENV_FLAG] === "1",
+  // pre-push arguments: the remote name (or URL) and the URL being pushed to.
+  destinations = [],
 }) {
   // 配布済み hook は旧 revisor.state.json のパスを焼き込んでいる。 再インストール
   // なしで database を見つけられるよう、旧パスはここで読み替える。
@@ -271,9 +278,15 @@ export async function guardMainPush({
   let scannedAddedLines = 0;
   const findings = [];
   // Ordinary GitHub pushes still scan outgoing history, including tag targets.
+  // New refs skip commits the destination remote already has (e.g. a release
+  // tag on published history); an unresolved destination scans everything.
   const scannedPushes = pushes.filter((record) => !ZERO_SHA.test(record.localSha));
+  const remotes = scannedPushes.length > 0
+    ? await resolveDestinationRemotes(repoPath, destinations) : [];
   for (const record of scannedPushes) {
-    const result = await scanOutgoingHistory(repoPath, record, { repository: repository.repository, env });
+    const result = await scanOutgoingHistory(repoPath, record, {
+      repository: repository.repository, env, remotes,
+    });
     scannedAddedLines += result.scannedAddedLines;
     findings.push(...result.findings);
   }

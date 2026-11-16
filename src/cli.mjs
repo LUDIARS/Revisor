@@ -12,6 +12,7 @@ import {
 } from "./config.mjs";
 import { pathToFileURL } from "node:url";
 import { guardMainPush } from "./push-guard.mjs";
+import { guardPushDestinations } from "./push-destination.mjs";
 import { pushBranch } from "./branch-push.mjs";
 import { runPushHandoffCommand } from "./push-handoff-command.mjs";
 import { option, runLocalPrCommand } from "./local-pr-commands.mjs";
@@ -226,6 +227,7 @@ export async function main(args, {
     const result = await guardMainPush({
       repoPath,
       statePath,
+      destinations: guardPushDestinations(args),
       input: await readStdin(stdin),
     });
     if (!result.allowed) {

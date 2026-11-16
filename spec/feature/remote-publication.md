@@ -232,9 +232,17 @@ local-only fallback.
 Before any authorized ref update, scan the subject and complete body of every
 outgoing commit with the credential rules used for patch additions. A finding
 blocks publication and records only the rule, commit SHA and message line.
-A new ref has no remote baseline, so its entire reachable history is checked;
-a local base or merge-base must not suppress inherited messages. Authorized
-tag targets receive the same gate. Deletions have no outgoing commits.
+A new ref has no remote baseline, so its reachable history is checked except
+commits already reachable from the destination remote's tracking refs
+(`git log <local> --not --remotes=<remote>`). The destination is the pre-push
+remote name or URL, matched to a configured remote by name or by URL ignoring
+credentials, scheme, case, a trailing slash and `.git`. Commits already on the
+destination are public there, so a release tag on published history is not
+blocked by old messages. When no configured remote matches or remote data is
+unreadable, the entire reachable history is checked; a local base or
+merge-base must never suppress inherited messages. Updates of an existing ref
+keep the `remote..local` range. Authorized tag targets receive the same gate.
+Deletions have no outgoing commits. (actio:53dc1e38-4c28-4c26-bed4-06261c849f9f)
 Unreadable history or malformed message records fail closed.
 
 Commit messages also use the configured confidential-term policy, including its

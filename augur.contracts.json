@@ -12,7 +12,8 @@
       "module": "contracts/workflow-authorization-headers.contract.mjs",
       "mode": "observe",
       "sample": 1
-    },    {
+    },
+    {
       "id": "C-21",
       "criterion": "C-21 scanRepository(options): 収集失敗は error と空の所見を返し、理由は固定の一般文と既知の許可コードだけで機密情報を含めない",
       "symbol": "scanRepository",
@@ -198,6 +199,24 @@
       "symbol": "changedSourcePaths",
       "file": "src/praesidium/files.mjs",
       "module": "contracts/changed-source-paths.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-23",
+      "criterion": "C-23 outgoingRangeArgs(record, remotes): 新規 ref は送信先 remote の追跡 ref にある commit を除外し、remote 不明なら全体、既存 ref 更新は remoteSha..localSha のまま",
+      "symbol": "outgoingRangeArgs",
+      "file": "src/outgoing-history.mjs",
+      "module": "contracts/outgoing-range-args.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-24",
+      "criterion": "C-24 resolveDestinationRemotes(repoPath, destinations): push 先の remote 名または URL に一致する設定済み remote 名だけを返し、取れないときは空で返す",
+      "symbol": "resolveDestinationRemotes",
+      "file": "src/push-destination.mjs",
+      "module": "contracts/resolve-destination-remotes.contract.mjs",
       "mode": "observe",
       "sample": 1
     }
