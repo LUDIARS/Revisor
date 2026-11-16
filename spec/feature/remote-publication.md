@@ -156,6 +156,12 @@ version、base 以外の checkout は 409、入力不正は 400 とする。
 UTF-8 file からだけ読む。CLI は `confirmed:true` を送信し、Release の権限判断・公開処理を
 複製しない。
 
+POST は変更系 route なので、CLI は常駐サービスと同じ暗号化ローカル設定
+(`REVISOR_CONFIG_PATH` / `REVISOR_KEY_PATH`) から `readWorkflowToken` で workflow トークンを
+読み、`Authorization: Bearer` で送る (`src/workflow-authorization.mjs`)。トークンは引数・
+ログ・出力に出さない。未設定・復号不能のときは送信前に、何が足りないかを日本語で示して
+失敗する (401 `unauthorized` にしない)。経緯: actio:3410046c-dde7-40af-993f-10f86ad8d3c1。
+
 ## Authentication and data boundary
 
 The GitHub App id and PEM private key are encrypted in `revisor.config.json`.

@@ -5,6 +5,14 @@
   "runtimeFile": "src/contract-runtime.mjs",
   "contracts": [
     {
+      "id": "C-22",
+      "criterion": "C-22 workflowAuthorizationHeaders(env): ローカル設定の workflow トークンを Authorization: Bearer 1 本で返し、取れないときは何が足りないかを日本語で示して送信前に失敗する",
+      "symbol": "workflowAuthorizationHeaders",
+      "file": "src/workflow-authorization.mjs",
+      "module": "contracts/workflow-authorization-headers.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },    {
       "id": "C-21",
       "criterion": "C-21 scanRepository(options): 収集失敗は error と空の所見を返し、理由は固定の一般文と既知の許可コードだけで機密情報を含めない",
       "symbol": "scanRepository",
