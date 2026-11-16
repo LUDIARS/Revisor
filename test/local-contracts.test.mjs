@@ -15,6 +15,11 @@ const PR_CONTENT = [
   "- 不十分な内容ではテストを開始しない。",
 ].join("\n");
 
+// 登録は root_path が絶対パスであることを先に検査する。 ドライブ名付きの開発機の
+// パスは POSIX (CI) では絶対パスにならず、 各テストが見たい検査の手前で落ちるので、
+// 実行ホストで絶対パスになる形にする (Windows では従来どおり)。
+const ROOT_PATH = process.platform === "win32" ? "E:/Document/Ars/Revisor" : "/Document/Ars/Revisor";
+
 function pullRequestInput(overrides = {}) {
   return {
     repository: "LUDIARS/Revisor",
@@ -28,7 +33,7 @@ function pullRequestInput(overrides = {}) {
 test("requires test cases at repository registration", () => {
   assert.throws(() => validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     base_ref: "main",
     test_cases: [],
   }), /At least one test case/);
@@ -37,7 +42,7 @@ test("requires test cases at repository registration", () => {
 test("rejects repository paths containing Git-config control characters", () => {
   assert.throws(() => validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor\n[include]",
+    root_path: `${ROOT_PATH}\n[include]`,
     test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
   }), /root_path must not contain control characters/);
 });
@@ -45,7 +50,7 @@ test("rejects repository paths containing Git-config control characters", () => 
 test("normalizes argv test cases and local PR metadata", () => {
   const registration = validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{
       name: "unit",
       command: "npm",
@@ -191,7 +196,7 @@ test("rejects non-Japanese or incomplete PR content before it reaches review", (
 test("rejects shell metacharacters in registered test argv", () => {
   assert.throws(() => validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{
       name: "unsafe",
       command: "npm",
@@ -203,7 +208,7 @@ test("rejects shell metacharacters in registered test argv", () => {
 test("accepts and validates review-plan coverage metadata on a test case", () => {
   const registration = validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{
       name: "smoke",
       command: "npm",
@@ -220,14 +225,14 @@ test("accepts and validates review-plan coverage metadata on a test case", () =>
 test("re-accepts the normalized registration it produced", () => {
   const first = validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
   });
   // The validator emits `kinds: null` for an undeclared case, so re-registering
   // from a stored record must not be read as an invalid kind list.
   const again = validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{ ...first.testCases[0], timeout_ms: first.testCases[0].timeoutMs }],
   });
   assert.deepEqual(again.testCases[0], first.testCases[0]);
@@ -236,7 +241,7 @@ test("re-accepts the normalized registration it produced", () => {
 test("rejects an unknown change kind and a non-boolean flag", () => {
   const base = {
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
   };
   assert.throws(() => validateRepositoryRegistration({
     ...base,
@@ -255,14 +260,14 @@ test("rejects an unknown change kind and a non-boolean flag", () => {
 test("keeps validated notify targets at repository registration", () => {
   const registration = validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
     notify: { release: ["discord:team", "slack:ops", "concordia"], merged: [] },
   });
   assert.deepEqual(registration.notify, { release: ["discord:team", "slack:ops", "concordia"] });
   assert.equal("notify" in validateRepositoryRegistration({
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
   }), false);
 });
@@ -270,7 +275,7 @@ test("keeps validated notify targets at repository registration", () => {
 test("rejects notify targets that are not discord:<name>, slack:<name>, or concordia", () => {
   const base = {
     repository: "LUDIARS/Revisor",
-    root_path: "E:/Document/Ars/Revisor",
+    root_path: ROOT_PATH,
     test_cases: [{ name: "unit", command: "npm", args: ["test"] }],
   };
   assert.throws(() => validateRepositoryRegistration({ ...base, notify: { release: ["https://hooks.slack.com/x"] } }),

@@ -502,6 +502,9 @@ test("fails without replacing a missing encryption key", () => {
 
 test("persists the human's auto-merge threshold and the plan advisor", () => {
   const state = fixture();
+  // 絶対パスはそのまま保存される。 ドライブ名付きのパスは POSIX (CI) では相対パス扱いで
+  // 設定ファイルの置き場所基準に解決されるため、 実行ホストで絶対パスになる形にする。
+  const augurFolder = process.platform === "win32" ? "E:/Document/Ars/Augur" : "/Document/Ars/Augur";
   try {
     writeSettings({
       anatomiaFolder: "E:/Document/Ars/Anatomia",
@@ -512,14 +515,14 @@ test("persists the human's auto-merge threshold and the plan advisor", () => {
       autoMergeRiskThreshold: 30,
       autoMergeRequiresRuntimeVerificationClear: false,
       planAdvisor: "augur",
-      augurFolder: "E:/Document/Ars/Augur",
+      augurFolder,
     }, state.env);
     const settings = readSettings(state.env);
     assert.equal(settings.autoMergeEnabled, true);
     assert.equal(settings.autoMergeRiskThreshold, 30);
     assert.equal(settings.autoMergeRequiresRuntimeVerificationClear, false);
     assert.equal(settings.planAdvisor, "augur");
-    assert.equal(settings.augurFolder, "E:/Document/Ars/Augur");
+    assert.equal(settings.augurFolder, augurFolder);
     // An omitted field keeps what the operator already chose instead of silently
     // resetting the accepted risk to the default.
     writeSettings({

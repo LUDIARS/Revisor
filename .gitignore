@@ -11,3 +11,6 @@ coverage/
 !.anatomia/layers.json
 .contracts-logs*/
 /logs/
+
+# push-guard のテストが一時的に置く global hook (finally で消す)
+test/.scratch-global-hooks-*/

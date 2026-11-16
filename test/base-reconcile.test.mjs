@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { reconcileBaseWithRemote } from "../src/base-reconcile.mjs";
+import { writeGitHubAppCredentials } from "../src/config.mjs";
 import { BaseMovedError, RevisorError } from "../src/errors.mjs";
 import { squashMergeLocalPullRequest } from "../src/local-merge.mjs";
 import { NO_LFS_FILTER_ARGS } from "../src/workspace.mjs";
@@ -23,9 +24,27 @@ function git(repoPath, ...args) {
   return result.stdout.trim();
 }
 
+// reconcileBaseWithRemote は (stub の) client を作る前に、 GitHub App の資格情報と
+// 設定を `env` の Revisor 設定から読む。 env を渡さないと開発者自身の設定 (資格情報・
+// reviewScratchRoot) を読んでしまい、 設定の無い CI では "GitHub App credentials are
+// not configured." で落ちていた。 fixture ごとに試験用の設定を置き、 そこだけを読ませる。
+const TEST_ONLY_PRIVATE_KEY = [
+  ["-----BEGIN", "PRIVATE KEY-----"].join(" "),
+  "test-only",
+  ["-----END", "PRIVATE KEY-----"].join(" "),
+].join("\n");
+
+function revisorEnv(directory) {
+  return {
+    REVISOR_CONFIG_PATH: join(directory, "revisor.config.json"),
+    REVISOR_KEY_PATH: join(directory, "revisor.config.key"),
+  };
+}
+
 // ローカル正本 (main 1 コミット) と、 そこから clone した「GitHub 側」 リポジトリ。
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "revisor-base-reconcile-"));
+  writeGitHubAppCredentials({ appId: "1", privateKey: TEST_ONLY_PRIVATE_KEY }, revisorEnv(directory));
   const localPath = join(directory, "Local");
   const init = spawnSync("git", ["init", localPath], { encoding: "utf8", windowsHide: true });
   if (init.status !== 0) throw new Error(init.stderr || init.stdout);
@@ -65,6 +84,7 @@ function reconcileInput(localPath, remotePath) {
     baseRef: "main",
     runRemoteGit: localOnlyRemoteGit(remotePath),
     createClient: stubClient,
+    env: revisorEnv(dirname(localPath)),
   };
 }
 

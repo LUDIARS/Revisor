@@ -48,8 +48,13 @@ test("reports one failure per line with the ownership reason intact", async () =
 // refusal the merge path does. Without command-scoped trust every contaminated
 // checkout is named at boot even though merging it works.
 test("carries source trust into the readability check itself", async () => {
+  // 登録パスは resolve してから区切りを / にそろえる。 ドライブ名付きの Windows パスは
+  // POSIX (CI) では相対パスになり cwd が前に付くので、 ほかのホストでは同じ形の絶対パスを使う。
+  const onWindows = process.platform === "win32";
+  const rootPath = onWindows ? "C:\\workspace\\Revisor" : "/workspace/Revisor";
+  const portableRoot = onWindows ? "C:/workspace/Revisor" : "/workspace/Revisor";
   const calls = [];
-  await inspectRegisteredRepositories([REPOSITORIES[0]], {
+  await inspectRegisteredRepositories([{ ...REPOSITORIES[0], rootPath }], {
     runGit: (rootPath, args) => {
       calls.push(args);
       return `${rootPath}\\.git`;
@@ -58,9 +63,9 @@ test("carries source trust into the readability check itself", async () => {
 
   assert.deepEqual(calls[0].slice(0, 4), [
     "-c",
-    "safe.directory=C:/workspace/Revisor",
+    `safe.directory=${portableRoot}`,
     "-c",
-    "safe.directory=C:/workspace/Revisor/.git",
+    `safe.directory=${portableRoot}/.git`,
   ]);
   assert.deepEqual(calls[0].slice(-2), ["rev-parse", "--absolute-git-dir"]);
   assert.equal(calls[0].includes("safe.directory=*"), false);

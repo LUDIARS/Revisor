@@ -9,6 +9,15 @@ import {
   resolveUserGlobalConfigPath,
 } from "../src/git-trust.mjs";
 
+// 信頼設定は登録パスを resolve してから区切りを / にそろえる。 ドライブ名付きの Windows
+// パスは POSIX (CI) では相対パスになり cwd が前に付くので、 Windows では従来どおりの綴りで
+// 区切りの変換まで確かめ、 ほかのホストでは同じ形の絶対パスを使う。
+const ON_WINDOWS = process.platform === "win32";
+const USER_CONFIG = ON_WINDOWS ? "C:\\Users\\dev\\.gitconfig" : "/Users/dev/.gitconfig";
+const PRODUCT = ON_WINDOWS ? "C:\\workspace\\Product" : "/workspace/Product";
+const PRODUCT_GIT = ON_WINDOWS ? "C:\\workspace\\Product\\.git" : "/workspace/Product/.git";
+const PREFIX = ON_WINDOWS ? "C:" : "";
+
 const WINDOWS_ENV = {
   LOCALAPPDATA: "C:\\Users\\dev\\AppData\\Local",
   USERPROFILE: "C:\\Users\\dev",
@@ -23,13 +32,10 @@ test("keeps the trust configuration beside the Revisor managed Git runtime", () 
 });
 
 test("includes the user's global configuration so identity and credentials survive", () => {
-  const content = buildTrustConfig("C:\\Users\\dev\\.gitconfig", [
-    "C:\\workspace\\Product",
-    "C:\\workspace\\Product\\.git",
-  ]);
-  assert.match(content, /\[include\]\n\tpath = "C:\/Users\/dev\/\.gitconfig"/);
-  assert.match(content, /directory = "C:\/workspace\/Product"/);
-  assert.match(content, /directory = "C:\/workspace\/Product\/\.git"/);
+  const content = buildTrustConfig(USER_CONFIG, [PRODUCT, PRODUCT_GIT]);
+  assert.ok(content.includes(`[include]\n\tpath = "${PREFIX}/Users/dev/.gitconfig"`));
+  assert.ok(content.includes(`directory = "${PREFIX}/workspace/Product"\n`));
+  assert.ok(content.includes(`directory = "${PREFIX}/workspace/Product/.git"\n`));
   assert.equal(content.includes("directory = *"), false);
 });
 
@@ -83,7 +89,7 @@ test("points Git at the trust configuration without losing the caller's environm
   const env = gitTrustEnv({
     env: { ...WINDOWS_ENV, AUTH_HEADER: "secret" },
     platform: "win32",
-    safeDirectories: ["C:\\workspace\\Product", "C:\\workspace\\Product\\.git"],
+    safeDirectories: [PRODUCT, PRODUCT_GIT],
     ensure: (path, content) => {
       written.push({ path, content });
       return path;
@@ -91,7 +97,7 @@ test("points Git at the trust configuration without losing the caller's environm
   });
 
   assert.equal(written.length, 1);
-  assert.match(written[0].content, /directory = "C:\/workspace\/Product"/);
+  assert.ok(written[0].content.includes(`directory = "${PREFIX}/workspace/Product"\n`));
   assert.equal(written[0].content.includes("directory = *"), false);
   assert.match(
     env.GIT_CONFIG_GLOBAL.replaceAll("\\", "/"),

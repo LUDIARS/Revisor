@@ -83,7 +83,19 @@ export async function relandHeadOnBase({ repoPath, worktreePath, baseSha, headSh
   try {
     // A squash merge always stages a single-parent result. Git rejects
     // `--no-ff` together with `--squash`, so do not add a fast-forward flag.
-    await gitWithoutLfs(worktreePath, ["merge", "--squash", "--no-commit", headSha]);
+    // Git asks for a committer identity even with --no-commit, so pass the same
+    // one every other Revisor merge passes; a host without a global identity
+    // would otherwise fail with "Committer identity unknown".
+    await gitWithoutLfs(worktreePath, [
+      "-c",
+      "user.name=LUDIARS Revisor",
+      "-c",
+      "user.email=revisor@localhost",
+      "merge",
+      "--squash",
+      "--no-commit",
+      headSha,
+    ]);
   } catch (error) {
     const paths = await conflictedPaths(worktreePath);
     const message = error instanceof Error ? error.message : String(error);
