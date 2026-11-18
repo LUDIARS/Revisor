@@ -296,3 +296,25 @@ test("refuses a GitHub Release for a GitHub-workflow repository before touching 
   }), /GitHub Release cannot be created/);
   assert.equal(tagged, false);
 });
+
+// 公開に失敗したら、 この呼び出しが打った tag だけを消す。 既にあった tag には触らない。
+for (const [created, expected] of [[true, [["delete", "v1.5.0", "abc123"]]], [false, []]]) {
+  test(`deletes the release tag on failure only when this call created it (created=${created})`, async () => {
+    const calls = [];
+    await assert.rejects(publishManualRelease({
+      repository: { repository: "LUDIARS/Product", rootPath: "E:/Product", baseRef: "main" },
+      kind: "minor", expectedVersion: "1.4.8", title: "Product 1.5", notes: "Guidance.",
+      readCredentials: () => ({}),
+      createClient: () => ({ installationToken: async () => "token" }),
+      runGit: async (_path, args) => args[0] === "symbolic-ref" ? "main" : "abc123",
+      readVersion: async () => "1.4.8",
+      writeVersion: async () => calls.push(["write"]),
+      getLocalTags: async () => ["v1.4.8"], getRemoteTags: async () => ["v1.4.8"],
+      syncPackage: async () => ({ synced: false, reason: "no package.json" }),
+      createTag: async () => ({ created }),
+      deleteTag: async (value) => calls.push(["delete", value.tag, value.mergeCommitSha]),
+      push: async () => { throw new Error("remote rejected"); },
+    }), /remote rejected/);
+    assert.deepEqual(calls, expected);
+  });
+}

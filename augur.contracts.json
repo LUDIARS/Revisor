@@ -219,6 +219,15 @@
       "module": "contracts/resolve-destination-remotes.contract.mjs",
       "mode": "observe",
       "sample": 1
+    },
+    {
+      "id": "C-25",
+      "criterion": "C-25 createLocalReleaseTag(request): 新しく打った tag は created=true、既に同じ commit を指す tag は created=false を返し、公開に失敗した release が自分の打った tag だけを消せるようにする",
+      "symbol": "createLocalReleaseTag",
+      "file": "src/git-publication.mjs",
+      "module": "contracts/create-local-release-tag.contract.mjs",
+      "mode": "observe",
+      "sample": 1
     }
   ]
 }

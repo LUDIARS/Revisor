@@ -2,6 +2,7 @@ import { readGitHubAppCredentials } from "./config.mjs";
 import { RevisorError } from "./errors.mjs";
 import {
   createLocalReleaseTag,
+  forgetPreparedReleaseTag,
   listLocalReleaseTags,
   listRemoteReleaseTags,
   pushReleaseAtomically,
@@ -32,6 +33,8 @@ export async function publishManualRelease({
   getLocalTags = listLocalReleaseTags,
   getRemoteTags = listRemoteReleaseTags,
   createTag = createLocalReleaseTag,
+  deleteTag = ({ rootPath, tag, mergeCommitSha }) =>
+    forgetPreparedReleaseTag(rootPath, tag, mergeCommitSha),
   push = pushReleaseAtomically,
   pushPlain = pushWithLocalCredentials,
   readVersion = readLocalVersion,
@@ -104,6 +107,21 @@ export async function publishManualRelease({
     if (await headSha().catch(() => null) !== baseSha) return;
     await runGit(repository.rootPath, ["reset", "--hard", preSyncSha]).catch(() => undefined);
   };
+  // この公開が打った tag も同じく戻す。 残すと tag が巻き戻された追従 commit を指したまま
+  // 居座り、 次の release が "already points to another commit" で止まる。 消すのは
+  // この呼び出しが新しく打った (created) tag だけで、 指す先がこの公開の commit である
+  // ことを確かめてから消す (`forgetPreparedReleaseTag`)。 push は base と tag を atomic に
+  // 送るので、 失敗した公開の tag は GitHub に載っていない。 既にあった tag (公開済みかも
+  // しれない) には触らない。 版の台帳 (writeVersion) は公開成功後にしか書かない。
+  let createdTag = false;
+  const rollbackCreatedTag = async () => {
+    if (!createdTag) return;
+    await deleteTag({
+      rootPath: repository.rootPath,
+      tag,
+      mergeCommitSha: baseSha,
+    }).catch(() => undefined);
+  };
   const releaseNotes = composeManualReleaseNotes({
     title,
     body: notes,
@@ -121,12 +139,13 @@ export async function publishManualRelease({
         `Release Notes contain ${leakage.totalFindings} potential information leakage finding(s).`,
       );
     }
-    await createTag({
+    const tagging = await createTag({
       rootPath: repository.rootPath,
       mergeCommitSha: baseSha,
       tag,
       message: `${tag}: ${title}`,
     });
+    createdTag = tagging?.created === true;
     if (viaApp) {
       await push({
         repository: repository.repository,
@@ -151,6 +170,7 @@ export async function publishManualRelease({
       });
     }
   } catch (error) {
+    await rollbackCreatedTag();
     await rollbackPackageSync();
     throw error;
   }

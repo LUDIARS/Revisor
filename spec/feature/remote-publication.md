@@ -49,6 +49,15 @@ currently checked-out registered base HEAD:
    credentials for `workflow: github`);
 7. when requested, create the GitHub Release; only then update local version state.
 
+手順 5〜6 の途中で失敗したとき (漏洩検査で送信が止まった、push が拒否された等)、その
+release は手元を元の状態へ戻す。`package.json` 追従 commit を巻き戻し、**この release
+自身が新しく打った tag** (`createLocalReleaseTag` が `created: true` を返したもの) を、
+指す先がその追従 commit であることを確かめてから消す。base と tag は atomic に push
+するので、失敗した公開の tag は GitHub に載っていない。既にあった tag は公開済みの
+可能性があるので消さず動かさない。local version state は公開成功後にしか書かないので
+変わらない。これで再実行が `Release tag '…' already points to another commit` で
+止まらない。経緯: actio:c80f1642-5380-4246-9c45-fe951ef50ae9。
+
 Creating the GitHub Release is the operator's choice (`githubRelease`). When it
 is omitted, a `revisor` repository creates one and a `github` repository does
 not. A `github` repository has no App channel, so an explicit

@@ -3,6 +3,8 @@ import { BaseMovedError, RevisorError } from "./errors.mjs";
 import { git } from "./workspace.mjs";
 import { isReleaseTag } from "./release-version.mjs";
 import { githubRemoteUrl, runAuthenticatedGit } from "./authenticated-git.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:5799e37c */
+import augurContract_7667c89c from '../contracts/create-local-release-tag.contract.mjs'; /* augur-inject:contract-predicate:b99cdb29 */
 
 function refsByName(output) {
   return new Map(output.split(/\r?\n/).filter(Boolean).map((line) => {
@@ -96,6 +98,9 @@ export async function findPreparedMerge(rootPath, localPrId) {
   return { mergeCommitSha, tag: tags[0] ?? null };
 }
 
+// `created` tells the caller whether this call made the tag. Only a tag made
+// here may be removed when the publication that follows fails; a tag that
+// already existed may be published and must never be moved or deleted.
 export async function createLocalReleaseTag({
   rootPath,
   mergeCommitSha,
@@ -105,7 +110,7 @@ export async function createLocalReleaseTag({
   const existing = await git(rootPath, ["tag", "--list", tag]);
   if (existing) {
     const target = await git(rootPath, ["rev-list", "-n", "1", tag]);
-    if (target.toLowerCase() === mergeCommitSha.toLowerCase()) return;
+    if (target.toLowerCase() === mergeCommitSha.toLowerCase()) return { created: false };
     throw new RevisorError(`Release tag '${tag}' already points to another commit.`);
   }
   await git(rootPath, [
@@ -120,7 +125,10 @@ export async function createLocalReleaseTag({
     "-m",
     message,
   ]);
+  return { created: true };
 }
+// @ts-expect-error augur-inject
+createLocalReleaseTag = contract(createLocalReleaseTag, { ...augurContract_7667c89c, contractId: 'C-25', mode: 'observe', sample: 1, where: 'src/git-publication.mjs:102', rule: 'contract-wrap', id: '7667c89c' }); /* augur-inject:contract-wrap:7667c89c */
 
 async function remoteState({
   repository,
