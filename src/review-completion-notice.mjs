@@ -10,6 +10,11 @@
  */
 
 import { reviewBlockLines } from "./review-report.mjs";
+import {
+  failedCheckLines,
+  failureNextStepLines,
+  reviewErrorLines,
+} from "./review-failure-detail.mjs";
 
 const MAX_LISTED_REASONS = 5;
 
@@ -44,8 +49,10 @@ export function reviewCompletionMessage(pullRequest) {
     }
   } else if (pullRequest.checkStatus === "failed") {
     lines.push(`⚠️ Revisor レビュー失敗: ${label} は審査を完了できませんでした。`);
-    if (pullRequest.error) lines.push(`理由: ${String(pullRequest.error).slice(0, 300)}`);
-    lines.push("再実行するか、原因を確認してください。");
+    lines.push(...reviewErrorLines(pullRequest.error));
+    const checks = failedCheckLines(pullRequest.ci);
+    lines.push(...checks);
+    lines.push(...failureNextStepLines({ hasFailedChecks: checks.length > 0 }));
   } else {
     lines.push(`🔴 Revisor レビュー完了: ${label} はマージできません。`);
     const reasons = pullRequest.reasons ?? [];
@@ -53,6 +60,9 @@ export function reviewCompletionMessage(pullRequest) {
       lines.push("ブロック理由:");
       lines.push(...summarizeList(reasons));
     }
+    const checks = failedCheckLines(pullRequest.ci);
+    lines.push(...checks);
+    if (checks.length > 0) lines.push(...failureNextStepLines({ hasFailedChecks: true }));
   }
   const advisories = pullRequest.advisories ?? [];
   if (advisories.length > 0) {
