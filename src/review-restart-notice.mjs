@@ -39,10 +39,11 @@ export function reviewRestartMessage(pullRequest, reason) {
  * 通知は best-effort で、 失敗しても再審査の受付は変えない。
  */
 export async function notifyReviewRestart({ pullRequest, reason, baseUrl, notify }) {
-  if (!pullRequest?.sessionId || !baseUrl) return false;
+  const sessionId = pullRequest?.noticeSessionId ?? pullRequest?.sessionId;
+  if (!sessionId || !baseUrl) return false;
   return notify({
     baseUrl,
-    sessionId: pullRequest.sessionId,
+    sessionId,
     text: reviewRestartMessage(pullRequest, reason),
   });
 }

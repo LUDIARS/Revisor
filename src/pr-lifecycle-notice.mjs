@@ -143,10 +143,11 @@ export async function notifyPullRequestLifecycle({
   baseUrl,
   notify,
 }) {
-  if (!pullRequest?.sessionId || !baseUrl) return false;
+  const sessionId = pullRequest?.noticeSessionId ?? pullRequest?.sessionId;
+  if (!sessionId || !baseUrl) return false;
   return notify({
     baseUrl,
-    sessionId: pullRequest.sessionId,
+    sessionId,
     channel: "報告",
     authorLabel: "Revisor",
     text: pullRequestLifecycleMessage(event, pullRequest),

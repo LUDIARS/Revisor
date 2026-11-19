@@ -367,7 +367,9 @@ test("re-queues a reviewed local PR against a moved head with a full intent revi
     git(fixture.repoPath, "checkout", "main");
     const movedHead = git(fixture.repoPath, "rev-parse", "feat/local");
 
-    const retried = await service.retryPullRequest(pullRequest.id);
+    const retried = await service.retryPullRequest(pullRequest.id, { noticeSessionId: "successor" });
+    assert.equal(store.getPullRequest(pullRequest.id).noticeSessionId, "successor");
+    assert.equal(retried.sessionId, pullRequest.sessionId);
     assert.equal(submitted.length, 2);
     assert.equal(submitted[1].headSha, movedHead);
     assert.equal(submitted[1].reviewMode, "full");

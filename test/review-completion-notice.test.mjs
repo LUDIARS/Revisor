@@ -130,6 +130,16 @@ test("stays silent when Concordia cannot be located", async () => {
   assert.equal(called, false);
 });
 
+test("delivers the result to the session that requested another review", async () => {
+  const recipients = [];
+  await notifyReviewCompletion({
+    pullRequest: pr({ sessionId: "original", noticeSessionId: "successor" }),
+    baseUrl: "http://localhost",
+    notify: async ({ sessionId }) => { recipients.push(sessionId); return true; },
+  });
+  assert.deepEqual(recipients, ["successor"]);
+});
+
 function makeStore(record) {
   return {
     updatePullRequest(id, patch) {

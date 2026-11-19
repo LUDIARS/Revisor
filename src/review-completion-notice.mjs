@@ -71,10 +71,11 @@ export function reviewCompletionMessage(pullRequest) {
  * 通知は best-effort で、失敗しても審査結果は変えない。
  */
 export async function notifyReviewCompletion({ pullRequest, baseUrl, notify }) {
-  if (!pullRequest?.sessionId || !baseUrl) return false;
+  const sessionId = pullRequest?.noticeSessionId ?? pullRequest?.sessionId;
+  if (!sessionId || !baseUrl) return false;
   return notify({
     baseUrl,
-    sessionId: pullRequest.sessionId,
+    sessionId,
     text: reviewCompletionMessage(pullRequest),
   });
 }

@@ -393,7 +393,7 @@ export class LocalPrService {
    *
    * @implements SPEC-MANUAL-STALLED-REVIEW-RECOVERY
    */
-  async retryPullRequest(id, { fastLane = false, force = false } = {}) {
+  async retryPullRequest(id, { fastLane = false, force = false, noticeSessionId = null } = {}) {
     const pullRequest = this.store.getPullRequest(id);
     if (!pullRequest) throw new Error(`Local PR '${id}' was not found.`);
     if (pullRequest.status !== "open") {
@@ -406,6 +406,7 @@ export class LocalPrService {
     return this.#requeue(pullRequest, {
       reviewLane: fastLane ? REVIEW_LANES.FAST : REVIEW_LANES.STANDARD,
       allowActiveSameHead: force,
+      noticeSessionId,
       reason: REVIEW_RESTART_REASONS.MANUAL,
     });
   }
@@ -573,6 +574,7 @@ export class LocalPrService {
   async #requeue(pullRequest, {
     announceFailure = true,
     forceFullReview = false,
+    noticeSessionId = null,
     allowActiveSameHead = false,
     reviewLane = normalizeReviewLane(pullRequest.reviewLane),
     reason = forceFullReview ? REVIEW_RESTART_REASONS.RISK_REASSESSMENT : REVIEW_RESTART_REASONS.STALE_CONTENT,
@@ -621,6 +623,7 @@ export class LocalPrService {
       repository,
       this.store.updatePullRequest(pullRequest.id, {
         ...pendingReviewProjection(),
+        ...(noticeSessionId ? { noticeSessionId } : {}),
         // 引き継ぐ段階の通過と成果だけは捨てずに残す。 これが無いと、次に落ちた
         // ときにまた最初からになるうえ、再検証が前回結果を読めない。
         ...retainedStageProjection(pullRequest, reusedStages),

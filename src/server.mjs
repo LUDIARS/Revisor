@@ -277,9 +277,12 @@ export function createRequestHandler({
       }
       const retry = /^\/v1\/local-prs\/([^/]+)\/retry$/.exec(url.pathname);
       if (request.method === "POST" && retry) {
-        const retryOptions = validateReviewRetry(
-          await readJsonBody(request, { optional: true }),
-        );
+        const body = await readJsonBody(request, { optional: true });
+        const retryOptions = validateReviewRetry(body);
+        // Session routing comes from the authenticated workflow caller.
+        if (body?.session_id != null) {
+          retryOptions.noticeSessionId = validateFastLanePromotion(body).sessionId;
+        }
         const pullRequest = await localPrService.retryPullRequest(
           decodeURIComponent(retry[1]),
           retryOptions,
