@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import test from "node:test";
 import { runSecurityScan, skippedSecurityScan } from "../src/security-scan.mjs";
+import { modelRoleMap, setModelTestEnv } from "./helpers/model-role-map.mjs";
 
 const SETTINGS = {
   securityScanEnabled: true,
@@ -105,7 +106,7 @@ test("passes a configured model and omits the flag when unset", async () => {
   const withModel = [];
   await runSecurityScan({
     ...scanOptions({ exitCode: 0 }),
-    settings: { ...SETTINGS, securityScanModel: "gpt-5.6-terra" },
+    settings: { ...SETTINGS, securityScanModel: "codex-fixture-model" },
     execute: async (invocation) => {
       withModel.push(invocation);
       return { ok: true, stdout: "", stderr: "", exitCode: 0 };
@@ -113,7 +114,7 @@ test("passes a configured model and omits the flag when unset", async () => {
   });
   const modelIndex = withModel[0].args.indexOf("--model");
   assert.notEqual(modelIndex, -1);
-  assert.equal(withModel[0].args[modelIndex + 1], "gpt-5.6-terra");
+  assert.equal(withModel[0].args[modelIndex + 1], "codex-fixture-model");
 
   const withoutModel = [];
   await runSecurityScan({
@@ -124,6 +125,31 @@ test("passes a configured model and omits the flag when unset", async () => {
     },
   });
   assert.equal(withoutModel[0].args.includes("--model"), false);
+});
+
+test("resolves a security scan model role and fails before launch for an unmapped role", async (t) => {
+  setModelTestEnv(t, {
+    LUDIARS_ONESHOT_MODEL_LUNA: undefined,
+    LUDIARS_ONESHOT_MODEL_ASTRA: undefined,
+    LUDIARS_MODEL_ROLES_FILE: modelRoleMap(t, { codex: { luna: "codex-fixture-luna" } }),
+  });
+  const outcome = await runSecurityScan({
+    ...scanOptions({ exitCode: 0 }),
+    settings: { ...SETTINGS, securityScanModel: "luna" },
+    execute: async ({ args }) => {
+      assert.equal(args[args.indexOf("--model") + 1], "codex-fixture-luna");
+      return { ok: true, exitCode: 0 };
+    },
+  });
+  assert.equal(outcome.status, "passed");
+  await assert.rejects(
+    runSecurityScan({
+      ...scanOptions({ exitCode: 0 }),
+      settings: { ...SETTINGS, securityScanModel: "astra" },
+      execute: async () => assert.fail("must not launch the scanner"),
+    }),
+    /model_role_unresolved:astra/,
+  );
 });
 
 // The real temp-directory helpers are exercised here on purpose: uniqueness per

@@ -1,9 +1,10 @@
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { resolveModel } from "@ludiars/one-shot";
 import { runProcess } from "./process.mjs";
 import { analyzeProjectOrphans } from "./project-orphans.mjs";
 
-export const REVISOR_ANATOMIA_MODEL = "claude-sonnet-4-6";
+const DEFAULT_ANATOMIA_MODEL_ROLE = "sonnet";
 
 function analysisEnv(extra = {}) {
   return {
@@ -11,7 +12,10 @@ function analysisEnv(extra = {}) {
     // Anatomia's current PR path is deterministic, but its provider-capable
     // phases default to Opus. Pin Revisor-owned analysis one tier lower so a
     // future/provider-enabled phase cannot silently restore the costly default.
-    ANATOMIA_LLM_MODEL: process.env.REVISOR_ANATOMIA_MODEL || REVISOR_ANATOMIA_MODEL,
+    ANATOMIA_LLM_MODEL: resolveModel(
+      process.env.REVISOR_ANATOMIA_MODEL || DEFAULT_ANATOMIA_MODEL_ROLE,
+      "claude",
+    ),
     ...extra,
   };
 }
@@ -98,6 +102,7 @@ export async function analyzePr({
   includeProjectOrphans = false,
   run = runProcess,
 }) {
+  const env = analysisEnv({ ANATOMIA_CACHE: "off" });
   const result = await run({
     command: process.execPath,
     args: [
@@ -112,7 +117,7 @@ export async function analyzePr({
     ],
     cwd,
     timeoutMs: 10 * 60_000,
-    env: analysisEnv({ ANATOMIA_CACHE: "off" }),
+    env,
   });
   if (!result.ok) {
     // In enforced mode, Anatomia intentionally exits non-zero after emitting
@@ -136,7 +141,7 @@ export async function analyzePr({
     analysis.quality = {
       ...analysis.quality,
       projectOrphans: await analyzeProjectOrphans({
-        cliPath, cwd, run, env: analysisEnv({ ANATOMIA_CACHE: "off" }),
+        cliPath, cwd, run, env,
       }),
     };
   }

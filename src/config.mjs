@@ -13,7 +13,7 @@ import { isDiscordWebhookUrl } from "./discord-webhook.mjs";
 import { isSlackWebhookUrl } from "./slack-webhook.mjs";
 import { normalizeAllowedHosts } from "./host-policy.mjs";
 import { defaultFastLaneSlots, fastLaneReservation } from "./review-lane.mjs";
-import { isForcedReviewModel } from "./forced-review-model.mjs";
+import { normalizeForcedReviewModel } from "./forced-review-model.mjs";
 import { isForcedReviewEffort } from "./forced-review-effort.mjs";
 
 const LOCAL_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -33,7 +33,7 @@ const SECURITY_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 // identifier is accepted; the empty string means "CLI default model".
 const SECURITY_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
-function isSecurityModel(value) {
+export function isSecurityModel(value) {
   return value === "" || SECURITY_MODEL_PATTERN.test(value);
 }
 
@@ -247,9 +247,7 @@ export function readSettings(env = process.env) {
     oppositeModelReviewEnabled: typeof value.oppositeModelReviewEnabled === "boolean"
       ? value.oppositeModelReviewEnabled
       : base.oppositeModelReviewEnabled,
-    forcedReviewModel: isForcedReviewModel(value.forcedReviewModel)
-      ? value.forcedReviewModel
-      : base.forcedReviewModel,
+    forcedReviewModel: normalizeForcedReviewModel(value.forcedReviewModel) ?? base.forcedReviewModel,
     // A missing key is a legacy config and adopts the operational default.
     // An explicitly persisted unknown value is different: do not silently turn
     // a corrupt override into a valid forced effort.
@@ -329,10 +327,10 @@ export function writeSettings(settings, env = process.env) {
   // 未設定 (undefined) は現在値の維持、明示された値は登録済みモデルのみ。
   // 未知の値を黙って "" に落とすと「強制したつもりで効いていない」状態に
   // なるため、書き込み時点で拒否する。
-  const forcedReviewModel = settings.forcedReviewModel === undefined
+  const forcedReviewModel = normalizeForcedReviewModel(settings.forcedReviewModel === undefined
     ? current.forcedReviewModel
-    : settings.forcedReviewModel;
-  if (!isForcedReviewModel(forcedReviewModel)) {
+    : settings.forcedReviewModel);
+  if (forcedReviewModel === null) {
     throw new RevisorError("Forced review model is invalid.");
   }
   const forcedReviewEffort = settings.forcedReviewEffort === undefined

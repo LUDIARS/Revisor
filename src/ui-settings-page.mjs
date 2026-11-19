@@ -17,7 +17,7 @@ const BODY = `
       <div class="field">
         <label for="fallback-reviewer">Cc文脈がない場合のレビュアー</label>
         <select id="fallback-reviewer">
-          <option value="codex-sol">Codex（審査: Sol / 補助: Terra）</option>
+          <option value="codex-sol">Codex（審査: Sol / 補助: Luna）</option>
           <option value="claude-opus">Claude（審査: Opus / 補助: Sonnet）</option>
         </select>
       </div>
@@ -31,11 +31,11 @@ const BODY = `
       <div class="field">
         <label for="forced-review-model">レビューモデルの強制指定</label>
         <select id="forced-review-model">
-          <option value="">強制しない（審査は opus / gpt-5.6-sol）</option>
+          <option value="">強制しない（審査は opus / sol）</option>
           <option value="opus">Claude Opus に固定</option>
-          <option value="gpt-5.6-sol">Codex Sol に固定</option>
+          <option value="sol">Codex Sol に固定</option>
         </select>
-        <span class="note">審査判断のモデルを固定します。テスト自動修正とPR説明生成は対象外で、空き状況からTerraまたはSonnetを選びます。固定した審査が容量不足になった場合は別系列へ切り替えません。</span>
+        <span class="note">審査判断のモデル役割を固定します。テスト自動修正とPR説明生成は空き状況からLunaまたはSonnetを選びます。固定した審査が容量不足になった場合は別系列へ切り替えません。</span>
       </div>
       <div class="field">
         <label for="forced-review-effort">レビュー effort の強制指定</label>
@@ -149,7 +149,7 @@ const BODY = `
       </div>
       <div class="field">
         <label for="security-model">スキャンに使うモデル（空で CLI 既定）</label>
-        <input id="security-model" type="text" placeholder="例: gpt-5.6-terra"
+        <input id="security-model" type="text" placeholder="例: luna"
           pattern="[A-Za-z0-9][A-Za-z0-9._-]*" maxlength="64">
         <span class="note">モデル名のみ（英数字と . _ -）。CLI 引数としてそのまま渡るため、それ以外の文字は保存時に拒否されます。</span>
       </div>

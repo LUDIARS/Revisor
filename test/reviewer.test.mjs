@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { runNamedCli } from "../src/process.mjs";
+import { modelRoleMap } from "./helpers/model-role-map.mjs";
 import {
   alternateReviewer,
   modelForPurpose,
@@ -20,7 +22,7 @@ test("reviews with the strong model on both reviewer providers", () => {
   });
   assert.deepEqual(reviewerInvocation("codex-sol", { env: SANDBOXED }), {
     name: "codex",
-    args: ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "workspace-write", "-"],
+    args: ["exec", "--model", "sol", "-c", "model_reasoning_effort=medium", "--sandbox", "workspace-write", "-"],
   });
 });
 
@@ -29,14 +31,14 @@ test("reviews with the strong model on both reviewer providers", () => {
 // 弱いモデルで走る — 既定は必ず review でなければならない。
 test("uses the auxiliary model only for machine work", () => {
   assert.equal(reviewerInvocation("claude-opus", { purpose: "auxiliary" }).args[1], "sonnet");
-  assert.equal(reviewerInvocation("codex-sol", { purpose: "auxiliary" }).args[2], "gpt-5.6-terra");
+  assert.equal(reviewerInvocation("codex-sol", { purpose: "auxiliary" }).args[2], "luna");
   assert.equal(modelForPurpose("claude-opus"), "opus");
-  assert.equal(modelForPurpose("codex-sol"), "gpt-5.6-sol");
+  assert.equal(modelForPurpose("codex-sol"), "sol");
   assert.throws(() => modelForPurpose("gemini"), /Unsupported reviewer 'gemini'/);
   assert.throws(() => modelForPurpose("gemini", "auxiliary"), /Unsupported reviewer 'gemini'/);
   assert.throws(() => modelForPurpose("codex-sol", "auxilary"), /Unsupported reviewer purpose/);
   assert.throws(
-    () => reviewerInvocation("codex-sol", { purpose: "auxilary", forcedModel: "gpt-5.6-sol" }),
+    () => reviewerInvocation("codex-sol", { purpose: "auxilary", forcedModel: "sol" }),
     /Unsupported reviewer purpose/,
   );
 });
@@ -45,11 +47,11 @@ test("REVISOR_CODEX_SANDBOX=danger-full-access drops the codex sandbox launch", 
   const env = { REVISOR_CODEX_SANDBOX: "danger-full-access" };
   assert.deepEqual(reviewerInvocation("codex-sol", { env, platform: "win32" }), {
     name: "codex",
-    args: ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
+    args: ["exec", "--model", "sol", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
   });
   assert.deepEqual(reviewerInvocation("codex-sol", { readOnly: true, env, platform: "win32" }), {
     name: "codex",
-    args: ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
+    args: ["exec", "--model", "sol", "-c", "model_reasoning_effort=medium", "--sandbox", "danger-full-access", "-"],
   });
 });
 
@@ -75,12 +77,23 @@ test("falls back only for provider capacity failures", () => {
   }), false);
 });
 
+test("reports an unresolved Codex role from the native one-shot boundary", async (t) => {
+  const result = await runNamedCli({
+    ...reviewerInvocation("codex-sol", { env: SANDBOXED }),
+    env: { LUDIARS_MODEL_ROLES_FILE: modelRoleMap(t, { codex: {} }) },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.exitCode, null);
+  assert.equal(result.stderr, "model_role_unresolved:sol");
+  assert.equal(reviewerCapacityUnavailable(result), false);
+});
+
 test("keeps plan-only calls read-only without downgrading the model", () => {
   assert.deepEqual(reviewerInvocation("claude-opus", { readOnly: true }).args, [
     "--model", "opus", "--effort", "medium", "--permission-mode", "plan", "--print",
   ]);
   assert.deepEqual(reviewerInvocation("codex-sol", { readOnly: true, env: SANDBOXED }).args, [
-    "exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--sandbox", "read-only", "-",
+    "exec", "--model", "sol", "-c", "model_reasoning_effort=medium", "--sandbox", "read-only", "-",
   ]);
 });
 
@@ -91,7 +104,7 @@ test("carries the requested effort through to both reviewer providers", () => {
   );
   assert.deepEqual(
     reviewerInvocation("codex-sol", { effort: "high", env: SANDBOXED }).args,
-    ["exec", "--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=high", "--sandbox", "workspace-write", "-"],
+    ["exec", "--model", "sol", "-c", "model_reasoning_effort=high", "--sandbox", "workspace-write", "-"],
   );
 });
 

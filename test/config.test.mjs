@@ -202,6 +202,25 @@ test("writeSettings persists an absolute augurFolder even when given a relative 
   }
 });
 
+test("reads the saved Codex Sol model as a role and persists it on the next save", () => {
+  const state = fixture();
+  try {
+    const settings = {
+      anatomiaFolder: "./anatomia",
+      fallbackReviewer: "claude-opus",
+      workerCount: 1,
+      forcedReviewModel: `gpt-${5.6}-sol`,
+    };
+    writeFileSync(state.path, JSON.stringify({ version: 1, settings, secrets: {} }));
+    assert.equal(readSettings(state.env).forcedReviewModel, "sol");
+    assert.equal(JSON.parse(readFileSync(state.path, "utf8")).settings.forcedReviewModel, settings.forcedReviewModel);
+    writeSettings({ ...settings, forcedReviewModel: undefined }, state.env);
+    assert.equal(JSON.parse(readFileSync(state.path, "utf8")).settings.forcedReviewModel, "sol");
+  } finally {
+    removeFixture(state.directory);
+  }
+});
+
 test("stores settings and encrypts local workflow secrets", () => {
   const state = fixture();
   try {
@@ -257,7 +276,7 @@ test("stores settings and encrypts local workflow secrets", () => {
       securityFailOnSeverity: "medium",
       securityMaxCostUsd: 2.5,
       securityScanEffort: "low",
-      securityScanModel: " gpt-5.6-terra ",
+      securityScanModel: " codex-fixture-model ",
     }, state.env);
     assert.equal(readSettings(state.env).anatomiaReviewGateEnabled, false);
     // Untouched by that write: the dual-layer gate keeps its enforced default.
@@ -266,7 +285,7 @@ test("stores settings and encrypts local workflow secrets", () => {
     assert.equal(readSettings(state.env).securityFailOnSeverity, "medium");
     assert.equal(readSettings(state.env).securityMaxCostUsd, 2.5);
     assert.equal(readSettings(state.env).securityScanEffort, "low");
-    assert.equal(readSettings(state.env).securityScanModel, "gpt-5.6-terra");
+    assert.equal(readSettings(state.env).securityScanModel, "codex-fixture-model");
     // 未知の effort は保存させない。 CLI へそのまま渡る値なので、 不正値を通すと
     // スキャン自体が落ちて「未完了」= マージ不可になり、 原因も見えなくなる。
     assert.throws(

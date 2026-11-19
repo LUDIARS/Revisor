@@ -58,6 +58,8 @@ Scan stopped: estimated cost $X exceeded the $Y limit   → exit 2
 対策として `--effort` を設定 (`securityScanEffort`) から**常に明示**し、 既定を
 `medium` に下げて「完走すること」を優先する。 深く見たいときだけ設定で上げる。
 `securityScanModel` は空なら CLI 既定モデルに任せ、 安いモデルへ寄せたいときだけ指定する。
+Codex の役割名を指定すると起動時に Concordia の対応表で解決する。明示したモデル ID は維持する。
+解決後の値にも同じ書式検証を行い、解決や検証に失敗した場合は理由を返して起動を中止する。
 
 実測 (2026-07-30、 Revisor 自身の 5 ファイル・+289 行の PR = merge-base 起点の実スコープ):
 `--effort medium` で **$4.15**・60 反復で完走した。 ただしこれは

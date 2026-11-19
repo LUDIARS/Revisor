@@ -134,20 +134,27 @@ section 置換、leakage / verification / checkpoint / cost skip、head 一致�
 
 ## SPEC-REVIEW-MODEL-BY-PURPOSE: 用途ごとのモデル選択
 
+関連タスク `actio:d1c9bf9d-16ee-40bd-81fd-2c64fec1ae09`
+
 モデルは差分規模ではなく呼び出しの用途から選ぶ。`purpose` は `review` または `auxiliary`
 だけを受け付け、不明な値は strong 側へ黙って倒さずエラーにする。
 
 - `review` は審査判断を行う用途で、既定値でもある。Claude 系列は `opus`、Codex 系列は
-  `gpt-5.6-sol` を使う。investigator、judge、plan advisor はいずれも審査判断なのでこちらに含む。
+  `sol` を使う。investigator、judge、plan advisor はいずれも審査判断なのでこちらに含む。
 - `auxiliary` は審査判断を行わない機械作業専用である。Claude 系列は `sonnet`、Codex 系列は
-  `gpt-5.6-terra` を使う。現時点では test autofix と PR narrative 整合だけが明示指定する。
+  `luna` を使う。現時点では test autofix と PR narrative 整合だけが明示指定する。
 - `forcedReviewModel` / `forcedReviewEffort` は審査判断だけに適用し、補助タスクでは無視する。
+
+Lapilli one-shot が CLI 起動時に Concordia の役割対応表を参照する。WSL 経由の Codex は
+Windows 側で解決した ID を引数で渡す。解決できない役割は理由を返して起動を中止する。
+Claude Code が解決できる同名エイリアスは Lapilli の規則に従う。Anatomia は既定で
+`sonnet` を使い、`REVISOR_ANATOMIA_MODEL` で指定した役割または明示 ID を優先する。
 
 ### SPEC-AUXILIARY-MODEL-CAPACITY: 補助モデルを空き状況から選ぶ
 
 テスト自動修正とPR説明生成は、審査の強制設定・作成者系列から独立して選ぶ。
 Rvのレビューワーカープールで実行中の系列別件数をdispatch時に比較し、少ない方の
-TerraまたはSonnetを選ぶ。同数はTerra優先。これはRv内の負荷の指標であり、
+LunaまたはSonnetを選ぶ。同数はLuna優先。これはRv内の負荷の指標であり、
 他サービスやアカウント全体の利用枠を測った値ではない。
 容量不足ならもう一方を一度だけ試す。通常の失敗は再試行しない。
 選択と容量不足による切替をログに残す。補助作業のeffortは呼び出し側のlowを維持する。
@@ -318,15 +325,16 @@ Anatomia の `pr-review` は domain / quality / architecture を 1 回の呼び�
 ## SPEC-FORCED-REVIEW-MODEL: 運用者がレビューモデルを固定する
 
 通常、レビューモデルは呼び出しの用途 (`purpose`) が決める — 審査判断は必ず strong 側
-(`opus` / `gpt-5.6-sol`)、補助タスクだけが auxiliary 側へ降りる (SPEC-REVIEW-MODEL-BY-PURPOSE)。
+(`opus` / `sol`)、補助タスクだけが auxiliary 側へ降りる (SPEC-REVIEW-MODEL-BY-PURPOSE)。
 運用側で「審査判断をこのモデルで行う」ときに、その選択を上書きする設定が
 `forcedReviewModel` である。`forcedReviewEffort` は同様に各 review
 stage が選んだ effort を上書きする。モデルは空文字が既定で、そのときは用途ごとのモデル選択を
 維持する。effort は 2026-08-23 の運用指示により `medium` を既定とし、空文字へ明示変更した
 場合だけ差分ごとの戦略へ戻す。
 
-1. 値は自由入力にせず、審査に使える strong モデル (`opus` / `gpt-5.6-sol`) だけを受け付ける。
-   補助専用の `sonnet` / `gpt-5.6-terra` は強制指定できない。値は `--model` として argv に
+1. 審査に使える役割 (`opus` / `sol`) を受け付ける。旧設定の Codex Sol モデル ID は
+   読み込み時に `sol` へ変換し、次の設定保存で役割を書き込む。
+   補助専用の `sonnet` / `luna` は強制指定できない。値は `--model` として argv に
    載るうえ、「そのモデルがどちらのレビュアー系列か」が分からないと `codex` に `--model opus`
    を渡すような取り合わせが作れてしまうため、登録表 (`src/forced-review-model.mjs`) で
    モデルと系列を対にして持つ。

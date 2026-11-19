@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { modelRoleMap } from "./helpers/model-role-map.mjs";
 import {
   buildWslCodexArgs,
   codexRuntimeConfig,
@@ -75,7 +76,7 @@ test("quotes values for the WSL shell and refuses control characters", () => {
 
 test("builds a wsl.exe argv that cds into the converted worktree", () => {
   const args = buildWslCodexArgs({
-    args: ["exec", "--model", "gpt-5.6-terra", "--sandbox", "workspace-write", "-"],
+    args: ["exec", "--model", "codex-fixture-luna", "--sandbox", "workspace-write", "-"],
     cwd: "E:\\Document\\Ars\\work\\head",
     sharedCliPath: "E:/library with spaces/cli.js",
     config: {
@@ -94,7 +95,7 @@ test("builds a wsl.exe argv that cds into the converted worktree", () => {
     "bash",
     "-lc",
     "cd '/mnt/e/Document/Ars/work/head' && exec node '/mnt/e/library with spaces/cli.js' \"$HOME\"'/.local/bin/codex' 'exec' '--model' "
-      + "'gpt-5.6-terra' '--sandbox' 'workspace-write' '-'",
+      + "'codex-fixture-luna' '--sandbox' 'workspace-write' '-'",
   ]);
 });
 
@@ -169,12 +170,13 @@ test("keeps the native path byte-identical when the runtime is not set", async (
   });
 });
 
-test("routes only codex through WSL, leaving other CLIs on the native path", async () => {
+test("routes only codex through WSL and passes the model resolved on the host", async (t) => {
   const env = {
     REVISOR_CODEX_RUNTIME: "wsl",
     PATH: "C:\\Windows\\System32",
     WSLENV: "GITHUB_TOKEN/u",
     GITHUB_TOKEN: "ghp_example",
+    LUDIARS_MODEL_ROLES_FILE: modelRoleMap(t, { codex: { sol: "codex-fixture-sol" } }),
   };
   let claude = null;
   await runCodexAwareCli({
@@ -217,9 +219,28 @@ test("routes only codex through WSL, leaving other CLIs on the native path", asy
   assert.equal(spawned.cwd, "E:\\work\\head");
   assert.deepEqual(spawned.args.slice(0, 6), ["-d", "Ubuntu", "-u", "ubuntu", "--", "bash"]);
   assert.match(spawned.args.at(-1), /^cd '\/mnt\/e\/work\/head' && /);
+  assert.match(spawned.args.at(-1), /'--model' 'codex-fixture-sol'/);
   // Only the launcher variables reach wsl.exe, and WSLENV is neutralised so the
   // host's own WSLENV cannot smuggle GITHUB_TOKEN across the boundary.
   assert.deepEqual(spawned.env, { PATH: "C:\\Windows\\System32", WSLENV: "" });
+});
+
+test("fails before starting WSL if an explicitly selected Codex role is missing", async (t) => {
+  const result = await runCodexAwareCli({
+    name: "codex",
+    args: ["exec", "--model", "luna", "-"],
+    cwd: "E:\\work\\head",
+    env: {
+      REVISOR_CODEX_RUNTIME: "wsl",
+      LUDIARS_MODEL_ROLES_FILE: modelRoleMap(t, { codex: { sol: "codex-fixture-sol" } }),
+    },
+  }, {
+    runCli: async () => assert.fail("must not fall back to native"),
+    runProc: async () => assert.fail("must not start WSL"),
+    platform: "win32",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.stderr, "model_role_unresolved:luna");
 });
 
 // sandbox 切替は綴り間違いを黙って sandboxed へ落とすと「設定したつもりで

@@ -11,6 +11,7 @@
   },
   "files": [
     "src",
+    "contracts",
     "scripts",
     "spec",
     "README.md",

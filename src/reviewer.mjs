@@ -1,22 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { claudeSessionCapacityUnavailable } from "./claude-capacity.mjs";
-import { forcedReviewerFor } from "./forced-review-model.mjs";
+import { forcedReviewerFor, normalizeForcedReviewModel } from "./forced-review-model.mjs";
 import { codexSandboxArgs, runCodexAwareCli } from "./codex-runtime.mjs";
 import { serviceLog } from "./service-log.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:c6083ad4 */
+import augurContract_d65aa006 from '../contracts/reviewer-model-role.contract.mjs'; /* augur-inject:contract-predicate:d352abc5 */
 
 // Persisted reviewer ids identify a provider family for config compatibility.
-// The concrete model comes from what the call is *for*, not from the diff size.
+// The model role comes from the purpose of the call.
 //
 // **審査そのものは常に strong モデルで行う** (neco 判断 2026-08-21: sonnet と
-// gpt-5.6-terra はレビュー向きではない)。 差分が小さいことは「弱いモデルで見てよい」の
+// luna はレビュー向きではない)。 差分が小さいことは「弱いモデルで見てよい」の
 // 理由にならない — 小さい差分ほど誤りが見逃されると気づかれない。
 //
 // 一方 test autofix と narrative 生成は**レビュー判断ではなく機械作業**なので、
 // 別枠の安いモデルを使う (neco 判断 2026-09-04:「レビュー本体のみ opus/sol に、
 // 補助タスクは別モデル」)。 分けないと機械作業に strong の推論コストを払い続ける。
 const MODELS_BY_PURPOSE = new Map([
-  ["review", new Map([["claude-opus", "opus"], ["codex-sol", "gpt-5.6-sol"]])],
-  ["auxiliary", new Map([["claude-opus", "sonnet"], ["codex-sol", "gpt-5.6-terra"]])],
+  ["review", new Map([["claude-opus", "opus"], ["codex-sol", "sol"]])],
+  ["auxiliary", new Map([["claude-opus", "sonnet"], ["codex-sol", "luna"]])],
 ]);
 
 /**
@@ -24,13 +26,15 @@ const MODELS_BY_PURPOSE = new Map([
  *
  * @implements SPEC-REVIEW-MODEL-BY-PURPOSE
  */
-export function modelForPurpose(reviewer, purpose = "review") {
+export function modelForPurpose(reviewerId, purpose = "review") {
   const table = MODELS_BY_PURPOSE.get(purpose);
   if (!table) throw new Error(`Unsupported reviewer purpose '${purpose}'.`);
-  const model = table.get(reviewer);
-  if (!model) throw new Error(`Unsupported reviewer '${reviewer}'.`);
-  return model;
+  const role = table.get(reviewerId);
+  if (!role) throw new Error(`Unsupported reviewer '${reviewerId}'.`);
+  return role;
 }
+// @ts-expect-error augur-inject
+modelForPurpose = contract(modelForPurpose, { ...augurContract_d65aa006, contractId: 'C-26', mode: 'observe', sample: 1, where: 'src/reviewer.mjs:27', rule: 'contract-wrap', id: 'd65aa006' }); /* augur-inject:contract-wrap:d65aa006 */
 
 /** @implements SPEC-CODEX-SANDBOX-MODE */
 export function reviewerInvocation(reviewer, {
@@ -51,13 +55,14 @@ export function reviewerInvocation(reviewer, {
       `Forced review model '${forcedModel}' does not belong to reviewer '${reviewer}'.`,
     );
   }
-  const selectedModel = modelForPurpose(reviewer, purpose);
+  const defaultRole = modelForPurpose(reviewer, purpose);
+  const selectedRole = normalizeForcedReviewModel(forcedModel) || defaultRole;
   if (reviewer === "claude-opus") {
     return {
       name: "claude",
       args: [
         "--model",
-        forcedModel || selectedModel,
+        selectedRole,
         "--effort",
         effort,
         "--permission-mode",
@@ -73,7 +78,7 @@ export function reviewerInvocation(reviewer, {
       args: [
         "exec",
         "--model",
-        forcedModel || selectedModel,
+        selectedRole,
         "-c",
         `model_reasoning_effort=${effort}`,
         ...codexSandboxArgs(readOnly, env, platform),

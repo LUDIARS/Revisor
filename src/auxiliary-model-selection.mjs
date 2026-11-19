@@ -13,7 +13,7 @@ export function selectAuxiliaryReviewer(activeRequests) {
       : forcedReviewerFor(options.forcedModel) ?? options.reviewer;
     if (running.has(reviewer)) running.set(reviewer, running.get(reviewer) + 1);
   }
-  // Equal load prefers Terra; the choice is made when a worker becomes free,
+  // Equal load prefers Luna; the choice is made when a worker becomes free,
   // so queued tasks do not all reserve the same stale snapshot.
   return REVIEWERS.reduce((best, reviewer) =>
     running.get(reviewer) < running.get(best) ? reviewer : best);

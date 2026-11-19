@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  FORCEABLE_REVIEW_MODEL_IDS,
+  FORCEABLE_REVIEW_MODEL_ROLES,
   configuredForcedReviewModel,
   forcedReviewerFor,
   isForcedReviewModel,
@@ -15,7 +15,7 @@ import { runReviewWithCapacityFallback } from "../src/runner.mjs";
 
 test("accepts only the registered models, plus the empty opt-out", () => {
   assert.equal(isForcedReviewModel(""), true);
-  for (const id of FORCEABLE_REVIEW_MODEL_IDS) {
+  for (const id of FORCEABLE_REVIEW_MODEL_ROLES) {
     assert.equal(isForcedReviewModel(id), true);
   }
   assert.equal(isForcedReviewModel("opus-4"), false);
@@ -25,9 +25,18 @@ test("accepts only the registered models, plus the empty opt-out", () => {
 
 test("resolves the reviewer family a forced model belongs to", () => {
   assert.equal(forcedReviewerFor("opus"), "claude-opus");
-  assert.equal(forcedReviewerFor("gpt-5.6-sol"), "codex-sol");
+  assert.equal(forcedReviewerFor("sol"), "codex-sol");
   assert.equal(forcedReviewerFor(""), null);
   assert.equal(forcedReviewerFor("opus-4"), null);
+});
+
+test("migrates a legacy Codex Sol override in both worker settings and reviewer arguments", () => {
+  for (const version of [5.6, 6]) {
+    const legacyModel = `gpt-${version}-sol`;
+    assert.equal(configuredForcedReviewModel({}, () => ({ forcedReviewModel: legacyModel })), "sol");
+    assert.equal(forcedReviewerFor(legacyModel), "codex-sol");
+    assert.equal(reviewerInvocation("codex-sol", { forcedModel: legacyModel, env: {} }).args[2], "sol");
+  }
 });
 
 // 補助モデルは審査に使わないと決めた以上、強制上書きの候補からも消えて
@@ -55,9 +64,9 @@ test("keeps auxiliary models independent of review overrides", () => {
     ["--model", "sonnet", "--effort", "medium", "--permission-mode", "acceptEdits", "--print"],
   );
   assert.deepEqual(
-    reviewerInvocation("codex-sol", { purpose: "auxiliary", forcedModel: "gpt-5.6-sol", env: {} }).args,
+    reviewerInvocation("codex-sol", { purpose: "auxiliary", forcedModel: "sol", env: {} }).args,
     [
-      "exec", "--model", "gpt-5.6-terra", "-c", "model_reasoning_effort=medium",
+      "exec", "--model", "luna", "-c", "model_reasoning_effort=medium",
       "--sandbox", "workspace-write", "-",
     ],
   );
@@ -79,7 +88,7 @@ test("forces medium effort even when the review strategy requested high", async 
     prompt: "review",
     timeoutMs: 1000,
     effort: "high",
-    forcedModel: "gpt-5.6-sol",
+    forcedModel: "sol",
     forcedEffort: "medium",
   }, {
     runCli: async (options) => {
@@ -145,7 +154,7 @@ test("keeps the caller's reviewer when nothing is forced", async () => {
     },
   });
   assert.equal(invocation.name, "codex");
-  assert.equal(invocation.args[2], "gpt-5.6-sol");
+  assert.equal(invocation.args[2], "sol");
 });
 
 test("reports the forced reviewer instead of the one selection asked for", async () => {

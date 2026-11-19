@@ -1,4 +1,6 @@
 import { rm } from "node:fs/promises";
+import { resolveModel } from "@ludiars/one-shot";
+import { isSecurityModel } from "./config.mjs";
 import { runNamedCli } from "./process.mjs";
 import { makeScratchDir } from "./scratch-space.mjs";
 
@@ -97,7 +99,7 @@ function extractFindings(stdout, failOnSeverity) {
   return { total: sanitized.length, findings: sanitized.slice(0, MAX_FINDINGS) };
 }
 
-function scanArgs({ worktreePath, diffBase, settings, outputDir }) {
+function scanArgs({ worktreePath, diffBase, settings, outputDir, model }) {
   return [
     "scan",
     worktreePath,
@@ -111,7 +113,7 @@ function scanArgs({ worktreePath, diffBase, settings, outputDir }) {
     "--effort",
     settings.securityScanEffort,
     // 空なら CLI 既定モデルに任せる (安いモデルへ寄せたいときだけ設定)。
-    ...(settings.securityScanModel ? ["--model", settings.securityScanModel] : []),
+    ...(model ? ["--model", model] : []),
     // Pinned to the ChatGPT/Codex subscription sign-in (neco 2026-07-30): the
     // default "auto" would silently switch to metered API billing whenever an
     // OPENAI_API_KEY/CODEX_API_KEY happens to be present in the service env.
@@ -174,6 +176,9 @@ export async function runSecurityScan({
   if (!settings.securityScanEnabled) {
     return skippedSecurityScan("disabled by settings");
   }
+  const model = settings.securityScanModel ? resolveModel(settings.securityScanModel, "codex") : "";
+  // Validate the resolved value before it reaches the Windows cmd.exe shim.
+  if (!isSecurityModel(model)) throw new Error("Invalid resolved security scan model.");
   const outputDir = await makeOutputDir();
   let stateDir;
   let result;
@@ -184,7 +189,7 @@ export async function runSecurityScan({
     stateDir = await makeStateDir();
     result = await execute({
       name: "codex-security",
-      args: scanArgs({ worktreePath, diffBase, settings, outputDir }),
+      args: scanArgs({ worktreePath, diffBase, settings, outputDir, model }),
       cwd: worktreePath,
       timeoutMs,
       env: scanEnv(stateDir),

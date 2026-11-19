@@ -1,6 +1,9 @@
 import { fileURLToPath } from "node:url";
+import { resolveModel } from "@ludiars/one-shot";
 import { RevisorError } from "./errors.mjs";
 import { runNamedCli, runProcess } from "./process.mjs";
+import { contract } from './contract-runtime.mjs'; /* augur-inject:import:801bc0f3 */
+import augurContract_ecf4bfa8 from '../contracts/wsl-model-role.contract.mjs'; /* augur-inject:contract-predicate:58657c22 */
 
 // Windows 版 codex はツール実行のたびに `CreateProcessWithLogonW` で
 // `CodexSandboxOffline` のログオンセッションを作り、それを解放しない
@@ -183,6 +186,25 @@ export function buildWslCodexArgs({ args, cwd, config,
   return ["-d", config.distro, "-u", config.user, "--", "bash", "-lc", command];
 }
 
+export function resolveWslModelArgs(args, env) {
+  const result = [...args];
+  const index = args.findIndex((arg) => arg === "--model" || arg === "-m");
+  if (index !== -1) {
+    if (!args[index + 1]) throw new Error("Missing model argument");
+    result[index + 1] = resolveModel(args[index + 1], "codex", env);
+    return result;
+  }
+  const inline = args.findIndex((arg) => arg.startsWith("--model="));
+  if (inline !== -1) {
+    result[inline] = `--model=${resolveModel(args[inline].slice(8), "codex", env)}`;
+    return result;
+  }
+  result.splice(args.indexOf("exec") + 1, 0, "--model", resolveModel("sol", "codex", env));
+  return result;
+}
+// @ts-expect-error augur-inject
+resolveWslModelArgs = contract(resolveWslModelArgs, { ...augurContract_ecf4bfa8, contractId: 'C-28', mode: 'observe', sample: 1, where: 'src/codex-runtime.mjs:187', rule: 'contract-wrap', id: 'ecf4bfa8' }); /* augur-inject:contract-wrap:ecf4bfa8 */
+
 /**
  * 名前付き CLI を起動する。`codex` かつ runtime=wsl のときだけ WSL 経由に
  * 差し替え、それ以外は `runNamedCli` と完全に同じ経路を通る。
@@ -209,9 +231,17 @@ export async function runCodexAwareCli(
       `${RUNTIME_ENV}=wsl requires a Windows host (wsl.exe), but the platform is '${platform}'.`,
     );
   }
+  // Concordia writes the map on the Windows host. Resolve before crossing
+  // into WSL so the launcher can keep the existing environment boundary.
+  let resolvedArgs;
+  try {
+    resolvedArgs = resolveWslModelArgs(args, env);
+  } catch (error) {
+    return { ok: false, stdout: "", stderr: error.message, exitCode: null };
+  }
   return runProc({
     command: "wsl.exe",
-    args: buildWslCodexArgs({ args, cwd, config }),
+    args: buildWslCodexArgs({ args: resolvedArgs, cwd, config }),
     cwd,
     stdin,
     timeoutMs,

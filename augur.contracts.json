@@ -5,6 +5,33 @@
   "runtimeFile": "src/contract-runtime.mjs",
   "contracts": [
     {
+      "id": "C-26",
+      "criterion": "C-26 modelForPurpose(reviewer, purpose): 審査は opus/sol、補助は sonnet/luna の役割名を返す",
+      "symbol": "modelForPurpose",
+      "file": "src/reviewer.mjs",
+      "module": "contracts/reviewer-model-role.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-27",
+      "criterion": "C-27 normalizeForcedReviewModel(value): 審査用の役割名を保持し、旧 Codex Sol ID を sol に正規化し、範囲外の値を拒否する",
+      "symbol": "normalizeForcedReviewModel",
+      "file": "src/forced-review-model.mjs",
+      "module": "contracts/forced-review-model-role.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
+      "id": "C-28",
+      "criterion": "C-28 resolveWslModelArgs(args, env): WSL の Codex 起動引数には Windows 側で解決したモデル ID を渡す",
+      "symbol": "resolveWslModelArgs",
+      "file": "src/codex-runtime.mjs",
+      "module": "contracts/wsl-model-role.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
       "id": "C-22",
       "criterion": "C-22 workflowAuthorizationHeaders(env): ローカル設定の workflow トークンを Authorization: Bearer 1 本で返し、取れないときは何が足りないかを日本語で示して送信前に失敗する",
       "symbol": "workflowAuthorizationHeaders",

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzePr } from "../src/anatomia.mjs";
+import { modelRoleMap, setModelTestEnv } from "./helpers/model-role-map.mjs";
 
 function capture(stdout = "{}", ok = true) {
   const calls = [];
@@ -21,6 +22,21 @@ test("analyzePr runs pr-review without the dual-layer enforcement flag by defaul
     "anatomia.mjs", "pr-review", "--repo", "head", "--base", "base", "--json",
   ]);
   assert.equal(runner.calls[0].env.ANATOMIA_CACHE, "off");
+});
+
+test("Anatomia resolves the default Sonnet role and preserves an explicit model ID", async (t) => {
+  setModelTestEnv(t, {
+    REVISOR_ANATOMIA_MODEL: undefined,
+    LUDIARS_ONESHOT_MODEL_SONNET: undefined,
+    LUDIARS_MODEL_ROLES_FILE: modelRoleMap(t, { claude: { sonnet: "claude-sonnet-fixture" } }),
+  });
+  const runner = capture();
+  const options = { cliPath: "anatomia.mjs", cwd: "head", base: "base", run: runner.run };
+  await analyzePr(options);
+  assert.equal(runner.calls[0].env.ANATOMIA_LLM_MODEL, "claude-sonnet-fixture");
+  process.env.REVISOR_ANATOMIA_MODEL = "claude-opus-fixture";
+  await analyzePr(options);
+  assert.equal(runner.calls[1].env.ANATOMIA_LLM_MODEL, "claude-opus-fixture");
 });
 
 test("analyzePr forwards --enforce-dual-layer-domain-gate only when enforcement is requested", async () => {

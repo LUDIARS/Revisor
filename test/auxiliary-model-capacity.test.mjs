@@ -32,7 +32,7 @@ function reviewRequest(reviewer, purpose = "review") {
   };
 }
 
-test("selects the less busy auxiliary family and prefers Terra on ties", () => {
+test("selects the less busy auxiliary family and prefers Luna on ties", () => {
   assert.equal(selectAuxiliaryReviewer([]), "codex-sol");
   assert.equal(selectAuxiliaryReviewer([
     reviewRequest("codex-sol"),
@@ -63,7 +63,7 @@ test("strips review overrides from auxiliary work at the worker boundary", async
       effort: "low",
     },
   }, {
-    forcedReviewModel: () => "gpt-5.6-sol",
+    forcedReviewModel: () => "sol",
     forcedReviewEffort: () => "medium",
     review: async (options) => {
       seen = options;
@@ -101,7 +101,7 @@ test("tries the other auxiliary family once on capacity failure", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.reviewer, "claude-opus");
   assert.deepEqual(invocations.map(({ name }) => name), ["codex", "claude"]);
-  assert.ok(invocations[0].args.includes("gpt-5.6-terra"));
+  assert.ok(invocations[0].args.includes("luna"));
   assert.ok(invocations[0].args.includes("model_reasoning_effort=low"));
   assert.deepEqual(invocations[1].args.slice(0, 4), ["--model", "sonnet", "--effort", "low"]);
   assert.deepEqual(logs, [["auxiliary_model_capacity_fallback", {
