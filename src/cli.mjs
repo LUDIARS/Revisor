@@ -25,6 +25,7 @@ import { serviceLog } from "./service-log.mjs";
 import { runManualReleaseCommand } from "./release-local-command.mjs";
 import { runServiceVersionCommand } from "./service-version-command.mjs";
 import { runRepositoryNotifyCommand } from "./repository-notify-command.mjs";
+import { runCloudBuildCommand } from "./cloud-build/command.mjs";
 
 function printHelp(stdout) {
   stdout.write([
@@ -47,6 +48,9 @@ function printHelp(stdout) {
     "  revisor repo register --json-file <path>",
     "  revisor repo notify <owner/name> --release <json-array> [--merged <json-array>] [--json]",
     "  revisor repo list [--json]",
+    "  revisor cloud-build request --exchange <dir> --repo <path> --pr <id> --number <n> --repository <owner/name> --head <sha> --run <id> --shard <i>/<n> --test <name>... --os <os> --arch <arch> --toolchain <name>@<version> [--cmake <v>] --input <path>... [--ttl-hours <n>]",
+    "  revisor cloud-build ingest --exchange <dir> --result <dir>  # 外部の結果を依頼と照合して分類 (拒否は exit 2)",
+    "  revisor cloud-build status --exchange <dir> --run <id> --head <sha>",
     "  revisor repo divergence [--repository <owner/name>] [--all] [--json]  # compare base with origin",
     "  revisor repo set-workflow <owner/name> <revisor|github>  # publish via GitHub App, or plain push",
     "  revisor queue status [--json]",
@@ -121,6 +125,8 @@ export async function main(args, {
   if (versionsHandled !== null) return versionsHandled;
   const notifyHandled = await runRepositoryNotifyCommand(args, { cwd, stdout, fetchImpl });
   if (notifyHandled !== null) return notifyHandled;
+  const cloudBuildHandled = await runCloudBuildCommand(args, { stdout });
+  if (cloudBuildHandled !== null) return cloudBuildHandled;
   // 審査キューは記録なので、投入も参照もマージも常駐プロセス無しで完結する。
   const handled = await runLocalPrCommand(args, { stdin, stdout });
   if (handled !== null) return handled;
