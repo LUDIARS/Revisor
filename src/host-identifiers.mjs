@@ -54,7 +54,7 @@ export function containsPrivateIp(line) {
   return false;
 }
 // @ts-expect-error augur-inject
-containsPrivateIp = contract(containsPrivateIp, { ...augurContract_7f76138a, contractId: 'C-12', mode: 'observe', sample: 1, where: 'src/host-identifiers.mjs:46', rule: 'contract-wrap', id: '7f76138a' }); /* augur-inject:contract-wrap:7f76138a */
+containsPrivateIp = contract(containsPrivateIp, { ...augurContract_7f76138a, contractId: 'C-12', mode: 'observe', sample: 0.01, where: 'src/host-identifiers.mjs:46', rule: 'contract-wrap', id: '7f76138a' }); /* augur-inject:contract-wrap:7f76138a */
 
 const PATH_SEGMENT = String.raw`[^\\/\s"'\x60<>|*?:;,()\[\]]*`;
 const DRIVE_PATH = new RegExp(
@@ -97,7 +97,7 @@ export function containsLocalPath(line) {
   return hasConcreteDrivePath(line) || hasConcreteHomePath(line);
 }
 // @ts-expect-error augur-inject
-containsLocalPath = contract(containsLocalPath, { ...augurContract_f1715103, contractId: 'C-13', mode: 'observe', sample: 1, where: 'src/host-identifiers.mjs:90', rule: 'contract-wrap', id: 'f1715103' }); /* augur-inject:contract-wrap:f1715103 */
+containsLocalPath = contract(containsLocalPath, { ...augurContract_f1715103, contractId: 'C-13', mode: 'observe', sample: 0.01, where: 'src/host-identifiers.mjs:90', rule: 'contract-wrap', id: 'f1715103' }); /* augur-inject:contract-wrap:f1715103 */
 
 const FULL_DRIVE_PATH = new RegExp(
   String.raw`(?<![A-Za-z0-9_])[A-Za-z]:(?:(?:\\{1,2}|/)+${PATH_SEGMENT})*`,

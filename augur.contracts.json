@@ -20,7 +20,7 @@
       "file": "src/forced-review-model.mjs",
       "module": "contracts/forced-review-model-role.contract.mjs",
       "mode": "observe",
-      "sample": 1
+      "sample": 0.01
     },
     {
       "id": "C-28",
@@ -155,7 +155,7 @@
       "file": "src/host-identifiers.mjs",
       "module": "contracts/contains-private-ip.contract.mjs",
       "mode": "observe",
-      "sample": 1
+      "sample": 0.01
     },
     {
       "id": "C-13",
@@ -164,7 +164,7 @@
       "file": "src/host-identifiers.mjs",
       "module": "contracts/contains-local-path.contract.mjs",
       "mode": "observe",
-      "sample": 1
+      "sample": 0.01
     },
     {
       "id": "C-14",

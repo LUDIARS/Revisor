@@ -31,7 +31,7 @@ export function normalizeForcedReviewModel(value) {
   return null;
 }
 // @ts-expect-error augur-inject
-normalizeForcedReviewModel = contract(normalizeForcedReviewModel, { ...augurContract_3b108e30, contractId: 'C-27', mode: 'observe', sample: 1, where: 'src/forced-review-model.mjs:26', rule: 'contract-wrap', id: '3b108e30' }); /* augur-inject:contract-wrap:3b108e30 */
+normalizeForcedReviewModel = contract(normalizeForcedReviewModel, { ...augurContract_3b108e30, contractId: 'C-27', mode: 'observe', sample: 0.01, where: 'src/forced-review-model.mjs:26', rule: 'contract-wrap', id: '3b108e30' }); /* augur-inject:contract-wrap:3b108e30 */
 
 /**
  * 空文字 (=強制なし) か、審査用の役割に変換できる値だけを受け付ける。
