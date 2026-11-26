@@ -2315,10 +2315,17 @@ test("a changed fragment some source includes needs a configured unit; other .in
   // file, header or fragment costs its own path and what it reaches, never a pass over every
   // unit or over a unit's every include line (each of these took 7 to 20 s, the fragments
   // and headers several minutes at 8,000).
+  // The bound guards the complexity (the quadratic versions took minutes), not the speed of
+  // a busy review host: a slow attempt is measured again, up to three times, and the fastest
+  // one is judged. A regression to a quadratic pass stays over the bound on every attempt.
   const timed = (label, sources, units, changed, bound = 3_000) => {
-    const begun = performance.now();
-    assert.deepEqual(unanalyzedPlatformUnits(sources, units, changed), [], label);
-    assert.ok(performance.now() - begun < bound, `${label}: ${performance.now() - begun} ms`);
+    let fastest = Infinity;
+    for (let attempt = 0; attempt < 3 && fastest >= bound; attempt += 1) {
+      const begun = performance.now();
+      assert.deepEqual(unanalyzedPlatformUnits(sources, units, changed), [], label);
+      fastest = Math.min(fastest, performance.now() - begun);
+    }
+    assert.ok(fastest < bound, `${label}: ${fastest} ms`);
   };
   const many = (count, make) => Array.from({ length: count }, (_, index) => make(index));
   const texts = many(30_000, index => `data/t${index}.txt`);

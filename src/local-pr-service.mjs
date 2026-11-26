@@ -322,6 +322,12 @@ export class LocalPrService {
       refs.headSha,
     );
     if (existing) return this.#reuseSubmittedPullRequest(existing, submission, repository);
+    // 応答の届かなかった提出の再送が、先の PR のマージ後に届くことがある。同じ head は
+    // もう取り込まれているので、新しい PR を作らず (審査も走らせず) マージ済みの PR を返す。
+    const merged = typeof this.store.findMergedPullRequestByHead === "function"
+      ? this.store.findMergedPullRequestByHead(repository.repository, refs.headSha)
+      : null;
+    if (merged) return merged;
     const candidate = {
       repository: repository.repository,
       title: submission.title,

@@ -435,6 +435,19 @@ export class LocalPrStore {
     return (loaded.inline ? loaded.anatomia : readAnatomia(database, id)) ?? null;
   }
 
+  /**
+   * 同じリポジトリ・同じ head で既にマージ済みの PR。応答の届かなかった提出の再送が、
+   * 先の PR のマージ後に届いても新しい PR を作らないために使う。
+   */
+  findMergedPullRequestByHead(repository, headSha) {
+    const database = this.#db();
+    const found = this.#allPullRequests(database).find((candidate) =>
+      candidate.status === "merged"
+      && candidate.repository.toLowerCase() === repository.toLowerCase()
+      && candidate.headSha.toLowerCase() === headSha.toLowerCase());
+    return found ? this.#getPullRequestRecord(database, found.id) : null;
+  }
+
   findExactPullRequest(repository, headSha) {
     const database = this.#db();
     const found = this.#allPullRequests(database).find((candidate) =>
