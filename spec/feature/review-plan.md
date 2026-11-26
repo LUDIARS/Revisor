@@ -389,3 +389,17 @@ stage が選んだ effort を上書きする。モデルは空文字が既定で
 実行する。この fallback は移行用であり、台帳があるリポジトリで全体スイートへ戻る理由には
 ならない。空の domain bundle は advisory（`<domain> に登録テストが無い`）とし、failed は
 ブロック、Augur runner の error や対象ドメイン欠如は未実行としてブロックする。
+
+## SPEC-SUBMODULE-RESOLVER-RETRY: Windows のサブモジュール更新の再試行
+
+関連タスク `actio:6c2b4771-3e73-49c0-a4ff-47a78c1c511e`、障害 `actio:9cb77ffa-79be-43cd-bfc5-3641f72608ae`。
+
+2026-11-26 JST、Actio #4258 と Vestigium #4263・#4267 で、Git 自身のクローン再試行後も
+`getaddrinfo() thread failed to start` が残った。稼働中の Revisor には `SystemRoot`、
+`windir`、`ComSpec`、`PATH` があり、ワーカーから Git までのコードにこれらを除外する処理は
+見つからなかった。失敗時の Git の環境と名前解決スレッドの起動失敗の原因は未特定。
+
+登録テストの `git submodule update` が Windows で非ゼロ終了し、標準エラーにこの診断がある場合、
+同じ作業場所で 2 秒後、同じ失敗が続けば 8 秒後に再実行する。各実行に登録済みのタイムアウトを
+適用し、チェック結果は最後の実行で決める。タイムアウト、認証失敗、他の Git コマンドは通常の
+結果を返す。修正の運用確認は、Revisor 反映後に該当チェックが後続の準備段へ進むことを確認する。

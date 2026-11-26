@@ -9,6 +9,7 @@ import { contract } from './contract-runtime.mjs'; /* augur-inject:import:61c7a4
 import augurContract_81e33a0d from '../contracts/run-planned-tests-augur-domain-bundles.contract.mjs'; /* augur-inject:contract-predicate:caf0700f */
 import { experienceEvidenceFor } from "./augur-evidence.mjs";
 import { runSetupTestCases, setupTestCases } from "./setup-test-cases.mjs";
+import { runWithSubmoduleRetry } from "./submodule-retry.mjs";
 import { registeredTestEnvironment } from "./test-environment.mjs";
 
 function testCwd(worktreePath, configuredCwd) {
@@ -46,6 +47,8 @@ export async function runRegisteredTests({
   testCases,
   env = process.env,
   execute = runProcess,
+  platform = process.platform,
+  wait,
   now = () => Date.now(),
   onCheckStarted = async () => {},
   onCheckResult = async () => {},
@@ -59,11 +62,13 @@ export async function runRegisteredTests({
   for (const test of testCases) {
     await onCheckStarted({ name: test.name });
     const startedAt = now();
-    const result = await execute(configuredProcess(
+    const invocation = configuredProcess(
       test,
       testCwd(worktreePath, test.cwd),
       testEnv,
-    ));
+      platform,
+    );
+    const result = await runWithSubmoduleRetry(invocation, { execute, wait, platform });
     const outcome = {
       name: test.name,
       status: result.ok ? "passed" : "failed",

@@ -5,6 +5,15 @@
   "runtimeFile": "src/contract-runtime.mjs",
   "contracts": [
     {
+      "id": "C-29",
+      "criterion": "C-29 submoduleRetryDelay(invocation, result, attempt, platform): Windows の Git サブモジュール更新で名前解決スレッドの起動に失敗した場合だけ、2 秒後と 8 秒後の再試行を許可する",
+      "symbol": "submoduleRetryDelay",
+      "file": "src/submodule-retry.mjs",
+      "module": "contracts/submodule-resolver-retry.contract.mjs",
+      "mode": "observe",
+      "sample": 1
+    },
+    {
       "id": "C-26",
       "criterion": "C-26 modelForPurpose(reviewer, purpose): 審査は opus/sol、補助は sonnet/luna の役割名を返す",
       "symbol": "modelForPurpose",
